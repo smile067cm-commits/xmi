@@ -31,9 +31,7 @@ BOT_USERNAME = "YourTelegramBot"
 # 1. BOT_TOKEN
 # 2. ADMIN_ID
 # 3. CHANNEL_ID
-# 4. FIREBASE_URL
-# 5. FIREBASE_SECRET
-# 6. SUPABASE_URL
-# 7. SUPABASE_SERVICE_KEY
-# 8. SECRET_TOKEN (Optional Telegram webhook security token)
+# 4. SUPABASE_URL
+# 5. SUPABASE_SERVICE_KEY
+# 6. SECRET_TOKEN (Optional Telegram webhook security token)
 # -------------------------------------------------------------

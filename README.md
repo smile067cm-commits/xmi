@@ -1,10 +1,10 @@
-# 📦 All-in-One Telegram Bot & Mini App on Cloudflare Worker
+# 📦 All-in-One Telegram Bot & Mini App on Cloudflare Worker (Supabase Only)
 
-A complete, production-ready system with **both the Telegram Bot and the Web App hosted in the EXACT same Cloudflare Worker codebase**. No separate frontend server or Cloudflare Pages deployment required!
+A complete, production-ready system with **both the Telegram Bot and the Web App hosted in the EXACT same Cloudflare Worker**, powered entirely by **Supabase (PostgreSQL)** for all databases (Users, Posts, Folders, Files, Comments, Likes).
 
 ---
 
-## 🌟 Architecture (Single Unified Cloudflare Worker)
+## 🌟 Architecture (Single Worker + Supabase)
 
 ```
                                   ┌────────────────────────────────┐
@@ -28,15 +28,17 @@ A complete, production-ready system with **both the Telegram Bot and the Web App
 │   • scheduled()         ➔ Cloudflare Cron Trigger (Auto-publishes scheduled posts every 5 min)  │
 └────────────────────────────────────────────────┬────────────────────────────────────────────────┘
                                                  │
-          ┌──────────────────────────────────────┼──────────────────────────────────────┐
-          │                                      │                                      │
-          ▼                                      ▼                                      ▼
-┌───────────────────┐                  ┌───────────────────┐                  ┌───────────────────┐
-│     Supabase      │                  │     Firebase      │                  │  Private Channel  │
-│  (PostgreSQL DB)  │                  │   (Realtime DB)   │                  │  (File Storage)   │
-│ Posts, Folders,   │                  │ User Profiles &   │                  │ Permanent Storage │
-│  Files, Comments  │                  │     Activity      │                  │  for Media Files  │
-└───────────────────┘                  └───────────────────┘                  └───────────────────┘
+                               ┌─────────────────┴─────────────────┐
+                               │                                   │
+                               ▼                                   ▼
+                    ┌─────────────────────────┐         ┌─────────────────────────┐
+                    │  Supabase (PostgreSQL)  │         │ Private Telegram Channel│
+                    │   • users               │         │   (Permanent secure     │
+                    │   • posts               │         │      file storage)      │
+                    │   • folders             │         └─────────────────────────┘
+                    │   • files               │
+                    │   • comments & likes    │
+                    └─────────────────────────┘
 ```
 
 ---
@@ -50,32 +52,28 @@ A complete, production-ready system with **both the Telegram Bot and the Web App
 │   ├── frontend.js       # Self-contained Web App SPA (HTML, CSS, JS with Telegram WebApp SDK)
 │   ├── bot.js            # Telegraf Bot logic (/start deep-links, /addpost flow, folder delivery)
 │   ├── api.js            # Unified itty-router (serves Web App, REST API, & Telegram Webhook)
-│   ├── db.js             # Supabase & Firebase REST API database clients
+│   ├── db.js             # Supabase REST API client for all tables (Users, Posts, Folders, etc.)
 │   └── session.js        # Multi-step session manager (Workers KV + memory fallback)
-├── supabase_schema.sql   # SQL schema ready to execute in Supabase SQL editor
+├── supabase_schema.sql   # Complete SQL schema for Supabase SQL editor
 ├── wrangler.toml         # Cloudflare Worker configuration & Cron triggers
 ├── package.json          # Project dependencies and scripts
-└── .env.example          # Reference for environment variables and secrets
+├── .env                  # Environment variables template
+└── .env.example          # Reference example
 ```
 
 ---
 
 ## 🚀 Quick Setup & Deployment (Termux / Linux)
 
-### 1. Database Setup
-
-#### A. Supabase (Content Database)
+### 1. Database Setup (Supabase)
 1. Go to [Supabase](https://supabase.com) and create a free project.
-2. Go to **SQL Editor**, paste the contents of [`supabase_schema.sql`](file:///storage/emulated/0/termux/ai/bot/supabase_schema.sql), and click **Run**.
-3. Under **Project Settings ➔ API**, copy your **Project URL** and **`service_role` secret key**.
+2. Go to the **SQL Editor** tab in Supabase.
+3. Paste the entire contents of [`supabase_schema.sql`](file:///storage/emulated/0/termux/ai/bot/supabase_schema.sql) and click **Run**.
+4. In **Project Settings ➔ API**, copy your:
+   - **Project URL** (`SUPABASE_URL`)
+   - **`service_role` secret key** (`SUPABASE_SERVICE_KEY`)
 
-#### B. Firebase (User Tracking)
-1. Go to [Firebase Console](https://console.firebase.google.com/) and create a project.
-2. In the sidebar, create a **Realtime Database**.
-3. Note your Database URL (e.g. `https://your-app-default-rtdb.firebaseio.com`).
-4. In **Project Settings ➔ Service Accounts ➔ Database Secrets**, copy your Secret key.
-
-#### C. Telegram Bot & File Storage Channel
+### 2. Telegram Bot & File Storage Channel
 1. Create a bot using [@BotFather](https://t.me/BotFather) and copy your **Bot Token**.
 2. Create a **Private Telegram Channel** for storing files.
 3. Add your Bot as an **Administrator** in this channel with post message rights.
@@ -83,7 +81,7 @@ A complete, production-ready system with **both the Telegram Bot and the Web App
 
 ---
 
-### 2. Deploy the Worker (1 Single Command!)
+### 3. Deploy the Worker (1 Single Command!)
 
 #### Step 1: Install Dependencies in Termux
 ```bash
@@ -95,8 +93,6 @@ npm install --no-bin-links
 npx wrangler secret put BOT_TOKEN
 npx wrangler secret put ADMIN_ID
 npx wrangler secret put CHANNEL_ID
-npx wrangler secret put FIREBASE_URL
-npx wrangler secret put FIREBASE_SECRET
 npx wrangler secret put SUPABASE_URL
 npx wrangler secret put SUPABASE_SERVICE_KEY
 ```
@@ -137,5 +133,6 @@ curl "https://telegram-bot-hub.<your-subdomain>.workers.dev/set-webhook"
 
 ### 3. User Flow (`/start`)
 1. Users send `/start` to open the interactive Mini App with one tap.
-2. Clicking **"Open in Bot"** on any post loads the post's folders.
-3. Clicking a folder forwards all files in that folder directly from the private channel to the user!
+2. User profile and activity timestamps are tracked directly in the Supabase `users` table.
+3. Clicking **"Open in Bot"** on any post loads the post's folders.
+4. Clicking a folder forwards all files in that folder directly from the private channel to the user!

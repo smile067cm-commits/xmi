@@ -1,92 +1,10 @@
 /**
- * Database Clients & Helpers for Firebase Realtime DB and Supabase REST API
+ * Database Clients & Helpers for Supabase PostgreSQL REST API
  * All requests use native fetch to run seamlessly on Cloudflare Workers.
  */
 
 // ==========================================
-// 1. FIREBASE REALTIME DATABASE (Users)
-// ==========================================
-
-/**
- * Format Firebase REST URL
- */
-function getFirebaseUrl(env, path) {
-  const baseUrl = env.FIREBASE_URL.replace(/\/+$/, '');
-  const authParam = env.FIREBASE_SECRET ? `?auth=${encodeURIComponent(env.FIREBASE_SECRET)}` : '';
-  return `${baseUrl}/${path}.json${authParam}`;
-}
-
-/**
- * Save or update Telegram user details and activity in Firebase Realtime DB
- */
-export async function saveOrUpdateUser(env, user) {
-  if (!env.FIREBASE_URL || !user || !user.id) return null;
-
-  try {
-    const userUrl = getFirebaseUrl(env, `users/${user.id}`);
-    
-    // Fetch existing user to update interactions count
-    let interactions = 1;
-    let firstSeen = Date.now();
-
-    try {
-      const getRes = await fetch(userUrl);
-      if (getRes.ok) {
-        const existing = await getRes.json();
-        if (existing) {
-          interactions = (existing.interactions || 0) + 1;
-          firstSeen = existing.first_seen || firstSeen;
-        }
-      }
-    } catch (e) {
-      console.warn('Could not fetch existing Firebase user:', e.message);
-    }
-
-    const userData = {
-      id: user.id,
-      username: user.username || null,
-      first_name: user.first_name || '',
-      last_name: user.last_name || '',
-      language_code: user.language_code || 'en',
-      first_seen: firstSeen,
-      last_activity: Date.now(),
-      interactions
-    };
-
-    const res = await fetch(userUrl, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(userData)
-    });
-
-    if (!res.ok) {
-      console.error('Firebase save error:', await res.text());
-    }
-    return userData;
-  } catch (error) {
-    console.error('Error saving user to Firebase:', error);
-    return null;
-  }
-}
-
-/**
- * Get user profile from Firebase Realtime DB
- */
-export async function getUser(env, userId) {
-  if (!env.FIREBASE_URL || !userId) return null;
-  try {
-    const userUrl = getFirebaseUrl(env, `users/${userId}`);
-    const res = await fetch(userUrl);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch (error) {
-    console.error('Error fetching user from Firebase:', error);
-    return null;
-  }
-}
-
-// ==========================================
-// 2. SUPABASE REST API (Content & Social)
+// SUPABASE REST API (All Data & Users)
 // ==========================================
 
 function getSupabaseHeaders(env, extraHeaders = {}) {
@@ -100,8 +18,108 @@ function getSupabaseHeaders(env, extraHeaders = {}) {
 }
 
 function getSupabaseBaseUrl(env) {
+  if (!env.SUPABASE_URL) {
+    throw new Error('SUPABASE_URL environment variable is missing.');
+  }
   return env.SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1';
 }
+
+// ------------------------------------------
+// 1. USERS (Profiles & Activity Tracking)
+// ------------------------------------------
+
+/**
+ * Save or update Telegram user details & interaction count in Supabase
+ */
+export async function saveOrUpdateUser(env, user) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY || !user || !user.id) return null;
+
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    
+    // Check if user already exists
+    const checkUrl = `${baseUrl}/users?id=eq.${user.id}&select=id,interactions,first_seen`;
+    const checkRes = await fetch(checkUrl, {
+      method: 'GET',
+      headers: getSupabaseHeaders(env)
+    });
+
+    const existingUsers = checkRes.ok ? await checkRes.json() : [];
+
+    if (existingUsers && existingUsers.length > 0) {
+      // User exists -> Update last_activity and increment interactions
+      const existing = existingUsers[0];
+      const updateUrl = `${baseUrl}/users?id=eq.${user.id}`;
+      const updateRes = await fetch(updateUrl, {
+        method: 'PATCH',
+        headers: getSupabaseHeaders(env),
+        body: JSON.stringify({
+          username: user.username || null,
+          first_name: user.first_name || '',
+          last_name: user.last_name || '',
+          language_code: user.language_code || 'en',
+          last_activity: new Date().toISOString(),
+          interactions: (Number(existing.interactions) || 0) + 1
+        })
+      });
+
+      if (!updateRes.ok) {
+        console.warn('Supabase update user warning:', await updateRes.text());
+      }
+      return existing;
+    } else {
+      // User does not exist -> Insert new user profile
+      const insertUrl = `${baseUrl}/users`;
+      const insertRes = await fetch(insertUrl, {
+        method: 'POST',
+        headers: getSupabaseHeaders(env),
+        body: JSON.stringify({
+          id: user.id,
+          username: user.username || null,
+          first_name: user.first_name || '',
+          last_name: user.last_name || '',
+          language_code: user.language_code || 'en',
+          first_seen: new Date().toISOString(),
+          last_activity: new Date().toISOString(),
+          interactions: 1
+        })
+      });
+
+      if (!insertRes.ok) {
+        console.warn('Supabase insert user warning:', await insertRes.text());
+      }
+      const inserted = await insertRes.json();
+      return inserted ? inserted[0] : null;
+    }
+  } catch (error) {
+    console.error('Error saving user to Supabase:', error);
+    return null;
+  }
+}
+
+/**
+ * Get user profile from Supabase
+ */
+export async function getUser(env, userId) {
+  if (!env.SUPABASE_URL || !userId) return null;
+  try {
+    const url = `${getSupabaseBaseUrl(env)}/users?id=eq.${userId}&select=*`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: getSupabaseHeaders(env)
+    });
+    if (!res.ok) return null;
+    const users = await res.json();
+    return users.length > 0 ? users[0] : null;
+  } catch (error) {
+    console.error('Error fetching user from Supabase:', error);
+    return null;
+  }
+}
+
+// ------------------------------------------
+// 2. CONTENT & POSTS
+// ------------------------------------------
 
 /**
  * Fetch all published posts with like and comment counts

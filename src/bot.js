@@ -23,9 +23,9 @@ export function createBot(env) {
   bot.use(async (ctx, next) => {
     try {
       if (ctx.from) {
-        // Track user interaction asynchronously in Firebase Realtime DB
+        // Track user interaction asynchronously in Supabase
         saveOrUpdateUser(env, ctx.from).catch(err => {
-          console.error('Failed to log user to Firebase:', err);
+          console.error('Failed to log user to Supabase:', err);
         });
       }
       return await next();
