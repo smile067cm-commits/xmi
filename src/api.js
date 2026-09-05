@@ -215,18 +215,44 @@ export function createRouter() {
 
       const currentUrl = new URL(request.url);
       const webhookUrl = `${currentUrl.origin}/webhook`;
+      const appUrl = env.WEB_APP_URL || currentUrl.origin;
 
       let apiUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
       if (env.SECRET_TOKEN) {
         apiUrl += `&secret_token=${encodeURIComponent(env.SECRET_TOKEN)}`;
       }
 
-      const res = await fetch(apiUrl);
-      const data = await res.json();
+      const webhookRes = await fetch(apiUrl);
+      const webhookData = await webhookRes.json();
+
+      // Configure the bottom-left Telegram Menu Button globally for all users
+      let menuButtonData = null;
+      try {
+        const menuBtnUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/setChatMenuButton`;
+        const menuRes = await fetch(menuBtnUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            menu_button: {
+              type: 'web_app',
+              text: '🚀 Open App',
+              web_app: {
+                url: appUrl
+              }
+            }
+          })
+        });
+        menuButtonData = await menuRes.json();
+      } catch (menuErr) {
+        console.warn('Failed to set chat menu button via API:', menuErr.message);
+      }
 
       return jsonResponse({
+        success: true,
         webhookUrl,
-        telegramResponse: data
+        appUrl,
+        telegramWebhookResponse: webhookData,
+        telegramMenuButtonResponse: menuButtonData
       });
     } catch (err) {
       return errorResponse(err.message, 500);

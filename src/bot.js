@@ -123,6 +123,19 @@ export function createBot(env) {
       [Markup.button.webApp('🚀 Open Bot App', appUrl)]
     ]);
 
+    // Automatically set the bottom-left Menu Button for the user's chat
+    try {
+      if (appUrl.startsWith('https://')) {
+        await ctx.setChatMenuButton({
+          type: 'web_app',
+          text: '🚀 Open App',
+          web_app: { url: appUrl }
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to set chat menu button on /start:', e.message);
+    }
+
     return await ctx.reply(welcomeText, {
       parse_mode: 'Markdown',
       ...keyboard
