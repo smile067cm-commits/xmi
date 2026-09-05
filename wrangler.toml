@@ -1,6 +1,6 @@
 name = "xmi"
 main = "src/index.js"
-compatibility_date = "2024-09-01"
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
 # -------------------------------------------------------------
@@ -25,7 +25,7 @@ BOT_USERNAME = "YourTelegramBot"
 WEB_APP_URL = "https://xmi.lakshminighty1.workers.dev"
 
 # -------------------------------------------------------------
-# Secrets to set via `npx wrangler secret put <KEY>`:
+# Secrets to set via Cloudflare Dashboard or `npx wrangler secret put`:
 # 1. BOT_TOKEN
 # 2. ADMIN_ID
 # 3. CHANNEL_ID
