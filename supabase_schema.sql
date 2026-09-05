@@ -48,17 +48,20 @@ CREATE TABLE IF NOT EXISTS public.folders (
 
 CREATE INDEX IF NOT EXISTS idx_folders_post_id ON public.folders(post_id);
 
--- 4. FILES TABLE
+-- 4. FILES TABLE (Supports both uploaded Telegram files & external download links)
 CREATE TABLE IF NOT EXISTS public.files (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     folder_id BIGINT NOT NULL REFERENCES public.folders(id) ON DELETE CASCADE,
     file_id TEXT NOT NULL,
-    channel_message_id BIGINT NOT NULL,
+    channel_message_id BIGINT, -- Nullable to allow external links without channel message
     file_name TEXT,
     mime_type TEXT,
     size BIGINT DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- In case the table already existed with NOT NULL on channel_message_id:
+ALTER TABLE public.files ALTER COLUMN channel_message_id DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_files_folder_id ON public.files(folder_id);
 
