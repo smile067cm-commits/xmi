@@ -1,4 +1,4 @@
-name = "telegram-bot-hub"
+name = "xmi"
 main = "src/index.js"
 compatibility_date = "2024-09-01"
 compatibility_flags = ["nodejs_compat"]
@@ -21,10 +21,8 @@ crons = ["*/5 * * * *"]
 # Environment Variables
 # -------------------------------------------------------------
 [vars]
-# Put your bot username here without '@' (used for deep links in the web app)
 BOT_USERNAME = "YourTelegramBot"
-# Optional custom frontend URL (defaults to Worker URL if omitted)
-# WEB_APP_URL = "https://telegram-bot-hub.yoursubdomain.workers.dev"
+WEB_APP_URL = "https://xmi.lakshminighty1.workers.dev"
 
 # -------------------------------------------------------------
 # Secrets to set via `npx wrangler secret put <KEY>`:
