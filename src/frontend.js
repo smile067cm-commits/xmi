@@ -11,7 +11,7 @@ export function getAppHtml(env) {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Telegram Content Hub & Mini App</title>
+  <title>xmi</title>
   
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -629,10 +629,10 @@ export function getAppHtml(env) {
   <!-- Header -->
   <header>
     <a href="#" class="brand">
-      <div class="brand-icon">📦</div>
+      <div class="brand-icon">⚡</div>
       <div>
-        <div class="brand-title">BotHub</div>
-        <div class="brand-subtitle">Cloudflare & Telegram Hub</div>
+        <div class="brand-title">xmi</div>
+        <div class="brand-subtitle">Telegram Content Hub</div>
       </div>
     </a>
 
@@ -804,18 +804,24 @@ export function getAppHtml(env) {
 
       try {
         const res = await fetch(\`\${API_BASE_URL}/api/posts\`);
-        if (!res.ok) throw new Error(\`HTTP \${res.status}\`);
-        
         const data = await res.json();
+        
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || \`HTTP \${res.status}\`);
+        }
+        
         allPosts = data.posts || [];
         renderPosts(allPosts);
       } catch (err) {
         console.error('Failed to load posts:', err);
         feed.innerHTML = \`
           <div class="empty-state" style="grid-column: 1 / -1;">
-            <div class="empty-state-icon">⚠️</div>
-            <h3>Could not load posts</h3>
-            <p style="margin-top: 6px; font-size: 0.9rem;">Please verify your Supabase database connection.</p>
+            <div class="empty-state-icon">⚡</div>
+            <h3>Database Connection Setup Required</h3>
+            <p style="margin-top: 6px; font-size: 0.9rem; color: #f87171;">\${escapeHtml(err.message)}</p>
+            <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">
+              Make sure you ran <code>supabase_schema.sql</code> in your Supabase SQL Editor and set your Supabase secrets in Cloudflare.
+            </p>
             <button class="btn btn-primary btn-sm" style="margin-top: 16px;" onclick="loadPosts()">Retry</button>
           </div>
         \`;
