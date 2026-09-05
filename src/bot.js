@@ -119,13 +119,9 @@ export function createBot(env) {
 
     welcomeText += `Tap the button below to launch the Bot App:`;
 
-    const buttons = [];
-    if (appUrl.startsWith('https://')) {
-      buttons.push([Markup.button.webApp('🚀 Open Bot App', appUrl)]);
-    }
-    buttons.push([Markup.button.url('🌐 Open in Browser', appUrl)]);
-
-    const keyboard = Markup.inlineKeyboard(buttons);
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.webApp('🚀 Open Bot App', appUrl)]
+    ]);
 
     return await ctx.reply(welcomeText, {
       parse_mode: 'Markdown',

@@ -760,15 +760,8 @@ export function getAppHtml(env) {
           <div class="user-profile-badge">
             <div class="user-avatar">\${(currentUser.first_name || 'U')[0].toUpperCase()}</div>
             <span>\${escapeHtml(currentUser.first_name)}</span>
-            <button class="btn btn-ghost btn-sm" id="btnLogout" style="padding: 2px 6px; font-size: 0.75rem; border: none; margin-left: 4px;" title="Logout">✕</button>
           </div>
         \`;
-        document.getElementById('btnLogout').addEventListener('click', () => {
-          localStorage.removeItem('tg_user');
-          currentUser = null;
-          renderAuthUI();
-          showToast('Logged out');
-        });
       } else {
         authArea.innerHTML = \`
           <button class="btn btn-telegram" id="btnLogin">
