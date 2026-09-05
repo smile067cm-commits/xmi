@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Telegram Content Hub & Mini App</title>
+  
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #090d16 100%);
+      --card-bg: rgba(30, 41, 59, 0.75);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0ea5e9;
+      --primary-glow: rgba(56, 189, 248, 0.25);
+      --accent-heart: #f43f5e;
+      --accent-telegram: #229ed9;
+      --border-radius: 16px;
+      --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-gradient);
+      background-attachment: fixed;
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Navigation Bar */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      background: rgba(15, 23, 42, 0.85);
+      border-bottom: 1px solid var(--card-border);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text-main);
+    }
+
+    .brand-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 4px 12px var(--primary-glow);
+    }
+
+    .brand-title {
+      font-weight: 700;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-subtitle {
+      font-size: 0.72rem;
+      color: var(--primary);
+      font-weight: 500;
+    }
+
+    .user-auth-area {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .user-profile-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.07);
+      padding: 5px 12px;
+      border-radius: 9999px;
+      border: 1px solid var(--card-border);
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .user-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .btn {
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-family: inherit;
+      font-weight: 600;
+      border-radius: 12px;
+      transition: var(--transition);
+      border: none;
+      outline: none;
+    }
+
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 0.82rem;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+      color: #04101e;
+      box-shadow: 0 4px 12px var(--primary-glow);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 16px var(--primary-glow);
+    }
+
+    .btn-telegram {
+      background: #229ed9;
+      color: white;
+      padding: 7px 14px;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+    }
+
+    .btn-telegram:hover {
+      background: #1e8bbd;
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--card-border);
+    }
+
+    .btn-ghost:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px 16px 60px 16px;
+    }
+
+    /* Search & Filter Bar */
+    .controls-bar {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    @media (min-width: 640px) {
+      .controls-bar {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+      }
+    }
+
+    .search-input-wrapper {
+      position: relative;
+      flex: 1;
+      max-width: 450px;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 10px 16px 10px 40px;
+      border-radius: 12px;
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+      font-size: 0.9rem;
+      outline: none;
+      transition: var(--transition);
+    }
+
+    .search-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-glow);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 12px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 16px;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    /* Posts Grid */
+    .posts-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 20px;
+    }
+
+    @media (min-width: 640px) {
+      .posts-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    /* Post Card */
+    .post-card {
+      background: var(--card-bg);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--card-border);
+      border-radius: var(--border-radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: var(--transition);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    .post-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(255, 255, 255, 0.2);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    }
+
+    .post-image-container {
+      width: 100%;
+      height: 190px;
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .post-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.4s ease;
+    }
+
+    .post-card:hover .post-image {
+      transform: scale(1.04);
+    }
+
+    .post-image-placeholder {
+      font-size: 40px;
+      opacity: 0.4;
+    }
+
+    .post-body {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+
+    .post-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      line-height: 1.35;
+      margin-bottom: 8px;
+      color: #ffffff;
+    }
+
+    .post-meta {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .post-actions-row {
+      margin-top: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .social-counters {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .action-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.88rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      padding: 6px 8px;
+      border-radius: 8px;
+      transition: var(--transition);
+    }
+
+    .action-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+    }
+
+    .action-btn.liked {
+      color: var(--accent-heart);
+    }
+
+    .action-btn.liked svg {
+      fill: var(--accent-heart);
+      stroke: var(--accent-heart);
+    }
+
+    .btn-open-bot {
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      padding: 7px 14px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: var(--transition);
+    }
+
+    .btn-open-bot:hover {
+      background: var(--primary);
+      color: #04101e;
+      box-shadow: 0 4px 12px var(--primary-glow);
+    }
+
+    /* Modal / Drawer for Comments & Details */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 100;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    @media (min-width: 640px) {
+      .modal-overlay {
+        align-items: center;
+        padding: 20px;
+      }
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-content {
+      background: #1e293b;
+      width: 100%;
+      max-width: 600px;
+      max-height: 85vh;
+      border-top-left-radius: 20px;
+      border-top-right-radius: 20px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    @media (min-width: 640px) {
+      .modal-content {
+        border-radius: 20px;
+        transform: scale(0.95);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .modal-overlay.active .modal-content {
+        transform: scale(1);
+      }
+    }
+
+    .modal-overlay.active .modal-content {
+      transform: translateY(0);
+    }
+
+    .modal-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 22px;
+      cursor: pointer;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-close:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: white;
+    }
+
+    .modal-body {
+      padding: 16px 20px;
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .comments-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .comment-item {
+      background: rgba(15, 23, 42, 0.6);
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .comment-author {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .comment-username {
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: var(--primary);
+    }
+
+    .comment-time {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .comment-text {
+      font-size: 0.88rem;
+      line-height: 1.4;
+      color: #e2e8f0;
+      white-space: pre-wrap;
+    }
+
+    .modal-footer {
+      padding: 16px 20px;
+      border-top: 1px solid var(--card-border);
+      background: #131d2e;
+    }
+
+    .comment-form {
+      display: flex;
+      gap: 8px;
+    }
+
+    .comment-input {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--card-border);
+      color: white;
+      font-family: inherit;
+      font-size: 0.88rem;
+      outline: none;
+    }
+
+    .comment-input:focus {
+      border-color: var(--primary);
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+
+    /* Skeleton Loading */
+    .skeleton {
+      background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite;
+      border-radius: 8px;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+
+    /* Toast Notification */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: #0ea5e9;
+      color: #031424;
+      padding: 10px 20px;
+      border-radius: 9999px;
+      font-weight: 600;
+      font-size: 0.88rem;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+      z-index: 200;
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    #toast.show {
+      transform: translateX(-50%) translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <a href="#" class="brand">
+      <div class="brand-icon">📦</div>
+      <div>
+        <div class="brand-title">BotHub</div>
+        <div class="brand-subtitle">Cloudflare & Telegram Hub</div>
+      </div>
+    </a>
+
+    <div class="user-auth-area" id="authArea">
+      <!-- Auth buttons / user profile rendered here by JS -->
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main>
+    <!-- Controls Bar -->
+    <div class="controls-bar">
+      <div class="search-input-wrapper">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="searchInput" class="search-input" placeholder="Search posts..." />
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-ghost btn-sm" id="btnSettings" title="App Settings">
+          ⚙️ Config
+        </button>
+      </div>
+    </div>
+
+    <!-- Feed Container -->
+    <div id="postsFeed" class="posts-grid">
+      <!-- Posts or Skeletons injected here -->
+    </div>
+  </main>
+
+  <!-- Comments Modal / Drawer -->
+  <div class="modal-overlay" id="commentsModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="modalPostTitle">Comments</h3>
+        <button class="modal-close" id="btnModalClose">&times;</button>
+      </div>
+
+      <div class="modal-body" id="modalCommentsBody">
+        <div id="foldersContainer" style="display: none; margin-bottom: 12px;"></div>
+        <div class="comments-list" id="commentsList"></div>
+      </div>
+
+      <div class="modal-footer">
+        <form class="comment-form" id="commentForm">
+          <input
+            type="text"
+            id="commentTextInput"
+            class="comment-input"
+            placeholder="Write a comment..."
+            autocomplete="off"
+            required
+          />
+          <button type="submit" class="btn btn-primary btn-sm">Post</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings / Config Modal -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Settings & Connection</h3>
+        <button class="modal-close" id="btnSettingsClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">
+          API Base URL (Cloudflare Worker):
+        </label>
+        <input
+          type="text"
+          id="settingApiUrl"
+          class="comment-input"
+          style="width: 100%; margin-bottom: 14px;"
+          placeholder="https://your-worker.workers.dev"
+        />
+
+        <label style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">
+          Telegram Bot Username (without @):
+        </label>
+        <input
+          type="text"
+          id="settingBotUsername"
+          class="comment-input"
+          style="width: 100%; margin-bottom: 14px;"
+          placeholder="YourTelegramBot"
+        />
+
+        <button class="btn btn-primary" id="btnSaveSettings" style="width: 100%;">
+          Save Settings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast">Message</div>
+
+  <script>
+    // =========================================================
+    // STATE & CONFIG
+    // =========================================================
+    const DEFAULT_CONFIG = {
+      apiUrl: window.location.origin.includes('pages.dev') || window.location.origin.includes('localhost')
+        ? window.location.origin
+        : '',
+      botUsername: 'YourTelegramBot'
+    };
+
+    let appConfig = {
+      apiUrl: localStorage.getItem('bot_api_url') || DEFAULT_CONFIG.apiUrl,
+      botUsername: localStorage.getItem('bot_username') || DEFAULT_CONFIG.botUsername
+    };
+
+    let currentUser = null;
+    let allPosts = [];
+    let currentModalPostId = null;
+
+    // =========================================================
+    // INITIALIZATION & AUTHENTICATION
+    // =========================================================
+    function init() {
+      // 1. Detect Telegram WebApp Context
+      if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe?.user) {
+        const tgUser = window.Telegram.WebApp.initDataUnsafe.user;
+        currentUser = {
+          id: tgUser.id,
+          first_name: tgUser.first_name,
+          last_name: tgUser.last_name || '',
+          username: tgUser.username || tgUser.first_name
+        };
+        localStorage.setItem('tg_user', JSON.stringify(currentUser));
+        window.Telegram.WebApp.expand();
+      } else {
+        // 2. Load stored user from LocalStorage
+        const saved = localStorage.getItem('tg_user');
+        if (saved) {
+          try { currentUser = JSON.parse(saved); } catch (e) {}
+        }
+      }
+
+      renderAuthUI();
+      loadPosts();
+      setupEventListeners();
+    }
+
+    // Telegram Login Callback (Used by Telegram Widget or Manual Auth)
+    window.onTelegramAuth = function(user) {
+      currentUser = {
+        id: user.id,
+        first_name: user.first_name,
+        last_name: user.last_name || '',
+        username: user.username || user.first_name
+      };
+      localStorage.setItem('tg_user', JSON.stringify(currentUser));
+      renderAuthUI();
+      showToast(`Welcome, ${currentUser.first_name}!`);
+    };
+
+    function renderAuthUI() {
+      const authArea = document.getElementById('authArea');
+      if (currentUser) {
+        authArea.innerHTML = `
+          <div class="user-profile-badge">
+            <div class="user-avatar">${(currentUser.first_name || 'U')[0].toUpperCase()}</div>
+            <span>${currentUser.first_name}</span>
+            <button class="btn btn-ghost btn-sm" id="btnLogout" style="padding: 2px 6px; font-size: 0.75rem; border: none; margin-left: 4px;" title="Logout">✕</button>
+          </div>
+        `;
+        document.getElementById('btnLogout').addEventListener('click', () => {
+          localStorage.removeItem('tg_user');
+          currentUser = null;
+          renderAuthUI();
+          showToast('Logged out');
+        });
+      } else {
+        authArea.innerHTML = `
+          <button class="btn btn-telegram" id="btnLogin">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.75-.55 2.92-1.27 4.86-2.11 5.83-2.52 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/></svg>
+            Login
+          </button>
+        `;
+        document.getElementById('btnLogin').addEventListener('click', promptTelegramLogin);
+      }
+    }
+
+    function promptTelegramLogin() {
+      const name = prompt("Enter your Telegram Username or Name to login for demo/preview:");
+      if (name && name.trim()) {
+        const mockId = Math.floor(10000000 + Math.random() * 90000000);
+        window.onTelegramAuth({
+          id: mockId,
+          first_name: name.trim(),
+          username: name.trim()
+        });
+      }
+    }
+
+    // =========================================================
+    // API CALLS & FEED RENDERING
+    // =========================================================
+    async function loadPosts() {
+      const feed = document.getElementById('postsFeed');
+      
+      // Render Skeleton Loaders
+      feed.innerHTML = Array(4).fill(0).map(() => `
+        <div class="post-card">
+          <div class="post-image-container skeleton"></div>
+          <div class="post-body">
+            <div class="skeleton" style="height: 22px; width: 80%; margin-bottom: 12px;"></div>
+            <div class="skeleton" style="height: 14px; width: 40%; margin-bottom: 20px;"></div>
+            <div class="skeleton" style="height: 32px; width: 100%; margin-top: auto;"></div>
+          </div>
+        </div>
+      `).join('');
+
+      try {
+        const url = `${appConfig.apiUrl}/api/posts`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        
+        const data = await res.json();
+        allPosts = data.posts || [];
+        renderPosts(allPosts);
+      } catch (err) {
+        console.error('Failed to load posts:', err);
+        feed.innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1;">
+            <div class="empty-state-icon">⚡</div>
+            <h3>Could not connect to API</h3>
+            <p style="margin-top: 6px; font-size: 0.9rem;">Make sure your Cloudflare Worker URL is configured correctly.</p>
+            <button class="btn btn-primary btn-sm" style="margin-top: 16px;" onclick="document.getElementById('btnSettings').click()">Configure API URL</button>
+          </div>
+        `;
+      }
+    }
+
+    function renderPosts(posts) {
+      const feed = document.getElementById('postsFeed');
+      
+      if (!posts || posts.length === 0) {
+        feed.innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1;">
+            <div class="empty-state-icon">📭</div>
+            <h3>No Published Posts Yet</h3>
+            <p style="margin-top: 6px;">New posts published via the Telegram Bot will appear here.</p>
+          </div>
+        `;
+        return;
+      }
+
+      feed.innerHTML = posts.map(post => {
+        const dateStr = post.created_at ? new Date(post.created_at).toLocaleDateString(undefined, {
+          month: 'short', day: 'numeric', year: 'numeric'
+        }) : '';
+
+        const botLink = `https://t.me/${appConfig.botUsername}?start=post_${post.id}`;
+
+        return `
+          <div class="post-card" data-id="${post.id}">
+            <div class="post-image-container">
+              ${post.preview_image ? `
+                <img src="${escapeHtml(post.preview_image)}" class="post-image" alt="${escapeHtml(post.title)}" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+                <div class="post-image-placeholder" style="display:none;">🖼️</div>
+              ` : `
+                <div class="post-image-placeholder">📂</div>
+              `}
+            </div>
+
+            <div class="post-body">
+              <h2 class="post-title">${escapeHtml(post.title)}</h2>
+              <div class="post-meta">
+                <span>📅 ${dateStr}</span>
+              </div>
+
+              <div class="post-actions-row">
+                <div class="social-counters">
+                  <button class="action-btn btn-like" onclick="handleLikeClick(${post.id}, this)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                    <span class="like-count">${post.like_count || 0}</span>
+                  </button>
+
+                  <button class="action-btn" onclick="openCommentsModal(${post.id})">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                    <span>${post.comment_count || 0}</span>
+                  </button>
+                </div>
+
+                <a href="${botLink}" target="_blank" class="btn-open-bot">
+                  <span>Open in Bot</span>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                </a>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // =========================================================
+    // LIKE TOGGLE HANDLER
+    // =========================================================
+    async function handleLikeClick(postId, btnElement) {
+      if (!currentUser) {
+        showToast('Please login to like this post!');
+        promptTelegramLogin();
+        return;
+      }
+
+      try {
+        const res = await fetch(`${appConfig.apiUrl}/api/likes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            post_id: postId,
+            user_id: currentUser.id
+          })
+        });
+
+        if (!res.ok) throw new Error('Failed to toggle like');
+        const data = await res.json();
+
+        // Update UI
+        const countSpan = btnElement.querySelector('.like-count');
+        if (countSpan) countSpan.textContent = data.like_count;
+        
+        if (data.liked) {
+          btnElement.classList.add('liked');
+        } else {
+          btnElement.classList.remove('liked');
+        }
+
+      } catch (err) {
+        console.error('Like error:', err);
+        showToast('Error updating like.');
+      }
+    }
+
+    // =========================================================
+    // COMMENTS MODAL HANDLERS
+    // =========================================================
+    async function openCommentsModal(postId) {
+      currentModalPostId = postId;
+      const modal = document.getElementById('commentsModal');
+      const commentsList = document.getElementById('commentsList');
+      const modalTitle = document.getElementById('modalPostTitle');
+
+      modal.classList.add('active');
+      modalTitle.textContent = 'Comments & Details';
+      commentsList.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-muted);">Loading comments...</div>';
+
+      try {
+        const userIdParam = currentUser ? `?user_id=${currentUser.id}` : '';
+        const res = await fetch(`${appConfig.apiUrl}/api/posts/${postId}${userIdParam}`);
+        if (!res.ok) throw new Error('Failed to fetch post details');
+
+        const data = await res.json();
+        const post = data.post;
+        modalTitle.textContent = post.title;
+
+        // Render comments
+        renderCommentsList(post.comments || []);
+      } catch (err) {
+        console.error('Failed to load comments:', err);
+        commentsList.innerHTML = '<div style="color: #f87171; text-align: center; padding: 10px;">Failed to load comments.</div>';
+      }
+    }
+
+    function renderCommentsList(comments) {
+      const commentsList = document.getElementById('commentsList');
+      if (!comments || comments.length === 0) {
+        commentsList.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No comments yet. Be the first to comment!</div>';
+        return;
+      }
+
+      commentsList.innerHTML = comments.map(c => {
+        const timeStr = c.created_at ? new Date(c.created_at).toLocaleString() : '';
+        return `
+          <div class="comment-item">
+            <div class="comment-author">
+              <span class="comment-username">@${escapeHtml(c.username)}</span>
+              <span class="comment-time">${timeStr}</span>
+            </div>
+            <div class="comment-text">${escapeHtml(c.text)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // =========================================================
+    // EVENT LISTENERS
+    // =========================================================
+    function setupEventListeners() {
+      // Search Filter
+      document.getElementById('searchInput').addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase().trim();
+        const filtered = allPosts.filter(p => p.title.toLowerCase().includes(query));
+        renderPosts(filtered);
+      });
+
+      // Close Modal
+      document.getElementById('btnModalClose').addEventListener('click', () => {
+        document.getElementById('commentsModal').classList.remove('active');
+      });
+
+      document.getElementById('commentsModal').addEventListener('click', (e) => {
+        if (e.target.id === 'commentsModal') {
+          document.getElementById('commentsModal').classList.remove('active');
+        }
+      });
+
+      // Submit Comment
+      document.getElementById('commentForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!currentUser) {
+          showToast('Please login to post a comment!');
+          promptTelegramLogin();
+          return;
+        }
+
+        const input = document.getElementById('commentTextInput');
+        const text = input.value.trim();
+        if (!text || !currentModalPostId) return;
+
+        try {
+          const res = await fetch(`${appConfig.apiUrl}/api/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              post_id: currentModalPostId,
+              user_id: currentUser.id,
+              username: currentUser.username || currentUser.first_name,
+              text
+            })
+          });
+
+          if (!res.ok) throw new Error('Failed to post comment');
+          input.value = '';
+          showToast('Comment posted!');
+          
+          // Refresh comments modal
+          openCommentsModal(currentModalPostId);
+          // Refresh main feed counts
+          loadPosts();
+        } catch (err) {
+          console.error('Comment submit error:', err);
+          showToast('Error posting comment.');
+        }
+      });
+
+      // Settings Modal
+      document.getElementById('btnSettings').addEventListener('click', () => {
+        document.getElementById('settingApiUrl').value = appConfig.apiUrl;
+        document.getElementById('settingBotUsername').value = appConfig.botUsername;
+        document.getElementById('settingsModal').classList.add('active');
+      });
+
+      document.getElementById('btnSettingsClose').addEventListener('click', () => {
+        document.getElementById('settingsModal').classList.remove('active');
+      });
+
+      document.getElementById('btnSaveSettings').addEventListener('click', () => {
+        const newUrl = document.getElementById('settingApiUrl').value.trim().replace(/\/+$/, '');
+        const newBot = document.getElementById('settingBotUsername').value.trim().replace(/^@/, '');
+
+        appConfig.apiUrl = newUrl;
+        appConfig.botUsername = newBot;
+
+        localStorage.setItem('bot_api_url', newUrl);
+        localStorage.setItem('bot_username', newBot);
+
+        document.getElementById('settingsModal').classList.remove('active');
+        showToast('Settings saved!');
+        loadPosts();
+      });
+    }
+
+    // =========================================================
+    // UTILS
+    // =========================================================
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2500);
+    }
+
+    // Launch
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

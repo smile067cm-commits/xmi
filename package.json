@@ -1,0 +1,18 @@
+{
+  "name": "telegram-bot-hub",
+  "version": "1.0.0",
+  "description": "Telegram Bot & Content Hub hosted on Cloudflare Workers & Pages",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "keywords": ["telegram", "cloudflare-workers", "telegraf", "supabase", "firebase"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "itty-router": "^5.0.24",
+    "telegraf": "^4.16.3"
+  }
+}
