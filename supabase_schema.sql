@@ -37,13 +37,21 @@ CREATE TABLE IF NOT EXISTS public.posts (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Upgrade users table with points & referral tracking
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS points BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referred_by BIGINT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referral_count INTEGER NOT NULL DEFAULT 0;
+
 -- Schema upgrades for existing posts table
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS direct_link TEXT;
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS direct_link_title TEXT;
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS is_promoted BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'All';
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS tags TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_posts_status ON public.posts(status);
 CREATE INDEX IF NOT EXISTS idx_posts_is_promoted ON public.posts(is_promoted DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_category ON public.posts(category);
 CREATE INDEX IF NOT EXISTS idx_posts_scheduled_at ON public.posts(scheduled_at);
 CREATE INDEX IF NOT EXISTS idx_posts_created_at ON public.posts(created_at DESC);
 
@@ -129,6 +137,51 @@ CREATE INDEX IF NOT EXISTS idx_file_access_post_id ON public.file_access_logs(po
 CREATE INDEX IF NOT EXISTS idx_file_access_user_id ON public.file_access_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_file_access_at ON public.file_access_logs(accessed_at DESC);
 
+-- 9. SAVED POSTS (Bookmarks)
+CREATE TABLE IF NOT EXISTS public.saved_posts (
+    user_id BIGINT NOT NULL,
+    post_id BIGINT NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, post_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_saved_posts_user_id ON public.saved_posts(user_id);
+
+-- 10. APP SETTINGS (Global Configuration: Referrals, Shortener, Ads, Force Join)
+CREATE TABLE IF NOT EXISTS public.settings (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 11. FORCE CHANNELS (Channels/Groups required to join)
+CREATE TABLE IF NOT EXISTS public.force_channels (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id TEXT NOT NULL UNIQUE,
+    channel_title TEXT NOT NULL,
+    invite_link TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 12. USER PASSES (Link shortener unlock passes)
+CREATE TABLE IF NOT EXISTS public.user_passes (
+    user_id BIGINT PRIMARY KEY,
+    pass_expires_at TIMESTAMPTZ,
+    posts_left INTEGER NOT NULL DEFAULT 0,
+    last_verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 13. VERIFY TOKENS (Temporary verification tokens for shortener redirection)
+CREATE TABLE IF NOT EXISTS public.verify_tokens (
+    token TEXT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    target_post_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_used BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+CREATE INDEX IF NOT EXISTS idx_verify_tokens_token ON public.verify_tokens(token);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
@@ -138,6 +191,11 @@ ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.post_views ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.file_access_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.saved_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.force_channels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_passes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.verify_tokens ENABLE ROW LEVEL SECURITY;
 
 -- Allow full access for service_role key (Drop first if exists to prevent 42710 error)
 DROP POLICY IF EXISTS "Allow service_role full access to users" ON public.users;
@@ -163,3 +221,18 @@ CREATE POLICY "Allow service_role full access to post_views" ON public.post_view
 
 DROP POLICY IF EXISTS "Allow service_role full access to file_access_logs" ON public.file_access_logs;
 CREATE POLICY "Allow service_role full access to file_access_logs" ON public.file_access_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to saved_posts" ON public.saved_posts;
+CREATE POLICY "Allow service_role full access to saved_posts" ON public.saved_posts FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to settings" ON public.settings;
+CREATE POLICY "Allow service_role full access to settings" ON public.settings FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to force_channels" ON public.force_channels;
+CREATE POLICY "Allow service_role full access to force_channels" ON public.force_channels FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to user_passes" ON public.user_passes;
+CREATE POLICY "Allow service_role full access to user_passes" ON public.user_passes FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to verify_tokens" ON public.verify_tokens;
+CREATE POLICY "Allow service_role full access to verify_tokens" ON public.verify_tokens FOR ALL TO service_role USING (true) WITH CHECK (true);

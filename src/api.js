@@ -12,7 +12,17 @@ import {
   recordPostView,
   recordFileAccess,
   getPostAnalytics,
-  getGlobalStats
+  getGlobalStats,
+  toggleSavePost,
+  getSavedPosts,
+  getSettings,
+  updateSetting,
+  getForceChannels,
+  addForceChannel,
+  removeForceChannel,
+  verifyTokenAndGrantPass,
+  getAllUserIds,
+  getUser
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
@@ -73,11 +83,287 @@ export function createRouter() {
   // -------------------------------------------------------------
   router.get('/api/posts', async (request, env) => {
     try {
-      const posts = await getPublishedPosts(env);
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+      const posts = await getPublishedPosts(env, userId);
       return jsonResponse({ success: true, posts });
     } catch (err) {
       console.error('API /api/posts error:', err);
       return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // GET /api/saved-posts - User's Saved/Bookmarked Posts
+  // -------------------------------------------------------------
+  router.get('/api/saved-posts', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+      if (!userId) {
+        return errorResponse('User ID is required', 400);
+      }
+      const posts = await getSavedPosts(env, userId);
+      return jsonResponse({ success: true, posts });
+    } catch (err) {
+      console.error('API /api/saved-posts error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/posts/:id/save - Toggle Save / Bookmark
+  // -------------------------------------------------------------
+  router.post('/api/posts/:id/save', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const body = await request.json();
+      const { user_id } = body || {};
+
+      if (!user_id) {
+        return errorResponse('user_id is required', 400);
+      }
+
+      const result = await toggleSavePost(env, user_id, id);
+      return jsonResponse({ success: true, saved: result.saved });
+    } catch (err) {
+      console.error('API /api/posts/:id/save error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // GET /api/settings - App Configuration & User Data
+  // -------------------------------------------------------------
+  router.get('/api/settings', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+      const settings = await getSettings(env);
+      
+      let userData = null;
+      if (userId) {
+        const u = await getUser(env, userId);
+        if (u) {
+          userData = {
+            id: u.id,
+            points: Number(u.points) || 0,
+            referral_count: Number(u.referral_count) || 0
+          };
+        }
+      }
+
+      return jsonResponse({ success: true, settings, user: userData });
+    } catch (err) {
+      console.error('API /api/settings error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/admin/settings - Update Settings (Admin Only)
+  // -------------------------------------------------------------
+  router.post('/api/admin/settings', async (request, env) => {
+    try {
+      const body = await request.json();
+      const { user_id, settings } = body || {};
+
+      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      if (!settings || typeof settings !== 'object') {
+        return errorResponse('Invalid settings object', 400);
+      }
+
+      for (const [key, value] of Object.entries(settings)) {
+        await updateSetting(env, key, value);
+      }
+
+      const updated = await getSettings(env);
+      return jsonResponse({ success: true, settings: updated });
+    } catch (err) {
+      console.error('API /api/admin/settings error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Force Join Channels Endpoints (Admin Only)
+  // -------------------------------------------------------------
+  router.get('/api/admin/force-channels', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin access', 403);
+      }
+
+      const channels = await getForceChannels(env);
+      return jsonResponse({ success: true, channels });
+    } catch (err) {
+      console.error('API force channels error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  router.post('/api/admin/force-channels', async (request, env) => {
+    try {
+      const body = await request.json();
+      const { user_id, channel_id, channel_title, invite_link } = body || {};
+
+      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      if (!channel_id || !channel_title || !invite_link) {
+        return errorResponse('channel_id, channel_title, and invite_link are required', 400);
+      }
+
+      const added = await addForceChannel(env, { channel_id, channel_title, invite_link });
+      return jsonResponse({ success: true, channel: added });
+    } catch (err) {
+      console.error('API add force channel error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  router.delete('/api/admin/force-channels/:id', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      await removeForceChannel(env, id);
+      return jsonResponse({ success: true, message: 'Channel removed' });
+    } catch (err) {
+      console.error('API remove force channel error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/admin/broadcast - Broadcast Message to All Users
+  // -------------------------------------------------------------
+  router.post('/api/admin/broadcast', async (request, env) => {
+    try {
+      const body = await request.json();
+      const { user_id, message, photo_url, button_text, button_url } = body || {};
+
+      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      if (!message || !message.trim()) {
+        return errorResponse('Broadcast message is required', 400);
+      }
+
+      const userIds = await getAllUserIds(env);
+      let sentCount = 0;
+      let failedCount = 0;
+
+      const inlineKeyboard = (button_text && button_url) ? {
+        inline_keyboard: [[{ text: button_text, url: button_url }]]
+      } : undefined;
+
+      for (const targetId of userIds) {
+        try {
+          if (photo_url && photo_url.startsWith('http')) {
+            const sendPhotoUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendPhoto`;
+            await fetch(sendPhotoUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: targetId,
+                photo: photo_url,
+                caption: message,
+                parse_mode: 'Markdown',
+                reply_markup: inlineKeyboard
+              })
+            });
+          } else {
+            const sendMsgUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`;
+            await fetch(sendMsgUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: targetId,
+                text: message,
+                parse_mode: 'Markdown',
+                reply_markup: inlineKeyboard
+              })
+            });
+          }
+          sentCount++;
+        } catch (e) {
+          failedCount++;
+        }
+      }
+
+      return jsonResponse({
+        success: true,
+        total_users: userIds.length,
+        sent_count: sentCount,
+        failed_count: failedCount
+      });
+    } catch (err) {
+      console.error('API broadcast error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // GET /verify & POST /api/verify - Shortener Token Verification
+  // -------------------------------------------------------------
+  router.get('/verify', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const token = url.searchParams.get('token');
+      if (!token) {
+        return htmlResponse('<h2>⚠️ Invalid or missing verification token.</h2>');
+      }
+
+      const record = await verifyTokenAndGrantPass(env, token);
+      if (!record) {
+        return htmlResponse('<h2>⚠️ Verification token expired or already used.</h2>');
+      }
+
+      const appUrl = env.WEB_APP_URL || url.origin;
+      const botUsername = env.BOT_USERNAME || 'Xminty_bot';
+      const redirectUrl = record.target_post_id ? `https://t.me/${botUsername}?start=post_${record.target_post_id}` : appUrl;
+
+      return htmlResponse(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Verification Successful</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
+            .card { background: #1e293b; padding: 32px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); max-width: 400px; }
+            .btn { display: inline-block; background: #38bdf8; color: #0f172a; text-decoration: none; padding: 12px 24px; border-radius: 10px; font-weight: 700; margin-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>🎉 Access Verified!</h1>
+            <p>Your access pass has been granted. You can now access full posts and files.</p>
+            <a href="${redirectUrl}" class="btn">🚀 Return to Post / App</a>
+          </div>
+          <script>
+            setTimeout(() => { window.location.href = "${redirectUrl}"; }, 1500);
+          </script>
+        </body>
+        </html>
+      `);
+    } catch (err) {
+      return htmlResponse(`<h2>⚠️ Error: ${err.message}</h2>`);
     }
   });
 
@@ -273,6 +559,8 @@ export function createRouter() {
         preview_image,
         direct_link,
         direct_link_title,
+        category,
+        tags,
         status,
         scheduled_at,
         is_promoted
@@ -287,6 +575,8 @@ export function createRouter() {
       if (preview_image !== undefined) updatePayload.preview_image = preview_image ? preview_image.trim() : null;
       if (direct_link !== undefined) updatePayload.direct_link = direct_link ? direct_link.trim() : null;
       if (direct_link_title !== undefined) updatePayload.direct_link_title = direct_link_title ? direct_link_title.trim() : null;
+      if (category !== undefined) updatePayload.category = category || 'All';
+      if (tags !== undefined) updatePayload.tags = tags || '';
       if (status !== undefined) updatePayload.status = status;
       if (scheduled_at !== undefined) updatePayload.scheduled_at = scheduled_at;
       if (is_promoted !== undefined) updatePayload.is_promoted = Boolean(is_promoted);
