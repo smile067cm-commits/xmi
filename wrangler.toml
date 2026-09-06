@@ -2,6 +2,7 @@ name = "xmi"
 main = "src/index.js"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
+keep_vars = true
 
 # -------------------------------------------------------------
 # Cron Trigger: Checks every 5 minutes for scheduled posts

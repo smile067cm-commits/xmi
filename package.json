@@ -5,7 +5,8 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler deploy --keep-vars",
+    "push-secrets": "node scripts/push-secrets.js",
     "tail": "wrangler tail"
   },
   "keywords": ["telegram", "cloudflare-workers", "telegraf", "supabase", "firebase"],
