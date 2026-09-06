@@ -339,12 +339,6 @@ export function createBot(env) {
         ]
       ];
 
-      const replyKeyboard = Markup.keyboard([
-        [Markup.button.webApp('🚀 Open Mini App', userAppUrl), '➕ Add Post'],
-        ['📑 Manage Posts', '📊 Stats'],
-        ['📢 Broadcast', '⚙️ Settings']
-      ]).resize();
-
       const text = `👑 *Admin Control Panel*\n\n` +
         `Welcome back, *${escapeMarkdown(ctx.from?.first_name || 'Admin')}*!\n` +
         `Choose an action using the buttons below:`;
@@ -359,15 +353,13 @@ export function createBot(env) {
         } catch (e) {
           return await ctx.reply(text, {
             parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(inlineButtons),
-            ...replyKeyboard
+            ...Markup.inlineKeyboard(inlineButtons)
           });
         }
       } else {
         return await ctx.reply(text, {
           parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard(inlineButtons),
-          ...replyKeyboard
+          ...Markup.inlineKeyboard(inlineButtons)
         });
       }
     } else {
@@ -391,12 +383,6 @@ export function createBot(env) {
         ]);
       }
 
-      const userReplyKeyboard = Markup.keyboard([
-        [Markup.button.webApp('🚀 Launch Mini App', userAppUrl)],
-        ['🔍 Browse Posts', '🔖 Saved Posts'],
-        settings.referral_enabled ? ['🎁 Invite Friends'] : []
-      ].filter(r => r.length > 0)).resize();
-
       const text = `👋 *Welcome to xmi Content Hub!*\n\n` +
         `• Access premium content, downloads, and exclusive files.\n` +
         (settings.referral_enabled ? `• 🪙 *Your Balance:* \`${userPoints} Points\`\n` : '') +
@@ -412,15 +398,13 @@ export function createBot(env) {
         } catch (e) {
           return await ctx.reply(text, {
             parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(inlineButtons),
-            ...userReplyKeyboard
+            ...Markup.inlineKeyboard(inlineButtons)
           });
         }
       } else {
         return await ctx.reply(text, {
           parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard(inlineButtons),
-          ...userReplyKeyboard
+          ...Markup.inlineKeyboard(inlineButtons)
         });
       }
     }
