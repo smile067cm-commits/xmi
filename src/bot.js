@@ -133,8 +133,14 @@ async function sendPostToUser(ctx, env, post, postId) {
 
   const folders = await getPostFoldersWithFiles(env, postId);
   const settings = await getSettings(env);
-  const postTimer = (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined) ? Number(post.auto_delete_minutes) : null;
-  const autoDeleteMinutes = postTimer !== null ? postTimer : Number(settings.auto_delete_minutes !== undefined ? settings.auto_delete_minutes : 30);
+  const globalTimer = (settings.auto_delete_minutes !== undefined && settings.auto_delete_minutes !== null && !isNaN(settings.auto_delete_minutes)) ? Number(settings.auto_delete_minutes) : 30;
+  let autoDeleteMinutes = globalTimer;
+  if (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined && post.auto_delete_minutes !== '') {
+    const parsed = Number(post.auto_delete_minutes);
+    if (!isNaN(parsed)) {
+      autoDeleteMinutes = parsed;
+    }
+  }
   const protectContent = Boolean(settings.protect_all_posts || post.protect_content);
 
   const sentMessageIds = [];
@@ -232,8 +238,9 @@ async function sendPostToUser(ctx, env, post, postId) {
 
   // 6. Send Expires Warning as a SEPARATE MESSAGE
   if (autoDeleteMinutes > 0) {
+    const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
     const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
-      `This message and all files/links above will automatically self-destruct & delete in *${autoDeleteMinutes} minutes*!\n\n` +
+      `This message and all files/links above will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
       (protectContent
         ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
         : `👉 *Please forward or save to your Saved Messages now before they disappear.*`);
