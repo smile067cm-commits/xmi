@@ -4,7 +4,7 @@
  */
 
 export function getAppHtml(env) {
-  const botUsername = env.BOT_USERNAME || 'YourTelegramBot';
+  const botUsername = env.BOT_USERNAME || 'xminty_bot';
   const adminId = env.ADMIN_ID || '';
 
   return `<!DOCTYPE html>
