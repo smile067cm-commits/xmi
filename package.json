@@ -5,15 +5,24 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "deploy": "wrangler deploy --keep-vars",
+    "deploy": "node node_modules/wrangler/bin/wrangler.js deploy --keep-vars",
     "push-secrets": "node scripts/push-secrets.js",
-    "tail": "wrangler tail"
+    "tail": "node node_modules/wrangler/bin/wrangler.js tail"
   },
-  "keywords": ["telegram", "cloudflare-workers", "telegraf", "supabase", "firebase"],
+  "keywords": [
+    "telegram",
+    "cloudflare-workers",
+    "telegraf",
+    "supabase",
+    "firebase"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "itty-router": "^5.0.24",
     "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "wrangler": "^4.129.0"
   }
 }
