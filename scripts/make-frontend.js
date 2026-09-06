@@ -1011,6 +1011,7 @@ const rawHtml = `<!DOCTYPE html>
         <div class="nav-pill active" data-view="feed">🔍 Browse Posts</div>
         <div class="nav-pill" data-view="saved">🔖 Saved Posts</div>
         <div class="nav-pill" id="navEarnPoints" style="display: none;" data-view="earn">🎁 Earn Points</div>
+        <div class="nav-pill" id="navAdminPill" style="display: none; background: rgba(251, 191, 36, 0.15); border-color: rgba(251, 191, 36, 0.4); color: #fbbf24; font-weight: 700;" data-view="admin">👑 Admin Hub</div>
       </div>
 
       <!-- Categories Bar -->
@@ -1448,7 +1449,7 @@ const rawHtml = `<!DOCTYPE html>
     const currentUserName = tg?.initDataUnsafe?.user?.first_name || (tg?.initDataUnsafe?.user?.username || 'User');
     const adminId = "__ADMIN_ID__";
     const botUsername = "__BOT_USERNAME__";
-    const isAdmin = Boolean(adminId && String(currentUserId) === String(adminId));
+    let isAdmin = Boolean(adminId && String(currentUserId) === String(adminId));
 
     let allPosts = [];
     let savedPostIds = new Set();
@@ -1468,13 +1469,23 @@ const rawHtml = `<!DOCTYPE html>
       setTimeout(() => toast.classList.remove('show'), 2500);
     }
 
+    function showAdminElements() {
+      isAdmin = true;
+      const bAdmin = document.getElementById('badgeAdmin');
+      if (bAdmin) bAdmin.style.display = 'inline-block';
+      const mBar = document.getElementById('adminModeBar');
+      if (mBar) mBar.style.display = 'flex';
+      const bQuick = document.getElementById('btnAdminQuick');
+      if (bQuick) bQuick.style.display = 'inline-flex';
+      const nAdmin = document.getElementById('navAdminPill');
+      if (nAdmin) nAdmin.style.display = 'inline-flex';
+      generateNewDestLink();
+    }
+
     // Initialize App
     async function initApp() {
       if (isAdmin) {
-        document.getElementById('badgeAdmin').style.display = 'inline-block';
-        document.getElementById('adminModeBar').style.display = 'flex';
-        document.getElementById('btnAdminQuick').style.display = 'inline-flex';
-        generateNewDestLink();
+        showAdminElements();
       }
 
       await loadSettingsAndUser();
@@ -1508,6 +1519,10 @@ const rawHtml = `<!DOCTYPE html>
           globalSettings = data.settings || {};
           if (data.user) {
             userPoints = Number(data.user.points) || 0;
+          }
+
+          if (data.is_admin) {
+            showAdminElements();
           }
 
           // Show points badge if referrals or shorteners enabled
@@ -1807,13 +1822,17 @@ const rawHtml = `<!DOCTYPE html>
 
       document.getElementById('btnRefreshDestLink')?.addEventListener('click', generateNewDestLink);
 
-      // User Nav Bar (Browse vs Saved vs Earn Points)
+      // User Nav Bar (Browse vs Saved vs Earn Points vs Admin Hub)
       document.querySelector('.user-nav-bar')?.addEventListener('click', (e) => {
         const pill = e.target.closest('.nav-pill');
         if (!pill) return;
         const view = pill.dataset.view;
         if (view === 'earn') {
           openPointsModal();
+          return;
+        }
+        if (view === 'admin') {
+          document.getElementById('tabModeAdmin')?.click();
           return;
         }
         document.querySelectorAll('.user-nav-bar .nav-pill').forEach(p => p.classList.remove('active'));
@@ -1908,13 +1927,16 @@ const rawHtml = `<!DOCTYPE html>
           return;
         }
 
-        // Single "Open in Bot" button click
+        // Single "Open in Bot" button click -> Deep link to bot and close Mini App
         const openBotBtn = e.target.closest('[data-act="open-in-bot"]');
         if (openBotBtn) {
           const postId = openBotBtn.dataset.id;
           const botUrl = 'https://t.me/' + botUsername + '?start=post_' + postId;
           if (tg && tg.openTelegramLink) {
             tg.openTelegramLink(botUrl);
+            setTimeout(() => {
+              if (tg.close) tg.close();
+            }, 300);
           } else {
             window.location.href = botUrl;
           }

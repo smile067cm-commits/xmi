@@ -279,13 +279,14 @@ export function createBot(env) {
     const userId = ctx.from?.id;
     const isAdmin = String(userId) === String(env.ADMIN_ID);
     const settings = await getSettings(env);
+    const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${userId}` : `${appUrl}?user_id=${userId}`) : appUrl;
 
     try {
-      if (appUrl.startsWith('https://')) {
+      if (userAppUrl.startsWith('https://')) {
         await ctx.setChatMenuButton({
           type: 'web_app',
           text: '🚀 Open App',
-          web_app: { url: appUrl }
+          web_app: { url: userAppUrl }
         });
       }
     } catch (e) {}
@@ -293,7 +294,7 @@ export function createBot(env) {
     if (isAdmin) {
       // Admin Control Panel
       const inlineButtons = [
-        [Markup.button.webApp('🚀 Open Mini App', appUrl)],
+        [Markup.button.webApp('🚀 Open Mini App', userAppUrl)],
         [
           Markup.button.callback('➕ Create Post', 'admin_menu_addpost'),
           Markup.button.callback('📑 Manage Posts', 'admin_post_list')
@@ -309,7 +310,7 @@ export function createBot(env) {
       ];
 
       const replyKeyboard = Markup.keyboard([
-        [Markup.button.webApp('🚀 Open Mini App', appUrl), '➕ Add Post'],
+        [Markup.button.webApp('🚀 Open Mini App', userAppUrl), '➕ Add Post'],
         ['📑 Manage Posts', '📊 Stats'],
         ['📢 Broadcast', '⚙️ Settings']
       ]).resize();
@@ -346,7 +347,7 @@ export function createBot(env) {
       userPoints = u?.points || 0;
 
       const inlineButtons = [
-        [Markup.button.webApp('🚀 Launch Mini App', appUrl)],
+        [Markup.button.webApp('🚀 Launch Mini App', userAppUrl)],
         [
           Markup.button.callback('🔍 Browse All Posts', 'user_browse_posts'),
           Markup.button.callback('🔖 My Saved Posts', 'user_saved_posts')
@@ -365,7 +366,7 @@ export function createBot(env) {
       }
 
       const replyButtons = [
-        [Markup.button.webApp('🚀 Launch App', appUrl), '🔍 Browse Posts'],
+        [Markup.button.webApp('🚀 Launch App', userAppUrl), '🔍 Browse Posts'],
         ['🔖 Saved Posts']
       ];
       const bottomRow = [];
@@ -409,6 +410,7 @@ export function createBot(env) {
   // -------------------------------------------------------------
   bot.start(async (ctx) => {
     const payload = ctx.startPayload || '';
+    const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${ctx.from?.id}` : `${appUrl}?user_id=${ctx.from?.id}`) : appUrl;
 
     // 1. Referral Deep Link: ref_<referrer_id>
     if (payload.startsWith('ref_')) {
@@ -424,13 +426,13 @@ export function createBot(env) {
     if (payload.startsWith('verify_')) {
       const token = payload.replace('verify_', '').trim();
       try {
-        const record = await verifyTokenAndGrantPass(env, token);
+        const record = await verifyTokenAndGrantPass(env, token, ctx.from?.id);
         if (record) {
           const buttons = [];
           if (record.target_post_id) {
             buttons.push([Markup.button.callback('📥 Open Post Files', `user_view_post_${record.target_post_id}`)]);
           }
-          buttons.push([Markup.button.webApp('🚀 Open Mini App', appUrl)]);
+          buttons.push([Markup.button.webApp('🚀 Open Mini App', userAppUrl)]);
           buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
 
           return await ctx.reply(

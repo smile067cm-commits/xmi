@@ -146,6 +146,8 @@ export function createRouter() {
       const userId = url.searchParams.get('user_id');
       const settings = await getSettings(env);
       
+      const isAdmin = Boolean(userId && env.ADMIN_ID && String(userId) === String(env.ADMIN_ID));
+
       let userData = null;
       if (userId) {
         const u = await getUser(env, userId);
@@ -158,7 +160,12 @@ export function createRouter() {
         }
       }
 
-      return jsonResponse({ success: true, settings, user: userData });
+      return jsonResponse({
+        success: true,
+        settings,
+        user: userData,
+        is_admin: isAdmin
+      });
     } catch (err) {
       console.error('API /api/settings error:', err);
       return errorResponse(err.message, 500);
