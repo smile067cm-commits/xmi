@@ -29,7 +29,13 @@ import {
   addEphemeralMessages,
   processEphemeralDeletions,
   getAllUserIds,
-  getUser
+  getUser,
+  isAdminUser,
+  getAdmins,
+  addAdmin,
+  deleteAdmin,
+  getDatabaseStorageStats,
+  optimizeDatabase
 } from './db.js';
 import { getSession, setSession, clearSession } from './session.js';
 
@@ -45,7 +51,7 @@ function escapeMarkdown(text) {
  * Checks if a user has joined all required force-join channels
  */
 async function checkForceJoin(ctx, env, userId) {
-  if (String(userId) === String(env.ADMIN_ID)) return { passed: true };
+  if (await isAdminUser(env, userId)) return { passed: true };
   try {
     const settings = await getSettings(env);
     if (!settings.force_join_enabled) return { passed: true };
@@ -81,7 +87,7 @@ async function checkForceJoin(ctx, env, userId) {
  * Checks if user has points to unlock content or generates multi-shortener verify link
  */
 async function checkLockerPass(ctx, env, userId, postId) {
-  if (String(userId) === String(env.ADMIN_ID)) return { passed: true };
+  if (await isAdminUser(env, userId)) return { passed: true };
   try {
     const result = await checkAndDeductPostAccess(env, userId, postId);
     if (result.allowed) {
@@ -111,12 +117,14 @@ async function checkLockerPass(ctx, env, userId, postId) {
 }
 
 /**
- * Delivers post details, files, and links (as buttons) to user with auto-deletion timer
+ * Delivers post details, files, and links (as buttons) to user with auto-deletion timer & content protection
  */
 async function sendPostToUser(ctx, env, post, postId) {
   const folders = await getPostFoldersWithFiles(env, postId);
   const settings = await getSettings(env);
-  const autoDeleteMinutes = Number(settings.auto_delete_minutes !== undefined ? settings.auto_delete_minutes : 30);
+  const postTimer = (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined) ? Number(post.auto_delete_minutes) : null;
+  const autoDeleteMinutes = postTimer !== null ? postTimer : Number(settings.auto_delete_minutes !== undefined ? settings.auto_delete_minutes : 30);
+  const protectContent = Boolean(post.protect_content);
   const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
 
   const sentMessageIds = [];
@@ -135,15 +143,22 @@ async function sendPostToUser(ctx, env, post, postId) {
     try {
       const imgMsg = await ctx.replyWithPhoto(post.preview_image, {
         caption: headerText,
-        parse_mode: 'Markdown'
+        parse_mode: 'Markdown',
+        protect_content: protectContent
       });
       if (imgMsg?.message_id) sentMessageIds.push(imgMsg.message_id);
     } catch (e) {
-      const txtMsg = await ctx.reply(headerText, { parse_mode: 'Markdown' });
+      const txtMsg = await ctx.reply(headerText, {
+        parse_mode: 'Markdown',
+        protect_content: protectContent
+      });
       if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
     }
   } else {
-    const txtMsg = await ctx.reply(headerText, { parse_mode: 'Markdown' });
+    const txtMsg = await ctx.reply(headerText, {
+      parse_mode: 'Markdown',
+      protect_content: protectContent
+    });
     if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
   }
 
@@ -153,6 +168,7 @@ async function sendPostToUser(ctx, env, post, postId) {
     try {
       const directMsg = await ctx.reply(`🔗 *Content Link:*\nTap the button below to access:`, {
         parse_mode: 'Markdown',
+        protect_content: protectContent,
         ...Markup.inlineKeyboard([
           [Markup.button.url(`📥 ${linkLabel}`, post.direct_link)]
         ])
@@ -177,6 +193,7 @@ async function sendPostToUser(ctx, env, post, postId) {
                 `🔗 *${escapeMarkdown(folder.name)}* ➔ *${escapeMarkdown(file.file_name || 'Link')}*`,
                 {
                   parse_mode: 'Markdown',
+                  protect_content: protectContent,
                   ...Markup.inlineKeyboard([
                     [Markup.button.url(`📥 ${linkBtnTitle}`, file.file_id)]
                   ])
@@ -187,11 +204,14 @@ async function sendPostToUser(ctx, env, post, postId) {
               const copied = await ctx.telegram.copyMessage(
                 ctx.chat.id,
                 env.CHANNEL_ID,
-                Number(file.channel_message_id)
+                Number(file.channel_message_id),
+                { protect_content: protectContent }
               );
               if (copied?.message_id) sentMessageIds.push(copied.message_id);
             } else if (file.file_id) {
-              const sentDoc = await ctx.telegram.sendDocument(ctx.chat.id, file.file_id);
+              const sentDoc = await ctx.telegram.sendDocument(ctx.chat.id, file.file_id, {
+                protect_content: protectContent
+              });
               if (sentDoc?.message_id) sentMessageIds.push(sentDoc.message_id);
             }
           } catch (fileErr) {
@@ -206,11 +226,14 @@ async function sendPostToUser(ctx, env, post, postId) {
   if (autoDeleteMinutes > 0) {
     const noticeText = `⏳ ⚠️ *Auto-Delete Notice:*\n\n` +
       `All files and links above will automatically self-destruct & delete in *${autoDeleteMinutes} minutes*!\n\n` +
-      `👉 *Please forward or save them to your Saved Messages now before they disappear.*`;
+      (protectContent
+        ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
+        : `👉 *Please forward or save them to your Saved Messages now before they disappear.*`);
 
     try {
       const noticeMsg = await ctx.reply(noticeText, {
         parse_mode: 'Markdown',
+        protect_content: protectContent,
         ...Markup.inlineKeyboard([
           [Markup.button.webApp('🚀 View in Mini App', appUrl)],
           [Markup.button.callback('🔙 Main Menu', 'main_menu')]
@@ -232,8 +255,9 @@ async function sendPostToUser(ctx, env, post, postId) {
     }
   } else {
     try {
-      await ctx.reply(`✅ *All items delivered successfully!*`, {
+      await ctx.reply(`✅ *All items delivered successfully!*` + (protectContent ? `\n🔒 *Content protection is enabled.*` : ''), {
         parse_mode: 'Markdown',
+        protect_content: protectContent,
         ...Markup.inlineKeyboard([
           [Markup.button.webApp('🚀 View in Mini App', appUrl)],
           [Markup.button.callback('🔙 Main Menu', 'main_menu')]
@@ -277,7 +301,7 @@ export function createBot(env) {
   // -------------------------------------------------------------
   async function showMainMenu(ctx) {
     const userId = ctx.from?.id;
-    const isAdmin = String(userId) === String(env.ADMIN_ID);
+    const isAdmin = await isAdminUser(env, userId);
     const settings = await getSettings(env);
     const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${userId}` : `${appUrl}?user_id=${userId}`) : appUrl;
 
@@ -300,8 +324,12 @@ export function createBot(env) {
           Markup.button.callback('📑 Manage Posts', 'admin_post_list')
         ],
         [
-          Markup.button.callback('📊 Hub Statistics', 'admin_stats'),
+          Markup.button.callback('📊 Statistics', 'admin_stats'),
           Markup.button.callback('📢 Broadcast', 'admin_menu_broadcast')
+        ],
+        [
+          Markup.button.callback('👥 Manage Admins', 'admin_menu_admins'),
+          Markup.button.callback('💾 Storage Meter', 'admin_menu_storage')
         ],
         [
           Markup.button.callback('⚙️ Hub Settings', 'admin_menu_settings'),
@@ -349,37 +377,28 @@ export function createBot(env) {
       const inlineButtons = [
         [Markup.button.webApp('🚀 Launch Mini App', userAppUrl)],
         [
-          Markup.button.callback('🔍 Browse All Posts', 'user_browse_posts'),
-          Markup.button.callback('🔖 My Saved Posts', 'user_saved_posts')
+          Markup.button.callback('🔍 Browse Posts', 'user_browse_posts'),
+          Markup.button.callback('🔖 Saved Posts', 'user_menu_saved')
         ]
       ];
 
-      const userFeaturesRow = [];
-      if (settings.shortener_enabled) {
-        userFeaturesRow.push(Markup.button.callback('🔗 Earn Points', 'user_earn_points'));
-      }
       if (settings.referral_enabled) {
-        userFeaturesRow.push(Markup.button.callback(`🎁 Invite & Earn (🪙 ${userPoints} pts)`, 'user_menu_invite'));
+        inlineButtons.push([
+          Markup.button.callback(`🪙 My Points: ${userPoints}`, 'user_menu_points'),
+          Markup.button.callback('🎁 Invite Friends', 'user_menu_invite')
+        ]);
       }
-      if (userFeaturesRow.length > 0) {
-        inlineButtons.push(userFeaturesRow);
-      }
 
-      const replyButtons = [
-        [Markup.button.webApp('🚀 Launch App', userAppUrl), '🔍 Browse Posts'],
-        ['🔖 Saved Posts']
-      ];
-      const bottomRow = [];
-      if (settings.shortener_enabled) bottomRow.push('🔗 Earn Points');
-      if (settings.referral_enabled) bottomRow.push('🎁 Invite Friends');
-      if (bottomRow.length > 0) replyButtons.push(bottomRow);
+      const userReplyKeyboard = Markup.keyboard([
+        [Markup.button.webApp('🚀 Launch Mini App', userAppUrl)],
+        ['🔍 Browse Posts', '🔖 Saved Posts'],
+        settings.referral_enabled ? ['🎁 Invite Friends'] : []
+      ].filter(r => r.length > 0)).resize();
 
-      const replyKeyboard = Markup.keyboard(replyButtons).resize();
-
-      let text = `👋 *Welcome ${escapeMarkdown(ctx.from?.first_name || 'there')}!*\n\n` +
-        `🪙 *Your Points Balance:* \`${userPoints} Points\`\n\n` +
-        `Explore published posts, curated folders, and downloadable resources.\n` +
-        `Tap any button below to get started:`;
+      const text = `👋 *Welcome to xmi Content Hub!*\n\n` +
+        `• Access premium content, downloads, and exclusive files.\n` +
+        (settings.referral_enabled ? `• 🪙 *Your Balance:* \`${userPoints} Points\`\n` : '') +
+        `\nTap **Launch Mini App** or choose an option below:`;
 
       if (ctx.callbackQuery) {
         await ctx.answerCbQuery();
@@ -392,33 +411,44 @@ export function createBot(env) {
           return await ctx.reply(text, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard(inlineButtons),
-            ...replyKeyboard
+            ...userReplyKeyboard
           });
         }
       } else {
         return await ctx.reply(text, {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard(inlineButtons),
-          ...replyKeyboard
+          ...userReplyKeyboard
         });
       }
     }
   }
 
   // -------------------------------------------------------------
-  // /start Command (Deep Link, Referrals, Verify, Welcome)
+  // /start handler with Deep Linking
   // -------------------------------------------------------------
   bot.start(async (ctx) => {
     const payload = ctx.startPayload || '';
-    const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${ctx.from?.id}` : `${appUrl}?user_id=${ctx.from?.id}`) : appUrl;
+    const userId = ctx.from?.id;
 
-    // 1. Referral Deep Link: ref_<referrer_id>
+    // 1. Referral Deep Link: ref_<inviter_id>
     if (payload.startsWith('ref_')) {
-      const referrerId = payload.replace('ref_', '').trim();
-      try {
-        await processReferral(env, ctx.from?.id, referrerId);
-      } catch (refErr) {
-        console.warn('Referral processing warning:', refErr.message);
+      const inviterId = payload.replace('ref_', '').trim();
+      if (inviterId && String(inviterId) !== String(userId)) {
+        try {
+          const res = await processReferral(env, inviterId, userId);
+          if (res.awarded) {
+            try {
+              await ctx.telegram.sendMessage(
+                inviterId,
+                `🎉 *Referral Bonus!*\nA user joined using your link. You earned *+${res.points} Points*! 🪙`,
+                { parse_mode: 'Markdown' }
+              );
+            } catch (e) {}
+          }
+        } catch (err) {
+          console.error('Referral processing error:', err);
+        }
       }
     }
 
@@ -426,36 +456,36 @@ export function createBot(env) {
     if (payload.startsWith('verify_')) {
       const token = payload.replace('verify_', '').trim();
       try {
-        const record = await verifyTokenAndGrantPass(env, token, ctx.from?.id);
-        if (record) {
-          const buttons = [];
-          if (record.target_post_id) {
-            buttons.push([Markup.button.callback('📥 Open Post Files', `user_view_post_${record.target_post_id}`)]);
-          }
-          buttons.push([Markup.button.webApp('🚀 Open Mini App', userAppUrl)]);
-          buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
+        const verifyRes = await verifyTokenAndGrantPass(env, token, userId);
+        if (verifyRes.success) {
+          await ctx.reply(
+            `🎉 *Access Unlocked & Points Earned!*\n\n` +
+            `• You received: *+${verifyRes.reward_points} Points* 🪙\n` +
+            `• Current Balance: *${verifyRes.current_points} Points* 🪙\n\n` +
+            `Delivering your requested content now...`,
+            { parse_mode: 'Markdown' }
+          );
 
+          if (verifyRes.post_id) {
+            const isAdmin = await isAdminUser(env, userId);
+            const post = await getPostById(env, verifyRes.post_id, userId, isAdmin);
+            if (post) {
+              return await sendPostToUser(ctx, env, post, verifyRes.post_id);
+            }
+          }
+          return await showMainMenu(ctx);
+        } else {
           return await ctx.reply(
-            `🎉 *Verification Successful!*\n\n` +
-            `🪙 *+${record.reward_points} Points* have been added to your balance!\n` +
-            `Total Balance: *${record.new_points || record.reward_points} Points*\n\n` +
-            `You can now access and download posts.`,
+            `⚠️ *Verification Link Invalid or Expired*\n\nPlease generate a new access link.`,
             {
               parse_mode: 'Markdown',
-              ...Markup.inlineKeyboard(buttons)
+              ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
             }
           );
-        } else {
-          return await ctx.reply('⚠️ This verification link has expired or has already been used.', {
-            ...Markup.inlineKeyboard([
-              [Markup.button.callback('🔄 Generate New Link', 'user_earn_points')],
-              [Markup.button.callback('🔙 Main Menu', 'main_menu')]
-            ])
-          });
         }
       } catch (vErr) {
-        console.error('Error verifying token on /start:', vErr);
-        return await ctx.reply('⚠️ Error during verification. Please try again.');
+        console.error('Verification error:', vErr);
+        return await ctx.reply('⚠️ Verification failed. Please try again.');
       }
     }
 
@@ -464,7 +494,8 @@ export function createBot(env) {
       const postId = payload.replace('post_', '').trim();
       
       try {
-        const post = await getPostById(env, postId, ctx.from?.id, String(ctx.from?.id) === String(env.ADMIN_ID));
+        const isAdmin = await isAdminUser(env, ctx.from?.id);
+        const post = await getPostById(env, postId, ctx.from?.id, isAdmin);
         
         if (!post) {
           return await ctx.reply('⚠️ Post not found or has been removed.', {
@@ -472,7 +503,6 @@ export function createBot(env) {
           });
         }
 
-        const isAdmin = String(ctx.from?.id) === String(env.ADMIN_ID);
         if (post.status !== 'published' && !isAdmin) {
           return await ctx.reply('🔒 This post is not yet published.', {
             ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
@@ -556,7 +586,8 @@ export function createBot(env) {
       );
     }
 
-    const post = await getPostById(env, postId, ctx.from?.id, String(ctx.from?.id) === String(env.ADMIN_ID));
+    const isAdmin = await isAdminUser(env, ctx.from?.id);
+    const post = await getPostById(env, postId, ctx.from?.id, isAdmin);
     if (!post) return await ctx.reply('⚠️ Post not found.');
 
     return await sendPostToUser(ctx, env, post, postId);
@@ -586,10 +617,47 @@ export function createBot(env) {
       );
     }
 
-    const post = await getPostById(env, postId, ctx.from?.id, String(ctx.from?.id) === String(env.ADMIN_ID));
+    const isAdmin = await isAdminUser(env, ctx.from?.id);
+    const post = await getPostById(env, postId, ctx.from?.id, isAdmin);
     if (!post) return await ctx.reply('⚠️ Post not found.');
 
     return await sendPostToUser(ctx, env, post, postId);
+  });
+
+  // -------------------------------------------------------------
+  // Regenerate Verify Link Callback
+  // -------------------------------------------------------------
+  bot.action(/^regen_verify_(\d+)$/, async (ctx) => {
+    const postId = ctx.match[1];
+    await ctx.answerCbQuery('Generating fresh link...');
+    const userId = ctx.from?.id;
+
+    try {
+      const tokenObj = await createVerifyToken(env, userId, postId);
+      const post = await getPostById(env, postId, userId, true);
+
+      const buttons = [
+        [Markup.button.url(`🔗 Complete Task (+${tokenObj.reward_points} Pts)`, tokenObj.verify_url)],
+        [Markup.button.callback('🔄 Regenerate Link Again', `regen_verify_${postId}`)],
+        [Markup.button.callback('🎁 Invite Friends', 'user_menu_invite')],
+        [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+      ];
+
+      return await ctx.reply(
+        `✨ *Fresh Verification Link Generated!*\n\n` +
+        `• *Post:* \`${escapeMarkdown(post?.title || 'Download')}\`\n` +
+        `• *Shortener:* \`${tokenObj.shortener_name}\`\n` +
+        `• *Reward:* \`+${tokenObj.reward_points} Points\` 🪙\n\n` +
+        `Tap below to complete task and unlock downloads:`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard(buttons)
+        }
+      );
+    } catch (e) {
+      console.error('Error generating token:', e);
+      return await ctx.reply('⚠️ Failed to generate verification link. Please try again.');
+    }
   });
 
   // -------------------------------------------------------------
@@ -701,7 +769,8 @@ export function createBot(env) {
   bot.action(/^user_view_post_(\d+)$/, async (ctx) => {
     const postId = ctx.match[1];
     await ctx.answerCbQuery();
-    const post = await getPostById(env, postId, ctx.from?.id, String(ctx.from?.id) === String(env.ADMIN_ID));
+    const isAdmin = await isAdminUser(env, ctx.from?.id);
+    const post = await getPostById(env, postId, ctx.from?.id, isAdmin);
     if (!post) return await ctx.reply('⚠️ Post not found.');
     return await sendPostToUser(ctx, env, post, postId);
   });
@@ -719,124 +788,66 @@ export function createBot(env) {
         });
       }
 
-      const buttons = saved.map(p => [
+      const buttons = saved.slice(0, 15).map(p => [
         Markup.button.callback(`🔖 ${p.title.slice(0, 28)}`, `user_view_post_${p.id}`)
       ]);
       buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
 
-      return await ctx.reply('🔖 *Your Saved Bookmarks:*\nTap any post to open:', {
+      return await ctx.reply('🔖 *Your Bookmarked Posts:*\nTap a post to access:', {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard(buttons)
       });
     } catch (err) {
       console.error('Error loading saved posts:', err);
-      return await ctx.reply('⚠️ Failed to load saved posts.');
+      return await ctx.reply('⚠️ Failed to load saved bookmarks.');
     }
   };
 
-  bot.action('user_saved_posts', handleSavedPosts);
+  bot.action('user_menu_saved', handleSavedPosts);
 
-  // -------------------------------------------------------------
-  // User Actions: Earn Points & Regenerate Verify Link
-  // -------------------------------------------------------------
-  const handleEarnPoints = async (ctx) => {
-    try {
-      if (ctx.callbackQuery) await ctx.answerCbQuery('Generating verify task link...');
-      const userId = ctx.from.id;
-      const tokenObj = await createVerifyToken(env, userId);
-      const u = await getUser(env, userId);
-      const points = u?.points || 0;
+  const handleUserPoints = async (ctx) => {
+    const userId = ctx.from?.id;
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
+    const u = await getUser(env, userId);
+    const settings = await getSettings(env);
 
-      const text = `🪙 *Earn Points & Unlock Downloads*\n\n` +
-        `• *Your Current Balance:* \`${points} Points\` 🪙\n` +
-        `• *Reward Per Task:* \`+${tokenObj.reward_points} Points\`\n\n` +
-        `Complete the quick shortlink task below in your browser to instantly earn points:`;
-
-      const keyboard = Markup.inlineKeyboard([
-        [Markup.button.url(`🔗 Complete Task (+${tokenObj.reward_points} Pts)`, tokenObj.verify_url)],
-        [Markup.button.callback('🔄 Regenerate Task Link', 'user_earn_points')],
-        [Markup.button.callback('🎁 Invite Friends', 'user_menu_invite')],
-        [Markup.button.callback('🔙 Main Menu', 'main_menu')]
-      ]);
-
-      if (ctx.callbackQuery) {
-        try {
-          return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
-        } catch {
-          return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
-        }
-      } else {
-        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+    return await ctx.reply(
+      `🪙 *Your Points Balance:*\n\n` +
+      `• *Current Balance:* \`${u?.points || 0} Points\`\n` +
+      `• *Cost Per Download:* \`${settings.points_per_post_download || 1} Point(s)\`\n` +
+      `• *Referral Reward:* \`+${settings.referral_points || 10} Points\` per friend invited\n\n` +
+      `Earn more points by inviting friends or completing monetized shortener tasks!`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🎁 Invite Friends', 'user_menu_invite')],
+          [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+        ])
       }
-    } catch (err) {
-      console.error('Error in earn points:', err);
-      return await ctx.reply('⚠️ Failed to generate verification task link.');
-    }
+    );
   };
 
-  bot.action('user_earn_points', handleEarnPoints);
-
-  bot.action(/^regen_verify_(\d+)$/, async (ctx) => {
-    const postId = ctx.match[1];
-    await ctx.answerCbQuery('Generating fresh verify link...');
-    const userId = ctx.from.id;
-    const tokenObj = await createVerifyToken(env, userId, postId);
-
-    const text = `🔄 *Fresh Verification Link Generated!*\n\n` +
-      `Complete this task to earn \`+${tokenObj.reward_points} Points\` and unlock post #${postId}:`;
-
-    const keyboard = Markup.inlineKeyboard([
-      [Markup.button.url(`🔗 Complete Task (+${tokenObj.reward_points} Pts)`, tokenObj.verify_url)],
-      [Markup.button.callback('🔄 Regenerate Again', `regen_verify_${postId}`)],
-      [Markup.button.callback('🔙 Main Menu', 'main_menu')]
-    ]);
-
-    try {
-      return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
-    } catch {
-      return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
-    }
-  });
+  bot.action('user_menu_points', handleUserPoints);
 
   const handleInviteFriends = async (ctx) => {
-    try {
-      if (ctx.callbackQuery) await ctx.answerCbQuery();
-      const botInfo = await ctx.telegram.getMe();
-      const refLink = `https://t.me/${botInfo.username}?start=ref_${ctx.from.id}`;
-      const u = await getUser(env, ctx.from.id);
-      const points = u?.points || 0;
-      const refCount = u?.referral_count || 0;
-      const settings = await getSettings(env);
-      const rewardPts = settings.referral_points || 10;
+    const userId = ctx.from?.id;
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
+    const botInfo = await ctx.telegram.getMe();
+    const refLink = `https://t.me/${botInfo.username}?start=ref_${userId}`;
+    const settings = await getSettings(env);
 
-      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent('Join ' + botInfo.username + ' to access premium files, courses, and resources!')}`;
-
-      const text = `🎁 *Invite Friends & Earn Points*\n\n` +
-        `• *Your Current Balance:* \`${points} Points\` 🪙\n` +
-        `• *Friends Invited:* \`${refCount}\` 👥\n` +
-        `• *Reward Per Friend:* \`+${rewardPts} Points\` 🪙\n\n` +
-        `Share your personal referral link with friends:\n` +
-        `\`${refLink}\``;
-
-      const keyboard = Markup.inlineKeyboard([
-        [Markup.button.url('✈️ Share on Telegram', shareUrl)],
-        [Markup.button.callback('🔗 Earn Points via Shortlink', 'user_earn_points')],
-        [Markup.button.callback('🔙 Main Menu', 'main_menu')]
-      ]);
-
-      if (ctx.callbackQuery) {
-        try {
-          return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
-        } catch {
-          return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
-        }
-      } else {
-        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+    return await ctx.reply(
+      `🎁 *Invite Friends & Earn Points*\n\n` +
+      `Share your personal referral link with friends. Whenever a friend joins the bot, you will earn *+${settings.referral_points || 10} Points*! 🪙\n\n` +
+      `🔗 *Your Referral Link:*\n\`${refLink}\``,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.url('📲 Share to Telegram', `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent('Join xmi Hub for premium downloads & resources!')}`)],
+          [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+        ])
       }
-    } catch (err) {
-      console.error('Error in invite friends:', err);
-      return await ctx.reply('⚠️ Failed to load referral information.');
-    }
+    );
   };
 
   bot.action('user_menu_invite', handleInviteFriends);
@@ -846,7 +857,7 @@ export function createBot(env) {
   // -------------------------------------------------------------
   const handleStats = async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) {
+    if (!(await isAdminUser(env, userId))) {
       return await ctx.reply('⛔ Unauthorized. Admin access only.');
     }
 
@@ -912,7 +923,7 @@ export function createBot(env) {
 
   const handleAdminPosts = async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) {
+    if (!(await isAdminUser(env, userId))) {
       return await ctx.reply('⛔ Unauthorized. Admin access only.');
     }
 
@@ -966,7 +977,7 @@ export function createBot(env) {
   // -------------------------------------------------------------
   bot.action(/^admin_post_view_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     try {
@@ -978,6 +989,10 @@ export function createBot(env) {
 
       await ctx.answerCbQuery();
       const statusIcon = post.status === 'published' ? '🟢 Published' : post.status === 'scheduled' ? '🟣 Scheduled' : '🟡 Draft';
+      const protectLabel = post.protect_content ? '🔒 Protect: ON' : '🔓 Protect: OFF';
+      const timerLabel = (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined)
+        ? (post.auto_delete_minutes === 0 ? 'Disabled (0m)' : `${post.auto_delete_minutes}m`)
+        : 'Default';
 
       const keyboard = Markup.inlineKeyboard([
         [
@@ -987,6 +1002,10 @@ export function createBot(env) {
         [
           Markup.button.callback('🔗 Edit Link', `admin_edit_link_${post.id}`),
           Markup.button.callback('📁 Add Files/Folders', `admin_edit_files_${post.id}`)
+        ],
+        [
+          Markup.button.callback(protectLabel, `admin_post_protect_${post.id}`),
+          Markup.button.callback(`⏳ Timer: ${timerLabel}`, `admin_edit_timer_${post.id}`)
         ],
         [
           Markup.button.callback(
@@ -1011,6 +1030,8 @@ export function createBot(env) {
         `📌 *${escapeMarkdown(post.title)}*\n\n` +
         `• *Post ID:* \`#${post.id}\`\n` +
         `• *Status:* ${statusIcon}\n` +
+        `• *Content Protection:* ${post.protect_content ? '🔒 Enabled (No Forward/Save)' : '🔓 Disabled'}\n` +
+        `• *Auto-Delete Timer:* ⏳ ${timerLabel}\n` +
         (post.category ? `• *Category:* ${escapeMarkdown(post.category)}\n` : '') +
         (post.tags ? `• *Tags:* ${escapeMarkdown(post.tags)}\n` : '') +
         `• *Folders:* ${post.folders?.length || 0}\n` +
@@ -1029,20 +1050,24 @@ export function createBot(env) {
     }
   });
 
-  // Toggle Promote / Feature
-  bot.action(/^admin_post_promote_(\d+)$/, async (ctx) => {
+  // Toggle Content Protection
+  bot.action(/^admin_post_protect_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     try {
       const post = await getPostById(env, postId, userId, true);
-      const newPromoted = !post.is_promoted;
-      await togglePromotePost(env, postId, newPromoted);
-      await ctx.answerCbQuery(newPromoted ? 'Post Featured & Pinned!' : 'Post unfeatured');
+      const newProtect = !post.protect_content;
+      await updatePost(env, postId, { protect_content: newProtect });
+      await ctx.answerCbQuery(newProtect ? '🔒 Content Protection Enabled' : '🔓 Content Protection Disabled');
       
       const updated = await getPostById(env, postId, userId, true);
       const statusIcon = updated.status === 'published' ? '🟢 Published' : updated.status === 'scheduled' ? '🟣 Scheduled' : '🟡 Draft';
+      const protectLabel = updated.protect_content ? '🔒 Protect: ON' : '🔓 Protect: OFF';
+      const timerLabel = (updated.auto_delete_minutes !== null && updated.auto_delete_minutes !== undefined)
+        ? (updated.auto_delete_minutes === 0 ? 'Disabled (0m)' : `${updated.auto_delete_minutes}m`)
+        : 'Default';
 
       const keyboard = Markup.inlineKeyboard([
         [
@@ -1052,6 +1077,10 @@ export function createBot(env) {
         [
           Markup.button.callback('🔗 Edit Link', `admin_edit_link_${updated.id}`),
           Markup.button.callback('📁 Add Files/Folders', `admin_edit_files_${updated.id}`)
+        ],
+        [
+          Markup.button.callback(protectLabel, `admin_post_protect_${updated.id}`),
+          Markup.button.callback(`⏳ Timer: ${timerLabel}`, `admin_edit_timer_${updated.id}`)
         ],
         [
           Markup.button.callback(
@@ -1075,6 +1104,168 @@ export function createBot(env) {
         `📌 *${escapeMarkdown(updated.title)}*\n\n` +
         `• *Post ID:* \`#${updated.id}\`\n` +
         `• *Status:* ${statusIcon}\n` +
+        `• *Content Protection:* ${updated.protect_content ? '🔒 Enabled (No Forward/Save)' : '🔓 Disabled'}\n` +
+        `• *Auto-Delete Timer:* ⏳ ${timerLabel}\n` +
+        (updated.category ? `• *Category:* ${escapeMarkdown(updated.category)}\n` : '') +
+        (updated.tags ? `• *Tags:* ${escapeMarkdown(updated.tags)}\n` : '') +
+        `• *Folders:* ${updated.folders?.length || 0}\n` +
+        `• *Views:* ${updated.view_count || 0}\n` +
+        `• *Likes:* ${updated.like_count}\n` +
+        `• *Comments:* ${updated.comment_count}\n` +
+        (updated.direct_link ? `• *Direct Link:* ${escapeMarkdown(updated.direct_link)}\n` : ''),
+        {
+          parse_mode: 'Markdown',
+          ...keyboard
+        }
+      );
+    } catch (err) {
+      await ctx.answerCbQuery('Failed to update protection');
+    }
+  });
+
+  // Edit Auto Delete Timer Menu
+  bot.action(/^admin_edit_timer_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const postId = ctx.match[1];
+    await ctx.answerCbQuery();
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('⏱️ 5 Minutes', `admin_set_timer_${postId}_5`),
+        Markup.button.callback('⏱️ 15 Minutes', `admin_set_timer_${postId}_15`)
+      ],
+      [
+        Markup.button.callback('⏱️ 30 Minutes', `admin_set_timer_${postId}_30`),
+        Markup.button.callback('⏱️ 60 Minutes', `admin_set_timer_${postId}_60`)
+      ],
+      [
+        Markup.button.callback('⏱️ 2 Hours', `admin_set_timer_${postId}_120`),
+        Markup.button.callback('⏱️ 24 Hours', `admin_set_timer_${postId}_1440`)
+      ],
+      [
+        Markup.button.callback('🚫 Disable (Never Delete)', `admin_set_timer_${postId}_0`),
+        Markup.button.callback('🔄 Reset to Global Default', `admin_set_timer_${postId}_default`)
+      ],
+      [
+        Markup.button.callback('✏️ Type Custom Minutes', `admin_type_timer_${postId}`),
+        Markup.button.callback('🔙 Return to Post', `admin_post_view_${postId}`)
+      ]
+    ]);
+
+    return await ctx.reply(
+      `⏳ *Set Auto-Delete Timer for Post #${postId}*\n\n` +
+      `Choose how long files & links should remain in the user's chat before self-destructing:\n\n` +
+      `• *Presets:* Select any duration button below\n` +
+      `• *Disable:* Content stays permanently in chat\n` +
+      `• *Global Default:* Uses hub default setting (currently 30 min)\n` +
+      `• *Custom:* Type any exact minutes`,
+      {
+        parse_mode: 'Markdown',
+        ...keyboard
+      }
+    );
+  });
+
+  bot.action(/^admin_set_timer_(\d+)_(\w+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const postId = ctx.match[1];
+    const valStr = ctx.match[2];
+    const minutes = valStr === 'default' ? null : parseInt(valStr, 10);
+
+    await updatePost(env, postId, { auto_delete_minutes: minutes });
+    await ctx.answerCbQuery(`Timer set to: ${valStr === 'default' ? 'Global Default' : (minutes === 0 ? 'Disabled' : minutes + 'm')}`);
+
+    return await ctx.reply(
+      `✅ *Auto-Delete Timer Updated!*\n\n` +
+      `Post #${postId} timer is now: *${valStr === 'default' ? 'Global Default' : (minutes === 0 ? 'Disabled (Never Delete)' : minutes + ' Minutes')}*`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Return to Post', `admin_post_view_${postId}`)]])
+      }
+    );
+  });
+
+  bot.action(/^admin_type_timer_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const postId = ctx.match[1];
+    await setSession(env, userId, {
+      step: 'EDIT_AUTO_DELETE_TIMER',
+      editPostId: postId
+    });
+
+    await ctx.answerCbQuery();
+    return await ctx.reply(
+      `⏳ *Type Custom Timer Minutes:*\n\n` +
+      `Please reply with the number of minutes (e.g. \`45\`, \`180\`, or \`0\` to disable):`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `admin_post_view_${postId}`)]])
+      }
+    );
+  });
+
+  // Toggle Promote / Feature
+  bot.action(/^admin_post_promote_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const postId = ctx.match[1];
+    try {
+      const post = await getPostById(env, postId, userId, true);
+      const newPromoted = !post.is_promoted;
+      await togglePromotePost(env, postId, newPromoted);
+      await ctx.answerCbQuery(newPromoted ? 'Post Featured & Pinned!' : 'Post unfeatured');
+      
+      const updated = await getPostById(env, postId, userId, true);
+      const statusIcon = updated.status === 'published' ? '🟢 Published' : updated.status === 'scheduled' ? '🟣 Scheduled' : '🟡 Draft';
+      const protectLabel = updated.protect_content ? '🔒 Protect: ON' : '🔓 Protect: OFF';
+      const timerLabel = (updated.auto_delete_minutes !== null && updated.auto_delete_minutes !== undefined)
+        ? (updated.auto_delete_minutes === 0 ? 'Disabled (0m)' : `${updated.auto_delete_minutes}m`)
+        : 'Default';
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✏️ Edit Title', `admin_edit_title_${updated.id}`),
+          Markup.button.callback('🖼️ Edit Image', `admin_edit_img_${updated.id}`)
+        ],
+        [
+          Markup.button.callback('🔗 Edit Link', `admin_edit_link_${updated.id}`),
+          Markup.button.callback('📁 Add Files/Folders', `admin_edit_files_${updated.id}`)
+        ],
+        [
+          Markup.button.callback(protectLabel, `admin_post_protect_${updated.id}`),
+          Markup.button.callback(`⏳ Timer: ${timerLabel}`, `admin_edit_timer_${updated.id}`)
+        ],
+        [
+          Markup.button.callback(
+            updated.status === 'published' ? '📝 Unpublish to Draft' : '🚀 Publish Now',
+            `admin_post_toggle_${updated.id}`
+          ),
+          Markup.button.callback(
+            updated.is_promoted ? '⭐ Unfeature' : '⭐ Promote/Pin',
+            `admin_post_promote_${updated.id}`
+          )
+        ],
+        [
+          Markup.button.callback('🗑️ Delete Post', `admin_post_del_ask_${updated.id}`)
+        ],
+        [
+          Markup.button.callback('🔙 Back to Posts List', 'admin_post_list')
+        ]
+      ]);
+
+      return await ctx.reply(
+        `📌 *${escapeMarkdown(updated.title)}*\n\n` +
+        `• *Post ID:* \`#${updated.id}\`\n` +
+        `• *Status:* ${statusIcon}\n` +
+        `• *Content Protection:* ${updated.protect_content ? '🔒 Enabled (No Forward/Save)' : '🔓 Disabled'}\n` +
+        `• *Auto-Delete Timer:* ⏳ ${timerLabel}\n` +
         (updated.category ? `• *Category:* ${escapeMarkdown(updated.category)}\n` : '') +
         (updated.tags ? `• *Tags:* ${escapeMarkdown(updated.tags)}\n` : '') +
         `• *Folders:* ${updated.folders?.length || 0}\n` +
@@ -1095,7 +1286,7 @@ export function createBot(env) {
   // Toggle Publish / Draft
   bot.action(/^admin_post_toggle_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     try {
@@ -1112,7 +1303,7 @@ export function createBot(env) {
   // Delete Confirmation Dialog
   bot.action(/^admin_post_del_ask_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     try {
@@ -1141,7 +1332,7 @@ export function createBot(env) {
   // Delete Confirmed
   bot.action(/^admin_post_del_confirm_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     try {
@@ -1159,7 +1350,7 @@ export function createBot(env) {
   // -------------------------------------------------------------
   const handleSettingsMenu = async (ctx) => {
     const userId = ctx.from?.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     if (ctx.callbackQuery) await ctx.answerCbQuery();
 
@@ -1171,9 +1362,11 @@ export function createBot(env) {
     const bannerStatus = settings.banner_enabled ? '🟢 ON' : '🔴 OFF';
     const forceStatus = settings.force_join_enabled ? '🟢 ON' : '🔴 OFF';
 
-    const text = `⚙️ *Hub Settings & Monetization*\n\n` +
+    const text = `⚙️ *Hub Settings & Rules*\n\n` +
       `• 🎁 *Referrals & Points:* ${refStatus} (\`${settings.referral_points || 10} pts\`)\n` +
       `• 🔗 *Shortener Locker:* ${shortStatus} (Mode: \`${settings.shortener_mode}\`)\n` +
+      `• ⏳ *Global Auto-Delete:* \`${settings.auto_delete_minutes || 30} minutes\`\n` +
+      `• 🪙 *Points per Download:* \`${settings.points_per_post_download || 1} pt\`\n` +
       `• 🖼️ *Sponsor Banner:* ${bannerStatus}\n` +
       `• 📢 *Force Join Channels:* ${forceStatus} (\`${channels.length} channel(s)\`)\n\n` +
       `Tap any toggle button below:`;
@@ -1190,6 +1383,10 @@ export function createBot(env) {
       [
         Markup.button.callback('➕ Add Force Channel', 'admin_add_channel_btn'),
         Markup.button.callback('📋 View Channels', 'admin_view_channels_btn')
+      ],
+      [
+        Markup.button.callback('👥 Manage Admins', 'admin_menu_admins'),
+        Markup.button.callback('💾 Storage Meter', 'admin_menu_storage')
       ],
       [Markup.button.callback('🔙 Back to Main Menu', 'admin_main_menu')]
     ]);
@@ -1233,7 +1430,7 @@ export function createBot(env) {
 
   bot.action('admin_add_channel_btn', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     await setSession(env, userId, { step: 'AWAITING_FORCE_CHANNEL' });
     await ctx.answerCbQuery();
@@ -1283,11 +1480,156 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
+  // Admins Management Handlers
+  // -------------------------------------------------------------
+  const handleAdminsMenu = async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
+
+    const admins = await getAdmins(env);
+    let text = `👥 *Admins Management*\n\n` +
+      `All added admins have full management permissions (create/edit/delete posts, broadcast, monetization, and add other admins).\n\n` +
+      `*Current Admins (${admins.length}):*\n`;
+
+    admins.forEach((a, i) => {
+      const badge = a.is_primary ? '👑 Primary Owner' : '🛡️ Co-Admin';
+      const name = a.full_name || a.username || `User ${a.user_id}`;
+      text += `${i + 1}. *${escapeMarkdown(name)}* (\`${a.user_id}\`) — ${badge}\n`;
+    });
+
+    const buttons = [];
+    admins.filter(a => !a.is_primary).forEach(a => {
+      const name = a.full_name || a.username || `ID ${a.user_id}`;
+      buttons.push([Markup.button.callback(`🗑️ Remove Admin ${name}`, `admin_del_admin_${a.user_id}`)]);
+    });
+
+    buttons.push([
+      Markup.button.callback('➕ Add New Admin', 'admin_add_admin_ask'),
+      Markup.button.callback('🔙 Main Menu', 'admin_main_menu')
+    ]);
+
+    return await ctx.reply(text, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard(buttons)
+    });
+  };
+
+  bot.action('admin_menu_admins', handleAdminsMenu);
+
+  bot.action('admin_add_admin_ask', async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    await setSession(env, userId, { step: 'ADD_ADMIN_USER_ID' });
+    await ctx.answerCbQuery();
+
+    return await ctx.reply(
+      `👥 *Add New Admin*\n\n` +
+      `Please reply with the Telegram **User ID** of the person you want to make admin.\n` +
+      `You can also provide a name:\n` +
+      `• Format: \`<User ID> | <Full Name / Note>\`\n` +
+      `• Example: \`987654321 | Alex Partner\``,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', 'admin_menu_admins')]])
+      }
+    );
+  });
+
+  bot.action(/^admin_del_admin_(\d+)$/, async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const targetId = ctx.match[1];
+    try {
+      await deleteAdmin(env, targetId);
+      await ctx.answerCbQuery('Admin removed successfully');
+      return await handleAdminsMenu(ctx);
+    } catch (e) {
+      await ctx.answerCbQuery(e.message);
+      return await ctx.reply(`⚠️ ${e.message}`);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Supabase Live Storage Meter Handlers
+  // -------------------------------------------------------------
+  const handleStorageMenu = async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
+
+    try {
+      const stats = await getDatabaseStorageStats(env);
+
+      // Create a visual ASCII progress bar (10 blocks)
+      const filledBlocks = Math.min(10, Math.max(0, Math.round(stats.used_percentage / 10)));
+      const emptyBlocks = 10 - filledBlocks;
+      const bar = '🟩'.repeat(filledBlocks === 0 ? 1 : filledBlocks) + '⬜'.repeat(emptyBlocks);
+
+      const text = `💾 *Supabase Database Live Storage Meter*\n\n` +
+        `• *Tier:* \`${stats.tier_name}\`\n` +
+        `• *Database Limit:* \`${stats.free_tier_limit_mb} MB\` (Free Forever)\n` +
+        `• *Estimated Usage:* \`${stats.estimated_size_mb} MB\` (\`${stats.used_percentage}%\` used)\n` +
+        `• *Free Space:* \`${stats.free_percentage}%\` remaining\n` +
+        `• *Capacity Remaining:* \`~${stats.posts_capacity_remaining.toLocaleString()} more posts\` 🚀\n\n` +
+        `*Storage Bar:*\n${bar} \`${stats.used_percentage}%\`\n\n` +
+        `📊 *Database Record Breakdown:*\n` +
+        `• 📄 Posts: \`${stats.posts_count}\`\n` +
+        `• 📁 Folders: \`${stats.folders_count}\`\n` +
+        `• 📥 Files/Links: \`${stats.files_count}\`\n` +
+        `• 👥 Users: \`${stats.users_count}\`\n` +
+        `• 💬 Comments: \`${stats.comments_count}\`\n` +
+        `• ❤️ Likes: \`${stats.likes_count}\`\n` +
+        `• ⏳ Ephemeral Queue: \`${stats.ephemeral_count}\`\n\n` +
+        `*Why it uses very little space:*\n` +
+        `PostgreSQL stores only lightweight text/metadata (~0.85 KB/post). Large files are stored on Telegram CDN channels, keeping Supabase free forever!`;
+
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('🧹 Clean & Optimize Database', 'admin_db_optimize')],
+        [
+          Markup.button.callback('🔄 Refresh Storage', 'admin_menu_storage'),
+          Markup.button.callback('🔙 Main Menu', 'admin_main_menu')
+        ]
+      ]);
+
+      return await ctx.reply(text, {
+        parse_mode: 'Markdown',
+        ...keyboard
+      });
+    } catch (e) {
+      console.error('Storage stats error:', e);
+      return await ctx.reply(`⚠️ Failed to fetch storage stats: ${e.message}`);
+    }
+  };
+
+  bot.action('admin_menu_storage', handleStorageMenu);
+
+  bot.action('admin_db_optimize', async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    await ctx.answerCbQuery('Optimizing database...');
+    try {
+      const res = await optimizeDatabase(env);
+      await ctx.reply(`🧹 *${res.message}*`, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Return to Storage Meter', 'admin_menu_storage')]])
+      });
+    } catch (e) {
+      await ctx.reply(`⚠️ Optimization failed: ${e.message}`);
+    }
+  });
+
+  // -------------------------------------------------------------
   // Bot-side Post Inline Editors
   // -------------------------------------------------------------
   bot.action(/^admin_edit_title_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     await setSession(env, userId, {
@@ -1309,7 +1651,7 @@ export function createBot(env) {
 
   bot.action(/^admin_edit_img_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     await setSession(env, userId, {
@@ -1332,7 +1674,7 @@ export function createBot(env) {
 
   bot.action(/^admin_edit_img_remove_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     await updatePost(env, postId, { preview_image: null });
@@ -1347,7 +1689,7 @@ export function createBot(env) {
 
   bot.action(/^admin_edit_link_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     await setSession(env, userId, {
@@ -1370,7 +1712,7 @@ export function createBot(env) {
 
   bot.action(/^admin_edit_link_remove_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     await updatePost(env, postId, { direct_link: null, direct_link_title: null });
@@ -1385,7 +1727,7 @@ export function createBot(env) {
 
   bot.action(/^admin_edit_files_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
     const post = await getPostById(env, postId, userId, true);
@@ -1407,7 +1749,7 @@ export function createBot(env) {
   // -------------------------------------------------------------
   const startBroadcastFlow = async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) {
+    if (!(await isAdminUser(env, userId))) {
       return await ctx.reply('⛔ Unauthorized. Admin access only.');
     }
 
@@ -1438,7 +1780,7 @@ export function createBot(env) {
 
   bot.action('broadcast_skip_photo', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session || session.step !== 'BROADCAST_PHOTO') return await ctx.answerCbQuery('Expired');
@@ -1463,7 +1805,7 @@ export function createBot(env) {
 
   bot.action('broadcast_skip_button', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session || session.step !== 'BROADCAST_BUTTON') return await ctx.answerCbQuery('Expired');
@@ -1496,7 +1838,7 @@ export function createBot(env) {
 
   bot.action('broadcast_send_confirm', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session || session.step !== 'BROADCAST_CONFIRM') return await ctx.answerCbQuery('Session expired');
@@ -1579,7 +1921,7 @@ export function createBot(env) {
   // -------------------------------------------------------------
   const startAddPostFlow = async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) {
+    if (!(await isAdminUser(env, userId))) {
       return await ctx.reply('⛔ Unauthorized. Admin access only.');
     }
 
@@ -1616,7 +1958,7 @@ export function createBot(env) {
 
   bot.action('step_skip_image', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session || session.step !== 'AWAITING_IMAGE') {
@@ -1656,7 +1998,7 @@ export function createBot(env) {
 
   bot.action('mode_direct_link', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session) return await ctx.answerCbQuery('Session expired');
@@ -1684,7 +2026,7 @@ export function createBot(env) {
 
   bot.action('mode_folders', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session) return await ctx.answerCbQuery('Session expired');
@@ -1735,7 +2077,7 @@ export function createBot(env) {
 
   const handleFinishFolders = async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session || !session.title) {
@@ -1806,7 +2148,7 @@ export function createBot(env) {
   // -------------------------------------------------------------
   bot.action('action_draft', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session || !session.title) {
@@ -1859,7 +2201,7 @@ export function createBot(env) {
 
   bot.action('action_publish', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session || !session.title) {
@@ -1917,7 +2259,7 @@ export function createBot(env) {
 
   bot.action('action_schedule', async (ctx) => {
     const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    if (!(await isAdminUser(env, userId))) return;
 
     const session = await getSession(env, userId);
     if (!session || !session.title) {
@@ -1968,6 +2310,58 @@ export function createBot(env) {
     // 2. Multi-step session handling
     const session = await getSession(env, userId);
     if (!session || !session.step) return;
+
+    // STEP: EDIT_AUTO_DELETE_TIMER
+    if (session.step === 'EDIT_AUTO_DELETE_TIMER') {
+      if (!text) return await ctx.reply('⚠️ Please enter a number in minutes (e.g. 15, 30, 60, or 0 to disable).');
+      const minutes = parseInt(text.trim(), 10);
+      if (isNaN(minutes) || minutes < 0) {
+        return await ctx.reply('⚠️ Please enter a valid non-negative number of minutes.');
+      }
+
+      const postId = session.editPostId;
+      await updatePost(env, postId, { auto_delete_minutes: minutes });
+      await clearSession(env, userId);
+
+      return await ctx.reply(
+        `✅ *Auto-Delete Timer Updated!*\n\nPost #${postId} timer is set to: *${minutes === 0 ? 'Disabled (Never Delete)' : minutes + ' Minutes'}*`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Return to Post View', `admin_post_view_${postId}`)]])
+        }
+      );
+    }
+
+    // STEP: ADD_ADMIN_USER_ID
+    if (session.step === 'ADD_ADMIN_USER_ID') {
+      if (!text) return await ctx.reply('⚠️ Please send the Telegram User ID of the new admin.');
+      const parts = text.split('|').map(s => s.trim());
+      const newAdminId = parseInt(parts[0], 10);
+      const adminName = parts[1] || '';
+
+      if (isNaN(newAdminId) || newAdminId <= 0) {
+        return await ctx.reply('⚠️ Invalid Telegram User ID. Please enter a positive numerical ID.');
+      }
+
+      try {
+        await addAdmin(env, {
+          user_id: newAdminId,
+          full_name: adminName,
+          added_by: userId
+        });
+        await clearSession(env, userId);
+
+        return await ctx.reply(
+          `✅ *Admin Added Successfully!*\n\n• *User ID:* \`${newAdminId}\`\n• *Name/Note:* ${escapeMarkdown(adminName || 'Co-Admin')}\n\nThis user now has full admin privileges in both the Bot and Web App.`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([[Markup.button.callback('👥 Return to Admins List', 'admin_menu_admins')]])
+          }
+        );
+      } catch (e) {
+        return await ctx.reply(`⚠️ Failed to add admin: ${e.message}`);
+      }
+    }
 
     // STEP: AWAITING_FORCE_CHANNEL
     if (session.step === 'AWAITING_FORCE_CHANNEL') {

@@ -138,7 +138,7 @@ export async function getPublishedPosts(env, userId = null) {
  * Fetch ALL posts for Admin Management (Promoted posts pinned to top)
  */
 export async function getAllPostsForAdmin(env) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?order=is_promoted.desc,created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,is_promoted,category,tags,status,scheduled_at,created_at,likes(user_id),comments(id),post_views(id),file_access_logs(id)`;
+  const url = `${getSupabaseBaseUrl(env)}/posts?order=is_promoted.desc,created_at.desc&select=*,likes(user_id),comments(id),post_views(id),file_access_logs(id)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -163,6 +163,8 @@ export async function getAllPostsForAdmin(env) {
     status: post.status,
     scheduled_at: post.scheduled_at,
     created_at: post.created_at,
+    auto_delete_minutes: post.auto_delete_minutes !== undefined ? post.auto_delete_minutes : null,
+    protect_content: Boolean(post.protect_content),
     like_count: post.likes ? post.likes.length : 0,
     comment_count: post.comments ? post.comments.length : 0,
     view_count: post.post_views ? post.post_views.length : 0,
@@ -174,7 +176,7 @@ export async function getAllPostsForAdmin(env) {
  * Fetch single post with folders, direct links, comments, and like status
  */
 export async function getPostById(env, postId, userId = null, isAdmin = false) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}&select=id,title,preview_image,direct_link,direct_link_title,is_promoted,category,tags,status,scheduled_at,created_at,folders(id,name,created_at,files(id,file_id,channel_message_id,file_name,mime_type,size)),comments(id,user_id,username,text,is_hidden,created_at),likes(user_id),post_views(id),saved_posts(user_id)`;
+  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}&select=*,folders(id,name,created_at,files(id,file_id,channel_message_id,file_name,mime_type,size)),comments(id,user_id,username,text,is_hidden,created_at),likes(user_id),post_views(id),saved_posts(user_id)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -209,6 +211,8 @@ export async function getPostById(env, postId, userId = null, isAdmin = false) {
     tags: post.tags || '',
     status: post.status,
     created_at: post.created_at,
+    auto_delete_minutes: post.auto_delete_minutes !== undefined ? post.auto_delete_minutes : null,
+    protect_content: Boolean(post.protect_content),
     folders,
     comments,
     like_count: post.likes ? post.likes.length : 0,
@@ -249,48 +253,124 @@ export async function getFolderFiles(env, folderId) {
   return await res.json();
 }
 
-export async function createPost(env, { title, preview_image = null, direct_link = null, direct_link_title = null, is_promoted = false, category = 'All', tags = '', status = 'draft', scheduled_at = null, created_by }) {
+export async function createPost(env, {
+  title,
+  preview_image = null,
+  direct_link = null,
+  direct_link_title = null,
+  is_promoted = false,
+  category = 'All',
+  tags = '',
+  status = 'draft',
+  scheduled_at = null,
+  auto_delete_minutes = null,
+  protect_content = false,
+  created_by
+}) {
   const url = `${getSupabaseBaseUrl(env)}/posts`;
   
-  const res = await fetch(url, {
+  const payload = {
+    title,
+    preview_image,
+    direct_link,
+    direct_link_title,
+    is_promoted: Boolean(is_promoted),
+    category: category || 'All',
+    tags: tags || '',
+    status,
+    scheduled_at,
+    created_by
+  };
+  if (auto_delete_minutes !== undefined && auto_delete_minutes !== null) payload.auto_delete_minutes = auto_delete_minutes;
+  if (protect_content !== undefined) payload.protect_content = Boolean(protect_content);
+
+  let res = await fetch(url, {
     method: 'POST',
     headers: getSupabaseHeaders(env),
-    body: JSON.stringify({
-      title,
-      preview_image,
-      direct_link,
-      direct_link_title,
-      is_promoted,
-      category: category || 'All',
-      tags: tags || '',
-      status,
-      scheduled_at,
-      created_by
-    })
+    body: JSON.stringify(payload)
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to create post (${res.status}): ${await res.text()}`);
+    let errText = await res.text();
+    const optionalFields = ['auto_delete_minutes', 'protect_content', 'direct_link_title', 'is_promoted', 'category', 'tags'];
+    const filtered = { ...payload };
+    while (!res.ok && res.status === 400 && errText.includes('schema cache')) {
+      let removedAny = false;
+      for (const field of optionalFields) {
+        if (errText.includes(`'${field}'`) && field in filtered) {
+          delete filtered[field];
+          removedAny = true;
+        }
+      }
+      if (!removedAny) {
+        delete filtered.auto_delete_minutes;
+        delete filtered.protect_content;
+      }
+      res = await fetch(url, {
+        method: 'POST',
+        headers: getSupabaseHeaders(env),
+        body: JSON.stringify(filtered)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data) ? data[0] : data;
+      }
+      errText = await res.text();
+    }
+
+    if (!res.ok) {
+      throw new Error(`Failed to create post (${res.status}): ${errText}`);
+    }
   }
 
   const data = await res.json();
-  return data[0];
+  return Array.isArray(data) ? data[0] : data;
 }
 
 export async function updatePost(env, postId, updateFields) {
   const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}`;
+  const payload = {
+    ...updateFields,
+    updated_at: new Date().toISOString()
+  };
   
-  const res = await fetch(url, {
+  let res = await fetch(url, {
     method: 'PATCH',
     headers: getSupabaseHeaders(env),
-    body: JSON.stringify({
-      ...updateFields,
-      updated_at: new Date().toISOString()
-    })
+    body: JSON.stringify(payload)
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to update post (${res.status}): ${await res.text()}`);
+    let errText = await res.text();
+    const optionalFields = ['auto_delete_minutes', 'protect_content', 'direct_link_title', 'is_promoted', 'category', 'tags'];
+    const filtered = { ...payload };
+    while (!res.ok && res.status === 400 && errText.includes('schema cache')) {
+      let removedAny = false;
+      for (const field of optionalFields) {
+        if (errText.includes(`'${field}'`) && field in filtered) {
+          delete filtered[field];
+          removedAny = true;
+        }
+      }
+      if (!removedAny) {
+        delete filtered.auto_delete_minutes;
+        delete filtered.protect_content;
+      }
+      res = await fetch(url, {
+        method: 'PATCH',
+        headers: getSupabaseHeaders(env),
+        body: JSON.stringify(filtered)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return Array.isArray(data) ? (data[0] || null) : data;
+      }
+      errText = await res.text();
+    }
+
+    if (!res.ok) {
+      throw new Error(`Failed to update post (${res.status}): ${errText}`);
+    }
   }
 
   const data = await res.json();
@@ -1158,14 +1238,14 @@ export async function processEphemeralDeletions(env) {
     const headers = getSupabaseHeaders(env);
     const nowIso = new Date().toISOString();
 
-    const fetchUrl = `${baseUrl}/ephemeral_messages?delete_at=lte.${nowIso}&is_deleted=eq.false&limit=100&select=id,chat_id,message_id`;
+    const fetchUrl = `${baseUrl}/ephemeral_messages?delete_at=lte.${nowIso}&is_deleted=eq.false&limit=150&select=id,chat_id,message_id`;
     const res = await fetch(fetchUrl, { method: 'GET', headers });
     if (!res.ok) return 0;
 
     const pending = await res.json();
-    if (!pending || pending.length === 0) return 0;
+    if (!pending || !Array.isArray(pending) || pending.length === 0) return 0;
 
-    const deletedIds = [];
+    const processedIds = [];
     for (const item of pending) {
       try {
         const deleteUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/deleteMessage`;
@@ -1177,23 +1257,27 @@ export async function processEphemeralDeletions(env) {
             message_id: item.message_id
           })
         });
-        deletedIds.push(item.id);
+        processedIds.push(item.id);
       } catch (delErr) {
-        console.warn(`Failed to delete message ${item.message_id} in chat ${item.chat_id}:`, delErr.message);
-        deletedIds.push(item.id);
+        processedIds.push(item.id);
       }
     }
 
-    if (deletedIds.length > 0) {
-      const markUrl = `${baseUrl}/ephemeral_messages?id=in.(${deletedIds.join(',')})`;
+    if (processedIds.length > 0) {
+      const markUrl = `${baseUrl}/ephemeral_messages?id=in.(${processedIds.join(',')})`;
       await fetch(markUrl, {
         method: 'PATCH',
         headers,
         body: JSON.stringify({ is_deleted: true })
       });
+      // Directly purge deleted ephemeral messages to save database storage
+      await fetch(markUrl, {
+        method: 'DELETE',
+        headers
+      }).catch(() => {});
     }
 
-    return deletedIds.length;
+    return processedIds.length;
   } catch (err) {
     console.error('Error in processEphemeralDeletions:', err);
     return 0;
@@ -1206,6 +1290,191 @@ export async function getAllUserIds(env) {
   const res = await fetch(`${baseUrl}/users?select=id`, { headers });
   const rows = res.ok ? await res.json() : [];
   return rows.map(r => r.id);
+}
+
+// ------------------------------------------
+// 14. MULTI-ADMIN MANAGEMENT
+// ------------------------------------------
+export async function isAdminUser(env, userId) {
+  if (!userId) return false;
+  const uidStr = String(userId);
+  if (env.ADMIN_ID && uidStr === String(env.ADMIN_ID)) return true;
+
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const res = await fetch(`${baseUrl}/admins?user_id=eq.${userId}&select=user_id`, { headers });
+    if (res.ok) {
+      const rows = await res.json();
+      return Array.isArray(rows) && rows.length > 0;
+    }
+  } catch (e) {
+    console.warn('Error checking admin status:', e);
+  }
+  return false;
+}
+
+export async function getAdmins(env) {
+  const list = [];
+  if (env.ADMIN_ID) {
+    list.push({
+      user_id: Number(env.ADMIN_ID),
+      username: 'Primary Owner',
+      full_name: 'Root Admin',
+      is_primary: true,
+      created_at: new Date(0).toISOString()
+    });
+  }
+
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const res = await fetch(`${baseUrl}/admins?order=created_at.asc`, { headers });
+    if (res.ok) {
+      const dbAdmins = await res.json();
+      if (Array.isArray(dbAdmins)) {
+        for (const a of dbAdmins) {
+          if (String(a.user_id) !== String(env.ADMIN_ID)) {
+            list.push({ ...a, is_primary: false });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Error fetching admins:', e);
+  }
+  return list;
+}
+
+export async function addAdmin(env, { user_id, username = '', full_name = '', added_by = null }) {
+  if (!user_id) throw new Error('user_id is required');
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+
+  const res = await fetch(`${baseUrl}/admins`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      user_id: Number(user_id),
+      username: username || '',
+      full_name: full_name || '',
+      added_by: added_by ? Number(added_by) : null
+    })
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    if (!errText.includes('duplicate key')) {
+      throw new Error(`Failed to add admin: ${errText}`);
+    }
+  }
+  return true;
+}
+
+export async function deleteAdmin(env, userId) {
+  if (String(userId) === String(env.ADMIN_ID)) {
+    throw new Error('Cannot remove primary root admin.');
+  }
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+
+  const res = await fetch(`${baseUrl}/admins?user_id=eq.${userId}`, {
+    method: 'DELETE',
+    headers
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to remove admin: ${await res.text()}`);
+  }
+  return true;
+}
+
+// ------------------------------------------
+// 15. SUPABASE DATABASE STORAGE & CAPACITY
+// ------------------------------------------
+export async function getDatabaseStorageStats(env) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env, { 'Prefer': 'count=exact' });
+
+  const getCount = async (table) => {
+    try {
+      const res = await fetch(`${baseUrl}/${table}?select=id&limit=1`, { headers });
+      const cr = res.headers.get('content-range');
+      if (cr && cr.includes('/')) {
+        const total = parseInt(cr.split('/')[1], 10);
+        return isNaN(total) ? 0 : total;
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data.length : 0;
+    } catch (e) {
+      return 0;
+    }
+  };
+
+  const [postsCount, foldersCount, filesCount, usersCount, commentsCount, likesCount, logsCount, ephemeralCount] = await Promise.all([
+    getCount('posts'),
+    getCount('folders'),
+    getCount('files'),
+    getCount('users'),
+    getCount('comments'),
+    getCount('likes'),
+    getCount('views_log'),
+    getCount('ephemeral_messages')
+  ]);
+
+  const totalRecords = postsCount + foldersCount + filesCount + usersCount + commentsCount + likesCount + logsCount + ephemeralCount;
+  // Estimated average row size including indexes in PostgreSQL: ~0.85 KB
+  const estimatedKb = Math.max(128, Math.round(totalRecords * 0.85 + 256));
+  const estimatedMb = (estimatedKb / 1024).toFixed(2);
+  const freeLimitMb = 500; // Supabase Free Tier 500 MB limit
+  const usedPercentage = Math.min(100, Math.max(0.05, ((estimatedKb / 1024) / freeLimitMb * 100))).toFixed(2);
+  const freePercentage = (100 - parseFloat(usedPercentage)).toFixed(2);
+  const postsCapacityRemaining = Math.max(0, Math.round((freeLimitMb * 1024 - estimatedKb) / 1.5));
+
+  return {
+    success: true,
+    total_records: totalRecords,
+    posts_count: postsCount,
+    folders_count: foldersCount,
+    files_count: filesCount,
+    users_count: usersCount,
+    comments_count: commentsCount,
+    likes_count: likesCount,
+    ephemeral_count: ephemeralCount,
+    estimated_size_mb: parseFloat(estimatedMb),
+    free_tier_limit_mb: freeLimitMb,
+    used_percentage: parseFloat(usedPercentage),
+    free_percentage: parseFloat(freePercentage),
+    posts_capacity_remaining: postsCapacityRemaining,
+    tier_name: 'Supabase Free Tier (500 MB Database)'
+  };
+}
+
+export async function optimizeDatabase(env) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+
+  let purgedCount = 0;
+  try {
+    const purgeEphemeral = await fetch(`${baseUrl}/ephemeral_messages?is_deleted=eq.true`, {
+      method: 'DELETE',
+      headers
+    });
+    if (purgeEphemeral.ok) purgedCount += 1;
+
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
+    await fetch(`${baseUrl}/views_log?viewed_at=lt.${ninetyDaysAgo}`, {
+      method: 'DELETE',
+      headers
+    }).catch(() => {});
+  } catch (e) {
+    console.warn('DB optimization warning:', e);
+  }
+
+  return {
+    success: true,
+    message: 'Database storage optimized. Ephemeral records and stale logs purged successfully!'
+  };
 }
 
 

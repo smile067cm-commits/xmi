@@ -27,7 +27,14 @@ import {
   verifyTokenAndGrantPass,
   checkAndDeductPostAccess,
   getAllUserIds,
-  getUser
+  getUser,
+  isAdminUser,
+  getAdmins,
+  addAdmin,
+  deleteAdmin,
+  getDatabaseStorageStats,
+  optimizeDatabase,
+  processEphemeralDeletions
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
@@ -142,11 +149,14 @@ export function createRouter() {
   // -------------------------------------------------------------
   router.get('/api/settings', async (request, env) => {
     try {
+      // Proactively clean expired ephemeral messages in background
+      processEphemeralDeletions(env).catch(() => {});
+
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
       const settings = await getSettings(env);
       
-      const isAdmin = Boolean(userId && env.ADMIN_ID && String(userId) === String(env.ADMIN_ID));
+      const isAdmin = await isAdminUser(env, userId);
 
       let userData = null;
       if (userId) {
@@ -180,7 +190,7 @@ export function createRouter() {
       const body = await request.json();
       const { user_id, settings } = body || {};
 
-      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+      if (!user_id || !(await isAdminUser(env, user_id))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -201,6 +211,117 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
+  // Multi-Admin Management (Admin Only)
+  // -------------------------------------------------------------
+  router.get('/api/admin/admins', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || !(await isAdminUser(env, userId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const admins = await getAdmins(env);
+      return jsonResponse({ success: true, admins });
+    } catch (err) {
+      console.error('API /api/admin/admins error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  router.post('/api/admin/admins', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const body = await request.json().catch(() => ({}));
+      const requesterId = queryUserId || body.added_by || body.requester_id || body.admin_id;
+      const newAdminId = body.new_admin_id || body.target_admin_id || body.user_id;
+
+      if (!requesterId || !(await isAdminUser(env, requesterId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      if (!newAdminId) {
+        return errorResponse('Telegram User ID is required', 400);
+      }
+
+      await addAdmin(env, {
+        user_id: newAdminId,
+        username: body.username || '',
+        full_name: body.full_name || '',
+        added_by: requesterId
+      });
+
+      const admins = await getAdmins(env);
+      return jsonResponse({ success: true, message: 'Admin added successfully', admins });
+    } catch (err) {
+      console.error('API add admin error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  router.delete('/api/admin/admins/:id', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || !(await isAdminUser(env, userId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      await deleteAdmin(env, id);
+      const admins = await getAdmins(env);
+      return jsonResponse({ success: true, message: 'Admin removed successfully', admins });
+    } catch (err) {
+      console.error('API delete admin error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Supabase Database Storage Stats & Optimization (Admin Only)
+  // -------------------------------------------------------------
+  router.get('/api/admin/database/stats', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || !(await isAdminUser(env, userId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const stats = await getDatabaseStorageStats(env);
+      return jsonResponse(stats);
+    } catch (err) {
+      console.error('API /api/admin/database/stats error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  router.post('/api/admin/database/optimize', async (request, env) => {
+    try {
+      let user_id = new URL(request.url).searchParams.get('user_id');
+      try {
+        const body = await request.json();
+        if (body?.user_id) user_id = body.user_id;
+      } catch (e) {}
+
+      if (!user_id || !(await isAdminUser(env, user_id))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const optResult = await optimizeDatabase(env);
+      const freshStats = await getDatabaseStorageStats(env);
+      return jsonResponse({ ...optResult, stats: freshStats });
+    } catch (err) {
+      console.error('API /api/admin/database/optimize error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
   // Force Join Channels Endpoints (Admin Only)
   // -------------------------------------------------------------
   router.get('/api/admin/force-channels', async (request, env) => {
@@ -208,7 +329,7 @@ export function createRouter() {
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
 
-      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+      if (!userId || !(await isAdminUser(env, userId))) {
         return errorResponse('Unauthorized admin access', 403);
       }
 
@@ -225,7 +346,7 @@ export function createRouter() {
       const body = await request.json();
       const { user_id, channel_id, channel_title, invite_link } = body || {};
 
-      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+      if (!user_id || !(await isAdminUser(env, user_id))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -247,7 +368,7 @@ export function createRouter() {
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
 
-      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+      if (!userId || !(await isAdminUser(env, userId))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -267,7 +388,7 @@ export function createRouter() {
       const body = await request.json();
       const { user_id, message, photo_url, button_text, button_url } = body || {};
 
-      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+      if (!user_id || !(await isAdminUser(env, user_id))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -386,7 +507,7 @@ export function createRouter() {
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
 
-      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+      if (!userId || !(await isAdminUser(env, userId))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -404,7 +525,7 @@ export function createRouter() {
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
 
-      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+      if (!userId || !(await isAdminUser(env, userId))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -431,7 +552,7 @@ export function createRouter() {
       const body = await request.json();
       const { user_id, title, name, shortener_url, api_url, api_key, bot_verify_link, reward_points, enabled } = body || {};
 
-      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+      if (!user_id || !(await isAdminUser(env, user_id))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -465,7 +586,7 @@ export function createRouter() {
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
 
-      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+      if (!userId || !(await isAdminUser(env, userId))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -694,6 +815,7 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
+  // -------------------------------------------------------------
   // GET /api/admin/posts - All posts for Admin (Draft, Scheduled, Published)
   // -------------------------------------------------------------
   router.get('/api/admin/posts', async (request, env) => {
@@ -701,7 +823,7 @@ export function createRouter() {
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
 
-      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+      if (!userId || !(await isAdminUser(env, userId))) {
         return errorResponse('Unauthorized admin access', 403);
       }
 
@@ -721,7 +843,7 @@ export function createRouter() {
       const { id } = request.params;
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
-      const isAdmin = Boolean(userId && String(userId) === String(env.ADMIN_ID));
+      const isAdmin = await isAdminUser(env, userId);
 
       const post = await getPostById(env, id, userId, isAdmin);
       if (!post) {
@@ -795,7 +917,7 @@ export function createRouter() {
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
 
-      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+      if (!userId || !(await isAdminUser(env, userId))) {
         return errorResponse('Unauthorized admin access', 403);
       }
 
@@ -816,7 +938,7 @@ export function createRouter() {
       const body = await request.json();
       const { user_id, is_promoted } = body || {};
 
-      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+      if (!user_id || !(await isAdminUser(env, user_id))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -837,7 +959,7 @@ export function createRouter() {
       const body = await request.json();
       const { user_id, status } = body || {};
 
-      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+      if (!user_id || !(await isAdminUser(env, user_id))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -867,7 +989,7 @@ export function createRouter() {
         } catch (e) {}
       }
 
-      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+      if (!userId || !(await isAdminUser(env, userId))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -896,13 +1018,15 @@ export function createRouter() {
         tags,
         status,
         scheduled_at,
-        is_promoted
+        is_promoted,
+        auto_delete_minutes,
+        protect_content
       } = body || {};
 
       const url = new URL(request.url);
       const actualUserId = user_id || url.searchParams.get('user_id');
 
-      if (!actualUserId || String(actualUserId) !== String(env.ADMIN_ID)) {
+      if (!actualUserId || !(await isAdminUser(env, actualUserId))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
@@ -916,6 +1040,10 @@ export function createRouter() {
       if (status !== undefined) updatePayload.status = status;
       if (scheduled_at !== undefined) updatePayload.scheduled_at = scheduled_at ? scheduled_at : null;
       if (is_promoted !== undefined) updatePayload.is_promoted = Boolean(is_promoted);
+      if (auto_delete_minutes !== undefined) {
+        updatePayload.auto_delete_minutes = (auto_delete_minutes !== null && auto_delete_minutes !== '' && !isNaN(auto_delete_minutes)) ? Number(auto_delete_minutes) : null;
+      }
+      if (protect_content !== undefined) updatePayload.protect_content = Boolean(protect_content);
 
       const updated = await updatePost(env, id, updatePayload);
       return jsonResponse({ success: true, post: updated });
@@ -933,7 +1061,7 @@ export function createRouter() {
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
 
-      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+      if (!userId || !(await isAdminUser(env, userId))) {
         return errorResponse('Unauthorized admin access', 403);
       }
 
@@ -979,7 +1107,7 @@ export function createRouter() {
       const body = await request.json();
       const { comment_id, user_id, action } = body || {};
 
-      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+      if (!user_id || !(await isAdminUser(env, user_id))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 

@@ -42,12 +42,28 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS points BIGINT NOT NULL DEFAULT
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referred_by BIGINT;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS referral_count INTEGER NOT NULL DEFAULT 0;
 
--- Schema upgrades for existing posts table
+-- Schema upgrades for existing posts table (Per-post Auto Delete & Content Protection)
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS direct_link TEXT;
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS direct_link_title TEXT;
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS is_promoted BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'All';
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS tags TEXT;
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS auto_delete_minutes INTEGER;
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS protect_content BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ADMINS TABLE (Multi-Admin Management)
+CREATE TABLE IF NOT EXISTS public.admins (
+    user_id BIGINT PRIMARY KEY,
+    username TEXT,
+    full_name TEXT,
+    added_by BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admins_user_id ON public.admins(user_id);
+ALTER TABLE public.admins ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow service_role full access to admins" ON public.admins;
+CREATE POLICY "Allow service_role full access to admins" ON public.admins FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 CREATE INDEX IF NOT EXISTS idx_posts_status ON public.posts(status);
 CREATE INDEX IF NOT EXISTS idx_posts_is_promoted ON public.posts(is_promoted DESC);
