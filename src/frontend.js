@@ -34,6 +34,7 @@ export function getAppHtml(env) {
       --primary-glow: rgba(56, 189, 248, 0.25);
       --accent-heart: #f43f5e;
       --accent-admin: #fbbf24;
+      --accent-promoted: #f59e0b;
       --accent-telegram: #229ed9;
       --border-radius: 16px;
       --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -231,7 +232,7 @@ export function getAppHtml(env) {
       border-color: var(--primary);
     }
 
-    /* Search & Filter Bar */
+    /* Controls Bar */
     .controls-bar {
       display: flex;
       flex-direction: column;
@@ -306,6 +307,12 @@ export function getAppHtml(env) {
       height: 100%;
       transition: var(--transition);
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+      position: relative;
+    }
+
+    .post-card.is-promoted {
+      border: 1px solid rgba(245, 158, 11, 0.5);
+      box-shadow: 0 8px 30px rgba(245, 158, 11, 0.2);
     }
 
     .post-card:hover {
@@ -355,17 +362,33 @@ export function getAppHtml(env) {
       z-index: 2;
     }
 
-    .post-status-badge {
+    .post-badges-top {
       position: absolute;
       top: 10px;
       left: 10px;
+      right: 10px;
       z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      pointer-events: none;
+    }
+
+    .post-status-badge {
       padding: 4px 10px;
       border-radius: 8px;
       font-size: 0.72rem;
       font-weight: 700;
       text-transform: uppercase;
       backdrop-filter: blur(8px);
+    }
+
+    .status-promoted {
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.9), rgba(217, 119, 6, 0.9));
+      color: #0f172a;
+      font-weight: 800;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
     }
 
     .status-published {
@@ -404,15 +427,16 @@ export function getAppHtml(env) {
     .post-meta {
       font-size: 0.78rem;
       color: var(--text-muted);
-      margin-bottom: 14px;
+      margin-bottom: 12px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
 
-    /* Admin Actions Row */
+    /* Admin Action Toolbar on Cards */
     .admin-card-actions {
       display: flex;
+      flex-wrap: wrap;
       gap: 6px;
       margin-bottom: 12px;
       padding-bottom: 10px;
@@ -433,6 +457,11 @@ export function getAppHtml(env) {
 
     .admin-btn:hover {
       background: rgba(255, 255, 255, 0.18);
+    }
+
+    .admin-btn-promote {
+      color: var(--accent-admin);
+      border-color: rgba(251, 191, 36, 0.3);
     }
 
     .admin-btn-delete {
@@ -536,7 +565,7 @@ export function getAppHtml(env) {
       color: #04101e;
     }
 
-    /* Modal / Drawer for Comments & Details */
+    /* Modal / Drawer for Comments & Analytics */
     .modal-overlay {
       position: fixed;
       inset: 0;
@@ -567,7 +596,7 @@ export function getAppHtml(env) {
     .modal-content {
       background: #1e293b;
       width: 100%;
-      max-width: 600px;
+      max-width: 640px;
       max-height: 85vh;
       border-top-left-radius: 20px;
       border-top-right-radius: 20px;
@@ -710,7 +739,7 @@ export function getAppHtml(env) {
       background: rgba(255, 255, 255, 0.06);
       border: 1px solid var(--card-border);
       color: var(--text-muted);
-      padding: 2px 8px;
+      padding: 3px 8px;
       border-radius: 6px;
       font-size: 0.72rem;
       font-weight: 600;
@@ -720,6 +749,77 @@ export function getAppHtml(env) {
     .comment-mod-btn:hover {
       color: white;
       background: rgba(255, 255, 255, 0.15);
+    }
+
+    /* Analytics UI Elements */
+    .analytics-summary-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .stat-card {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 1.4rem;
+      font-weight: 800;
+      color: var(--primary);
+    }
+
+    .stat-label {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .analytics-tabs {
+      display: flex;
+      gap: 6px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+
+    .analytics-tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .analytics-tab-btn.active {
+      background: var(--primary);
+      color: #04101e;
+    }
+
+    .log-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px;
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 0.82rem;
+    }
+
+    .log-user-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
     }
 
     .modal-footer {
@@ -749,7 +849,6 @@ export function getAppHtml(env) {
       border-color: var(--primary);
     }
 
-    /* Empty state */
     .empty-state {
       text-align: center;
       padding: 60px 20px;
@@ -761,7 +860,6 @@ export function getAppHtml(env) {
       margin-bottom: 12px;
     }
 
-    /* Skeleton Loading */
     .skeleton {
       background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%);
       background-size: 200% 100%;
@@ -774,7 +872,6 @@ export function getAppHtml(env) {
       100% { background-position: -200% 0; }
     }
 
-    /* Toast Notification */
     #toast {
       position: fixed;
       bottom: 24px;
@@ -868,6 +965,41 @@ export function getAppHtml(env) {
     </div>
   </div>
 
+  <!-- Admin Analytics Modal -->
+  <div class="modal-overlay" id="analyticsModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title" id="analyticsPostTitle">Post Analytics</h3>
+        <button class="modal-close" id="btnAnalyticsClose">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="analytics-summary-cards">
+          <div class="stat-card">
+            <div class="stat-value" id="statViews">0</div>
+            <div class="stat-label">👁️ Views</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statAccesses">0</div>
+            <div class="stat-label">📥 Access / Downloads</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statLikes">0</div>
+            <div class="stat-label">❤️ Likes</div>
+          </div>
+        </div>
+
+        <div class="analytics-tabs">
+          <button class="analytics-tab-btn active" data-atab="views">👁️ Viewers</button>
+          <button class="analytics-tab-btn" data-atab="accesses">📥 File / Link Downloads</button>
+          <button class="analytics-tab-btn" data-atab="likes">❤️ Likers</button>
+        </div>
+
+        <div id="analyticsList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification -->
   <div id="toast">Message</div>
 
@@ -881,6 +1013,8 @@ export function getAppHtml(env) {
     let allPosts = [];
     let currentFilter = 'all';
     let currentModalPostId = null;
+    let currentAnalyticsData = null;
+    let currentAnalyticsTab = 'views';
 
     function init() {
       if (window.Telegram && window.Telegram.WebApp) {
@@ -997,6 +1131,21 @@ export function getAppHtml(env) {
         
         allPosts = data.posts || [];
         filterAndRenderPosts();
+
+        // Track views for all posts currently loaded in user feed
+        if (currentUser && !isAdmin) {
+          allPosts.forEach(p => {
+            fetch(\`\${API_BASE_URL}/api/posts/\${p.id}/view\`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                user_id: currentUser.id,
+                username: currentUser.username,
+                first_name: currentUser.first_name
+              })
+            }).catch(() => {});
+          });
+        }
       } catch (err) {
         console.error('Failed to load posts:', err);
         feed.innerHTML = \`
@@ -1043,12 +1192,16 @@ export function getAppHtml(env) {
 
         const botLink = \`https://t.me/\${BOT_USERNAME}?start=post_\${post.id}\`;
         const hasImage = Boolean(post.preview_image);
+        const isPromoted = Boolean(post.is_promoted);
 
         return \`
-          <div class="post-card" data-id="\${post.id}">
+          <div class="post-card \${isPromoted ? 'is-promoted' : ''}" data-id="\${post.id}">
             <!-- Full Image with Blurred Side Backdrop -->
             <div class="post-image-container">
-              \${isAdmin ? \`<span class="post-status-badge status-\${post.status}">\${post.status}</span>\` : ''}
+              <div class="post-badges-top">
+                \${isPromoted ? '<span class="post-status-badge status-promoted">⭐ Featured</span>' : '<span></span>'}
+                \${isAdmin ? \`<span class="post-status-badge status-\${post.status}">\${post.status}</span>\` : ''}
+              </div>
               
               \${hasImage ? \`
                 <div class="post-image-backdrop" style="background-image: url('\${escapeHtml(post.preview_image)}');"></div>
@@ -1061,8 +1214,14 @@ export function getAppHtml(env) {
             <div class="post-body">
               \${isAdmin ? \`
                 <div class="admin-card-actions">
+                  <button class="admin-btn admin-btn-promote" onclick="togglePromote(\${post.id}, \${!isPromoted})">
+                    \${isPromoted ? '⭐ Unfeature' : '⭐ Promote'}
+                  </button>
+                  <button class="admin-btn" onclick="openAnalyticsModal(\${post.id}, '\${escapeHtml(post.title)}')">
+                    📊 Stats (\${post.view_count || 0})
+                  </button>
                   <button class="admin-btn" onclick="togglePostStatus(\${post.id}, '\${post.status}')">
-                    \${post.status === 'published' ? '📝 Set Draft' : '🚀 Publish'}
+                    \${post.status === 'published' ? '📝 Draft' : '🚀 Publish'}
                   </button>
                   <button class="admin-btn admin-btn-delete" onclick="deletePostItem(\${post.id})">
                     🗑️ Delete
@@ -1073,6 +1232,7 @@ export function getAppHtml(env) {
               <h2 class="post-title">\${escapeHtml(post.title)}</h2>
               <div class="post-meta">
                 <span>📅 \${dateStr}</span>
+                <span>• 👁️ \${post.view_count || 0} views</span>
               </div>
 
               <div class="post-actions-row">
@@ -1090,7 +1250,7 @@ export function getAppHtml(env) {
 
                 <div class="post-buttons-group">
                   \${post.direct_link ? \`
-                    <a href="\${escapeHtml(post.direct_link)}" target="_blank" class="btn-direct-link">
+                    <a href="\${escapeHtml(post.direct_link)}" target="_blank" class="btn-direct-link" onclick="trackLinkClick(\${post.id}, '\${escapeHtml(post.direct_link_title || 'Direct Link')}')">
                       <span>\${escapeHtml(post.direct_link_title || '🔗 Link')}</span>
                     </a>
                   \` : ''}
@@ -1107,9 +1267,39 @@ export function getAppHtml(env) {
       }).join('');
     }
 
+    function trackLinkClick(postId, linkTitle) {
+      if (!currentUser) return;
+      fetch(\`\${API_BASE_URL}/api/posts/\${postId}/access-log\`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          item_name: linkTitle,
+          user_id: currentUser.id,
+          username: currentUser.username,
+          first_name: currentUser.first_name
+        })
+      }).catch(() => {});
+    }
+
     // =========================================================
-    // ADMIN ACTIONS (Post & Comment Moderation)
+    // ADMIN ACTIONS (Promote, Status, Delete, Moderation)
     // =========================================================
+    async function togglePromote(postId, isPromoted) {
+      if (!isAdmin) return;
+      try {
+        const res = await fetch(\`\${API_BASE_URL}/api/admin/posts/\${postId}/promote\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUser.id, is_promoted: isPromoted })
+        });
+        if (!res.ok) throw new Error('Promote failed');
+        showToast(isPromoted ? '⭐ Post Featured & Pinned!' : 'Post unpromoted');
+        loadPosts();
+      } catch (e) {
+        showToast('Error updating promotion');
+      }
+    }
+
     async function togglePostStatus(postId, currentStatus) {
       if (!isAdmin) return;
       try {
@@ -1155,6 +1345,91 @@ export function getAppHtml(env) {
         loadPosts();
       } catch (e) {
         showToast('Error moderating comment');
+      }
+    }
+
+    // =========================================================
+    // ADMIN ANALYTICS MODAL
+    // =========================================================
+    async function openAnalyticsModal(postId, postTitle) {
+      if (!isAdmin) return;
+      const modal = document.getElementById('analyticsModal');
+      const titleEl = document.getElementById('analyticsPostTitle');
+      const listEl = document.getElementById('analyticsList');
+
+      modal.classList.add('active');
+      titleEl.textContent = 'Analytics: ' + postTitle;
+      listEl.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">Loading stats...</div>';
+
+      try {
+        const res = await fetch(\`\${API_BASE_URL}/api/admin/posts/\${postId}/analytics?user_id=\${currentUser.id}\`);
+        if (!res.ok) throw new Error('Failed to load analytics');
+
+        const data = await res.json();
+        currentAnalyticsData = data.analytics;
+
+        document.getElementById('statViews').textContent = (currentAnalyticsData.views || []).length;
+        document.getElementById('statAccesses').textContent = (currentAnalyticsData.accesses || []).length;
+        document.getElementById('statLikes').textContent = (currentAnalyticsData.likes || []).length;
+
+        renderAnalyticsTabContent();
+      } catch (e) {
+        listEl.innerHTML = '<div style="color: #f87171; text-align: center;">Failed to load analytics.</div>';
+      }
+    }
+
+    function renderAnalyticsTabContent() {
+      const listEl = document.getElementById('analyticsList');
+      if (!currentAnalyticsData) return;
+
+      if (currentAnalyticsTab === 'views') {
+        const views = currentAnalyticsData.views || [];
+        if (views.length === 0) {
+          listEl.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No view logs recorded yet.</div>';
+          return;
+        }
+        listEl.innerHTML = views.map(v => \`
+          <div class="log-item">
+            <div class="log-user-info">
+              <span style="font-weight: 700; color: var(--primary);">👤 \${escapeHtml(v.first_name || 'User')}</span>
+              \${v.username ? \`<span style="color: var(--text-muted);">(@\${escapeHtml(v.username)})</span>\` : ''}
+            </div>
+            <span style="color: var(--text-muted); font-size: 0.72rem;">\${new Date(v.viewed_at).toLocaleString()}</span>
+          </div>
+        \`).join('');
+      } else if (currentAnalyticsTab === 'accesses') {
+        const accesses = currentAnalyticsData.accesses || [];
+        if (accesses.length === 0) {
+          listEl.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No downloads or link clicks recorded yet.</div>';
+          return;
+        }
+        listEl.innerHTML = accesses.map(a => \`
+          <div class="log-item">
+            <div>
+              <div class="log-user-info">
+                <span style="font-weight: 700; color: #4ade80;">📥 \${escapeHtml(a.first_name || 'User')}</span>
+                \${a.username ? \`<span style="color: var(--text-muted);">(@\${escapeHtml(a.username)})</span>\` : ''}
+              </div>
+              <div style="font-size: 0.75rem; color: #cbd5e1; margin-top: 2px;">Item: <b>\${escapeHtml(a.item_name)}</b></div>
+            </div>
+            <span style="color: var(--text-muted); font-size: 0.72rem;">\${new Date(a.accessed_at).toLocaleString()}</span>
+          </div>
+        \`).join('');
+      } else if (currentAnalyticsTab === 'likes') {
+        const likes = currentAnalyticsData.likes || [];
+        if (likes.length === 0) {
+          listEl.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No likes yet.</div>';
+          return;
+        }
+        listEl.innerHTML = likes.map(l => \`
+          <div class="log-item">
+            <div class="log-user-info">
+              <span style="font-weight: 700; color: var(--accent-heart);">❤️ \${escapeHtml(l.first_name || 'User')}</span>
+              \${l.username ? \`<span style="color: var(--text-muted);">(@\${escapeHtml(l.username)})</span>\` : ''}
+            </div>
+            <span style="color: var(--text-muted); font-size: 0.72rem;">\${new Date(l.created_at).toLocaleString()}</span>
+          </div>
+        \`).join('');
       }
     }
 
@@ -1288,6 +1563,16 @@ export function getAppHtml(env) {
         });
       });
 
+      // Analytics tabs
+      document.querySelectorAll('.analytics-tab-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          document.querySelectorAll('.analytics-tab-btn').forEach(b => b.classList.remove('active'));
+          e.target.classList.add('active');
+          currentAnalyticsTab = e.target.getAttribute('data-atab');
+          renderAnalyticsTabContent();
+        });
+      });
+
       // Refresh Button
       document.getElementById('btnRefresh').addEventListener('click', () => {
         showToast('Refreshing...');
@@ -1299,14 +1584,24 @@ export function getAppHtml(env) {
         filterAndRenderPosts();
       });
 
-      // Close Modal
+      // Close Modals
       document.getElementById('btnModalClose').addEventListener('click', () => {
         document.getElementById('commentsModal').classList.remove('active');
+      });
+
+      document.getElementById('btnAnalyticsClose').addEventListener('click', () => {
+        document.getElementById('analyticsModal').classList.remove('active');
       });
 
       document.getElementById('commentsModal').addEventListener('click', (e) => {
         if (e.target.id === 'commentsModal') {
           document.getElementById('commentsModal').classList.remove('active');
+        }
+      });
+
+      document.getElementById('analyticsModal').addEventListener('click', (e) => {
+        if (e.target.id === 'analyticsModal') {
+          document.getElementById('analyticsModal').classList.remove('active');
         }
       });
 

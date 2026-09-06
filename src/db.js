@@ -100,10 +100,10 @@ export async function getUser(env, userId) {
 // ------------------------------------------
 
 /**
- * Fetch published posts for public view
+ * Fetch published posts for public feed (Promoted posts pinned to top)
  */
 export async function getPublishedPosts(env) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?status=eq.published&order=created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,status,created_at,likes(user_id),comments(id,is_hidden)`;
+  const url = `${getSupabaseBaseUrl(env)}/posts?status=eq.published&order=is_promoted.desc,created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,is_promoted,status,created_at,likes(user_id),comments(id,is_hidden),post_views(id)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -122,18 +122,20 @@ export async function getPublishedPosts(env) {
     preview_image: post.preview_image,
     direct_link: post.direct_link,
     direct_link_title: post.direct_link_title,
+    is_promoted: Boolean(post.is_promoted),
     status: post.status,
     created_at: post.created_at,
     like_count: post.likes ? post.likes.length : 0,
-    comment_count: post.comments ? post.comments.filter(c => !c.is_hidden).length : 0
+    comment_count: post.comments ? post.comments.filter(c => !c.is_hidden).length : 0,
+    view_count: post.post_views ? post.post_views.length : 0
   }));
 }
 
 /**
- * Fetch ALL posts (draft, scheduled, published) for Admin Management
+ * Fetch ALL posts for Admin Management (Promoted posts pinned to top)
  */
 export async function getAllPostsForAdmin(env) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?order=created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,status,scheduled_at,created_at,likes(user_id),comments(id)`;
+  const url = `${getSupabaseBaseUrl(env)}/posts?order=is_promoted.desc,created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,is_promoted,status,scheduled_at,created_at,likes(user_id),comments(id),post_views(id),file_access_logs(id)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -152,11 +154,14 @@ export async function getAllPostsForAdmin(env) {
     preview_image: post.preview_image,
     direct_link: post.direct_link,
     direct_link_title: post.direct_link_title,
+    is_promoted: Boolean(post.is_promoted),
     status: post.status,
     scheduled_at: post.scheduled_at,
     created_at: post.created_at,
     like_count: post.likes ? post.likes.length : 0,
-    comment_count: post.comments ? post.comments.length : 0
+    comment_count: post.comments ? post.comments.length : 0,
+    view_count: post.post_views ? post.post_views.length : 0,
+    access_count: post.file_access_logs ? post.file_access_logs.length : 0
   }));
 }
 
@@ -164,7 +169,7 @@ export async function getAllPostsForAdmin(env) {
  * Fetch single post with folders, direct links, comments, and like status
  */
 export async function getPostById(env, postId, userId = null, isAdmin = false) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}&select=id,title,preview_image,direct_link,direct_link_title,status,scheduled_at,created_at,folders(id,name,created_at,files(id,file_id,channel_message_id,file_name,mime_type,size)),comments(id,user_id,username,text,is_hidden,created_at),likes(user_id)`;
+  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}&select=id,title,preview_image,direct_link,direct_link_title,is_promoted,status,scheduled_at,created_at,folders(id,name,created_at,files(id,file_id,channel_message_id,file_name,mime_type,size)),comments(id,user_id,username,text,is_hidden,created_at),likes(user_id),post_views(id)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -181,7 +186,6 @@ export async function getPostById(env, postId, userId = null, isAdmin = false) {
   const post = posts[0];
   const liked = userId ? (post.likes || []).some(l => String(l.user_id) === String(userId)) : false;
 
-  // Filter comments (regular users only see non-hidden comments; admin sees all)
   const allComments = post.comments || [];
   const comments = (isAdmin ? allComments : allComments.filter(c => !c.is_hidden))
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
@@ -194,12 +198,14 @@ export async function getPostById(env, postId, userId = null, isAdmin = false) {
     preview_image: post.preview_image,
     direct_link: post.direct_link,
     direct_link_title: post.direct_link_title,
+    is_promoted: Boolean(post.is_promoted),
     status: post.status,
     created_at: post.created_at,
     folders,
     comments,
     like_count: post.likes ? post.likes.length : 0,
     comment_count: comments.length,
+    view_count: post.post_views ? post.post_views.length : 0,
     liked
   };
 }
@@ -234,7 +240,7 @@ export async function getFolderFiles(env, folderId) {
   return await res.json();
 }
 
-export async function createPost(env, { title, preview_image = null, direct_link = null, direct_link_title = null, status = 'draft', scheduled_at = null, created_by }) {
+export async function createPost(env, { title, preview_image = null, direct_link = null, direct_link_title = null, is_promoted = false, status = 'draft', scheduled_at = null, created_by }) {
   const url = `${getSupabaseBaseUrl(env)}/posts`;
   
   const res = await fetch(url, {
@@ -245,6 +251,7 @@ export async function createPost(env, { title, preview_image = null, direct_link
       preview_image,
       direct_link,
       direct_link_title,
+      is_promoted,
       status,
       scheduled_at,
       created_by
@@ -277,6 +284,10 @@ export async function updatePost(env, postId, updateFields) {
 
   const data = await res.json();
   return data[0];
+}
+
+export async function togglePromotePost(env, postId, isPromoted) {
+  return await updatePost(env, postId, { is_promoted: isPromoted });
 }
 
 export async function deletePost(env, postId) {
@@ -332,6 +343,105 @@ export async function createFiles(env, filesArray) {
   return await res.json();
 }
 
+// ------------------------------------------
+// 3. ANALYTICS & ACTIVITY LOGGING
+// ------------------------------------------
+
+/**
+ * Record a user viewing a post
+ */
+export async function recordPostView(env, { post_id, user_id, username, first_name }) {
+  if (!env.SUPABASE_URL || !post_id || !user_id) return null;
+  try {
+    const url = `${getSupabaseBaseUrl(env)}/post_views`;
+    await fetch(url, {
+      method: 'POST',
+      headers: getSupabaseHeaders(env),
+      body: JSON.stringify({
+        post_id: Number(post_id),
+        user_id: Number(user_id),
+        username: username || null,
+        first_name: first_name || ''
+      })
+    });
+  } catch (err) {
+    console.warn('Record post view warning:', err.message);
+  }
+}
+
+/**
+ * Record a user downloading a file or accessing a link
+ */
+export async function recordFileAccess(env, { post_id, folder_id = null, file_id = null, item_name, user_id, username, first_name }) {
+  if (!env.SUPABASE_URL || !post_id || !user_id) return null;
+  try {
+    const url = `${getSupabaseBaseUrl(env)}/file_access_logs`;
+    await fetch(url, {
+      method: 'POST',
+      headers: getSupabaseHeaders(env),
+      body: JSON.stringify({
+        post_id: Number(post_id),
+        folder_id: folder_id ? Number(folder_id) : null,
+        file_id: file_id || null,
+        item_name: item_name || 'Resource',
+        user_id: Number(user_id),
+        username: username || null,
+        first_name: first_name || ''
+      })
+    });
+  } catch (err) {
+    console.warn('Record file access warning:', err.message);
+  }
+}
+
+/**
+ * Fetch detailed analytics for a post (Views, Downloads/Accesses, Likes)
+ */
+export async function getPostAnalytics(env, postId) {
+  const baseUrl = getSupabaseBaseUrl(env);
+
+  // 1. Fetch Views
+  const viewsUrl = `${baseUrl}/post_views?post_id=eq.${postId}&order=viewed_at.desc&limit=100`;
+  const viewsRes = await fetch(viewsUrl, { method: 'GET', headers: getSupabaseHeaders(env) });
+  const views = viewsRes.ok ? await viewsRes.json() : [];
+
+  // 2. Fetch File & Link Access Logs
+  const accessUrl = `${baseUrl}/file_access_logs?post_id=eq.${postId}&order=accessed_at.desc&limit=100`;
+  const accessRes = await fetch(accessUrl, { method: 'GET', headers: getSupabaseHeaders(env) });
+  const accesses = accessRes.ok ? await accessRes.json() : [];
+
+  // 3. Fetch Likes with User details
+  const likesUrl = `${baseUrl}/likes?post_id=eq.${postId}&order=created_at.desc&select=post_id,user_id,created_at`;
+  const likesRes = await fetch(likesUrl, { method: 'GET', headers: getSupabaseHeaders(env) });
+  const rawLikes = likesRes.ok ? await likesRes.json() : [];
+
+  // Attach user details from users table for likes
+  const likes = [];
+  for (const l of rawLikes) {
+    let userDetails = { username: 'User', first_name: '' };
+    try {
+      const u = await getUser(env, l.user_id);
+      if (u) userDetails = u;
+    } catch (e) {}
+    likes.push({
+      user_id: l.user_id,
+      username: userDetails.username || 'User',
+      first_name: userDetails.first_name || '',
+      created_at: l.created_at
+    });
+  }
+
+  return {
+    views,
+    accesses,
+    likes
+  };
+}
+
+// ------------------------------------------
+// 4. COMMENTS & MODERATION
+// ------------------------------------------
+
 export async function addComment(env, { post_id, user_id, username, text }) {
   const url = `${getSupabaseBaseUrl(env)}/comments`;
   
@@ -355,9 +465,6 @@ export async function addComment(env, { post_id, user_id, username, text }) {
   return data[0];
 }
 
-/**
- * Moderate comment (Hide, Unhide, or Delete)
- */
 export async function moderateComment(env, { comment_id, action }) {
   const baseUrl = getSupabaseBaseUrl(env);
 
@@ -382,6 +489,10 @@ export async function moderateComment(env, { comment_id, action }) {
     return data[0];
   }
 }
+
+// ------------------------------------------
+// 5. LIKES & SCHEDULER
+// ------------------------------------------
 
 export async function toggleLike(env, { post_id, user_id }) {
   const baseUrl = getSupabaseBaseUrl(env);

@@ -7,7 +7,11 @@ import {
   moderateComment,
   toggleLike,
   updatePost,
-  deletePost
+  deletePost,
+  togglePromotePost,
+  recordPostView,
+  recordFileAccess,
+  getPostAnalytics
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
@@ -114,6 +118,99 @@ export function createRouter() {
       return jsonResponse({ success: true, post, is_admin: isAdmin });
     } catch (err) {
       console.error('API /api/posts/:id error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/posts/:id/view - Track post view
+  // -------------------------------------------------------------
+  router.post('/api/posts/:id/view', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const body = await request.json();
+      const { user_id, username, first_name } = body || {};
+
+      if (user_id) {
+        await recordPostView(env, {
+          post_id: id,
+          user_id,
+          username,
+          first_name
+        });
+      }
+
+      return jsonResponse({ success: true });
+    } catch (err) {
+      return jsonResponse({ success: false, error: err.message }, 200);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/posts/:id/access-log - Track file download or link access
+  // -------------------------------------------------------------
+  router.post('/api/posts/:id/access-log', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const body = await request.json();
+      const { folder_id, file_id, item_name, user_id, username, first_name } = body || {};
+
+      if (user_id) {
+        await recordFileAccess(env, {
+          post_id: id,
+          folder_id,
+          file_id,
+          item_name,
+          user_id,
+          username,
+          first_name
+        });
+      }
+
+      return jsonResponse({ success: true });
+    } catch (err) {
+      return jsonResponse({ success: false, error: err.message }, 200);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // GET /api/admin/posts/:id/analytics - Detailed Post Analytics
+  // -------------------------------------------------------------
+  router.get('/api/admin/posts/:id/analytics', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin access', 403);
+      }
+
+      const analytics = await getPostAnalytics(env, id);
+      return jsonResponse({ success: true, analytics });
+    } catch (err) {
+      console.error('API post analytics error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/admin/posts/:id/promote - Toggle Promoted / Featured
+  // -------------------------------------------------------------
+  router.post('/api/admin/posts/:id/promote', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const body = await request.json();
+      const { user_id, is_promoted } = body || {};
+
+      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const updated = await togglePromotePost(env, id, is_promoted);
+      return jsonResponse({ success: true, post: updated });
+    } catch (err) {
+      console.error('API promote error:', err);
       return errorResponse(err.message, 500);
     }
   });
