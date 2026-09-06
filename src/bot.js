@@ -3,6 +3,8 @@ import {
   saveOrUpdateUser,
   getPostById,
   getAllPostsForAdmin,
+  getPublishedPosts,
+  getSavedPosts,
   getPostFoldersWithFiles,
   getFolderFiles,
   createPost,
@@ -13,13 +15,17 @@ import {
   createFiles,
   getGlobalStats,
   getSettings,
+  updateSetting,
   getForceChannels,
+  addForceChannel,
+  removeForceChannel,
   processReferral,
   checkUserPass,
   consumeUserPass,
   createVerifyToken,
   verifyTokenAndGrantPass,
-  getAllUserIds
+  getAllUserIds,
+  getUser
 } from './db.js';
 import { getSession, setSession, clearSession } from './session.js';
 
@@ -133,6 +139,12 @@ async function sendPostToUser(ctx, env, post, postId) {
     });
   }
 
+  const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
+  keyboardButtons.push([
+    Markup.button.webApp('🚀 View in Mini App', appUrl),
+    Markup.button.callback('🔙 Main Menu', 'main_menu')
+  ]);
+
   const keyboard = Markup.inlineKeyboard(keyboardButtons);
 
   if (post.preview_image) {
@@ -158,9 +170,10 @@ async function sendPostToUser(ctx, env, post, postId) {
  */
 export function createBot(env) {
   const bot = new Telegraf(env.BOT_TOKEN);
+  const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
 
   // -------------------------------------------------------------
-  // Middleware: User Tracking & Session Loading
+  // Middleware: User Tracking
   // -------------------------------------------------------------
   bot.use(async (ctx, next) => {
     try {
@@ -173,10 +186,137 @@ export function createBot(env) {
     } catch (err) {
       console.error('Unhandled Bot Middleware Error:', err);
       if (ctx.chat) {
-        await ctx.reply('⚠️ An unexpected error occurred. Please try again later.');
+        await ctx.reply('⚠️ An unexpected error occurred. Please try again.');
       }
     }
   });
+
+  // -------------------------------------------------------------
+  // Main Menu Presenter (Buttons Only)
+  // -------------------------------------------------------------
+  async function showMainMenu(ctx) {
+    const userId = ctx.from?.id;
+    const isAdmin = String(userId) === String(env.ADMIN_ID);
+    const settings = await getSettings(env);
+
+    try {
+      if (appUrl.startsWith('https://')) {
+        await ctx.setChatMenuButton({
+          type: 'web_app',
+          text: '🚀 Open App',
+          web_app: { url: appUrl }
+        });
+      }
+    } catch (e) {}
+
+    if (isAdmin) {
+      // Admin Control Panel
+      const inlineButtons = [
+        [Markup.button.webApp('🚀 Open Mini App', appUrl)],
+        [
+          Markup.button.callback('➕ Create Post', 'admin_menu_addpost'),
+          Markup.button.callback('📑 Manage Posts', 'admin_post_list')
+        ],
+        [
+          Markup.button.callback('📊 Hub Statistics', 'admin_stats'),
+          Markup.button.callback('📢 Broadcast', 'admin_menu_broadcast')
+        ],
+        [
+          Markup.button.callback('⚙️ Hub Settings', 'admin_menu_settings'),
+          Markup.button.callback('🔍 Browse Posts', 'user_browse_posts')
+        ]
+      ];
+
+      const replyKeyboard = Markup.keyboard([
+        [Markup.button.webApp('🚀 Open Mini App', appUrl), '➕ Add Post'],
+        ['📑 Manage Posts', '📊 Stats'],
+        ['📢 Broadcast', '⚙️ Settings']
+      ]).resize();
+
+      const text = `👑 *Admin Control Panel*\n\n` +
+        `Welcome back, *${escapeMarkdown(ctx.from?.first_name || 'Admin')}*!\n` +
+        `Choose an action using the buttons below:`;
+
+      if (ctx.callbackQuery) {
+        await ctx.answerCbQuery();
+        try {
+          return await ctx.editMessageText(text, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(inlineButtons)
+          });
+        } catch (e) {
+          return await ctx.reply(text, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(inlineButtons),
+            ...replyKeyboard
+          });
+        }
+      } else {
+        return await ctx.reply(text, {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard(inlineButtons),
+          ...replyKeyboard
+        });
+      }
+    } else {
+      // Regular User Panel
+      let userPoints = 0;
+      if (settings.referral_enabled) {
+        const u = await getUser(env, userId);
+        userPoints = u?.points || 0;
+      }
+
+      const inlineButtons = [
+        [Markup.button.webApp('🚀 Launch Mini App', appUrl)],
+        [
+          Markup.button.callback('🔍 Browse All Posts', 'user_browse_posts'),
+          Markup.button.callback('🔖 My Saved Posts', 'user_saved_posts')
+        ]
+      ];
+
+      if (settings.referral_enabled) {
+        inlineButtons.push([
+          Markup.button.callback(`🎁 Invite & Earn (🪙 ${userPoints} pts)`, 'user_menu_invite')
+        ]);
+      }
+
+      const replyButtons = [
+        [Markup.button.webApp('🚀 Launch App', appUrl), '🔍 Browse Posts'],
+        ['🔖 Saved Posts']
+      ];
+      if (settings.referral_enabled) {
+        replyButtons[1].push('🎁 Invite Friends');
+      }
+
+      const replyKeyboard = Markup.keyboard(replyButtons).resize();
+
+      let text = `👋 *Welcome ${escapeMarkdown(ctx.from?.first_name || 'there')}!*\n\n` +
+        `Explore published posts, curated folders, and downloadable resources.\n` +
+        `Tap any button below to get started:`;
+
+      if (ctx.callbackQuery) {
+        await ctx.answerCbQuery();
+        try {
+          return await ctx.editMessageText(text, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(inlineButtons)
+          });
+        } catch (e) {
+          return await ctx.reply(text, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(inlineButtons),
+            ...replyKeyboard
+          });
+        }
+      } else {
+        return await ctx.reply(text, {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard(inlineButtons),
+          ...replyKeyboard
+        });
+      }
+    }
+  }
 
   // -------------------------------------------------------------
   // /start Command (Deep Link, Referrals, Verify, Welcome)
@@ -202,10 +342,10 @@ export function createBot(env) {
         if (record) {
           const buttons = [];
           if (record.target_post_id) {
-            buttons.push([Markup.button.callback('📥 Open Post Now', `check_pass_post_${record.target_post_id}`)]);
+            buttons.push([Markup.button.callback('📥 Open Post Now', `user_view_post_${record.target_post_id}`)]);
           }
-          const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
           buttons.push([Markup.button.webApp('🚀 Open Mini App', appUrl)]);
+          buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
 
           return await ctx.reply(
             `🎉 *Access Pass Granted!*\n\n` +
@@ -216,7 +356,9 @@ export function createBot(env) {
             }
           );
         } else {
-          return await ctx.reply('⚠️ This verification link has expired or has already been used.');
+          return await ctx.reply('⚠️ This verification link has expired or has already been used.', {
+            ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+          });
         }
       } catch (vErr) {
         console.error('Error verifying token on /start:', vErr);
@@ -232,12 +374,16 @@ export function createBot(env) {
         const post = await getPostById(env, postId, ctx.from?.id, String(ctx.from?.id) === String(env.ADMIN_ID));
         
         if (!post) {
-          return await ctx.reply('⚠️ Post not found or has been removed.');
+          return await ctx.reply('⚠️ Post not found or has been removed.', {
+            ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+          });
         }
 
         const isAdmin = String(ctx.from?.id) === String(env.ADMIN_ID);
         if (post.status !== 'published' && !isAdmin) {
-          return await ctx.reply('🔒 This post is not yet published.');
+          return await ctx.reply('🔒 This post is not yet published.', {
+            ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+          });
         }
 
         // Force Join Check
@@ -245,6 +391,7 @@ export function createBot(env) {
         if (!fj.passed) {
           const buttons = fj.unjoined.map(ch => [Markup.button.url(`📢 Join ${ch.channel_title}`, ch.invite_link)]);
           buttons.push([Markup.button.callback('🔄 I Have Joined (Check Again)', `check_force_post_${postId}`)]);
+          buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
 
           return await ctx.reply(
             `🔒 *Channel Membership Required*\n\n` +
@@ -265,7 +412,8 @@ export function createBot(env) {
 
           const buttons = [
             [Markup.button.url('🔓 Verify Link & Unlock Access', locker.verifyUrl)],
-            [Markup.button.callback('🔄 Check Access', `check_pass_post_${postId}`)]
+            [Markup.button.callback('🔄 Check Access', `check_pass_post_${postId}`)],
+            [Markup.button.callback('🔙 Main Menu', 'main_menu')]
           ];
 
           return await ctx.reply(
@@ -288,45 +436,12 @@ export function createBot(env) {
       }
     }
 
-    // 4. Default Welcome Message
-    const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
-    const isAdmin = String(ctx.from?.id) === String(env.ADMIN_ID);
-
-    let welcomeText = `👋 *Welcome ${escapeMarkdown(ctx.from?.first_name || 'there')}!*\n\n`;
-    welcomeText += `Explore published posts, curated folders, and downloadable resources directly through our interactive Mini App.\n\n`;
-    
-    if (isAdmin) {
-      welcomeText += `👑 *Admin Commands:*\n`;
-      welcomeText += `• /addpost - Create a new post\n`;
-      welcomeText += `• /admin - Manage & moderate all posts\n`;
-      welcomeText += `• /broadcast - Send announcement to all users\n`;
-      welcomeText += `• /stats - View Hub Analytics\n`;
-      welcomeText += `• /cancel - Abort current action\n\n`;
-    }
-
-    welcomeText += `Tap the button below to launch the Bot App:`;
-
-    const keyboard = Markup.inlineKeyboard([
-      [Markup.button.webApp('🚀 Open Bot App', appUrl)]
-    ]);
-
-    try {
-      if (appUrl.startsWith('https://')) {
-        await ctx.setChatMenuButton({
-          type: 'web_app',
-          text: '🚀 Open App',
-          web_app: { url: appUrl }
-        });
-      }
-    } catch (e) {
-      console.warn('Failed to set chat menu button on /start:', e.message);
-    }
-
-    return await ctx.reply(welcomeText, {
-      parse_mode: 'Markdown',
-      ...keyboard
-    });
+    // Default Main Menu
+    return await showMainMenu(ctx);
   });
+
+  bot.action('main_menu', showMainMenu);
+  bot.action('admin_main_menu', showMainMenu);
 
   // -------------------------------------------------------------
   // Check Force Join Callback
@@ -339,6 +454,7 @@ export function createBot(env) {
     if (!fj.passed) {
       const buttons = fj.unjoined.map(ch => [Markup.button.url(`📢 Join ${ch.channel_title}`, ch.invite_link)]);
       buttons.push([Markup.button.callback('🔄 I Have Joined (Check Again)', `check_force_post_${postId}`)]);
+      buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
 
       return await ctx.reply(
         `⚠️ You have not joined all required channels yet. Please join them first:`,
@@ -366,7 +482,8 @@ export function createBot(env) {
     if (!locker.passed) {
       const buttons = [
         [Markup.button.url('🔓 Verify Link & Unlock Access', locker.verifyUrl)],
-        [Markup.button.callback('🔄 Check Access', `check_pass_post_${postId}`)]
+        [Markup.button.callback('🔄 Check Access', `check_pass_post_${postId}`)],
+        [Markup.button.callback('🔙 Main Menu', 'main_menu')]
       ];
 
       return await ctx.reply(
@@ -393,7 +510,6 @@ export function createBot(env) {
     try {
       await ctx.answerCbQuery('Fetching folder contents...');
 
-      // Force join check
       const fj = await checkForceJoin(ctx, env, ctx.from?.id);
       if (!fj.passed) {
         const buttons = fj.unjoined.map(ch => [Markup.button.url(`📢 Join ${ch.channel_title}`, ch.invite_link)]);
@@ -452,7 +568,119 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
-  // Admin Management (/admin, /posts, /stats)
+  // User Actions: Browse Posts & Saved Posts & Invite Friends
+  // -------------------------------------------------------------
+  const handleBrowsePosts = async (ctx) => {
+    try {
+      if (ctx.callbackQuery) await ctx.answerCbQuery();
+      const posts = await getPublishedPosts(env, ctx.from?.id);
+      if (!posts || posts.length === 0) {
+        return await ctx.reply('📭 No published posts available right now.', {
+          ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+        });
+      }
+
+      const buttons = posts.slice(0, 15).map(p => {
+        const star = p.is_promoted ? '⭐ ' : '';
+        return [
+          Markup.button.callback(
+            `${star}${p.title.slice(0, 28)}`,
+            `user_view_post_${p.id}`
+          )
+        ];
+      });
+
+      buttons.push([
+        Markup.button.webApp('🚀 Open in Mini App', appUrl),
+        Markup.button.callback('🔙 Main Menu', 'main_menu')
+      ]);
+
+      return await ctx.reply('🔍 *Explore Published Content:*\nTap a post below to view files & links:', {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard(buttons)
+      });
+    } catch (err) {
+      console.error('Error browsing posts:', err);
+      return await ctx.reply('⚠️ Failed to load posts.');
+    }
+  };
+
+  bot.action('user_browse_posts', handleBrowsePosts);
+
+  bot.action(/^user_view_post_(\d+)$/, async (ctx) => {
+    const postId = ctx.match[1];
+    await ctx.answerCbQuery();
+    const post = await getPostById(env, postId, ctx.from?.id, String(ctx.from?.id) === String(env.ADMIN_ID));
+    if (!post) return await ctx.reply('⚠️ Post not found.');
+    return await sendPostToUser(ctx, env, post, postId);
+  });
+
+  const handleSavedPosts = async (ctx) => {
+    try {
+      if (ctx.callbackQuery) await ctx.answerCbQuery();
+      const saved = await getSavedPosts(env, ctx.from?.id);
+      if (!saved || saved.length === 0) {
+        return await ctx.reply('🔖 You have no saved bookmarks yet.\nBrowse posts and tap Save to bookmark them!', {
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🔍 Browse Posts', 'user_browse_posts')],
+            [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+          ])
+        });
+      }
+
+      const buttons = saved.map(p => [
+        Markup.button.callback(`🔖 ${p.title.slice(0, 28)}`, `user_view_post_${p.id}`)
+      ]);
+      buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
+
+      return await ctx.reply('🔖 *Your Saved Bookmarks:*\nTap any post to open:', {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard(buttons)
+      });
+    } catch (err) {
+      console.error('Error loading saved posts:', err);
+      return await ctx.reply('⚠️ Failed to load saved posts.');
+    }
+  };
+
+  bot.action('user_saved_posts', handleSavedPosts);
+
+  const handleInviteFriends = async (ctx) => {
+    try {
+      if (ctx.callbackQuery) await ctx.answerCbQuery();
+      const botInfo = await ctx.telegram.getMe();
+      const refLink = `https://t.me/${botInfo.username}?start=ref_${ctx.from.id}`;
+      const u = await getUser(env, ctx.from.id);
+      const points = u?.points || 0;
+      const refCount = u?.referral_count || 0;
+
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent('Join ' + botInfo.username + ' to access premium files, courses, and resources!')}`;
+
+      const text = `🎁 *Invite Friends & Earn Points*\n\n` +
+        `• *Your Current Balance:* \`${points} Points\` 🪙\n` +
+        `• *Friends Invited:* \`${refCount}\` 👥\n\n` +
+        `Share your personal referral link with friends:\n` +
+        `\`${refLink}\``;
+
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.url('✈️ Share on Telegram', shareUrl)],
+        [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+      ]);
+
+      return await ctx.reply(text, {
+        parse_mode: 'Markdown',
+        ...keyboard
+      });
+    } catch (err) {
+      console.error('Error in invite friends:', err);
+      return await ctx.reply('⚠️ Failed to load referral information.');
+    }
+  };
+
+  bot.action('user_menu_invite', handleInviteFriends);
+
+  // -------------------------------------------------------------
+  // Admin Management & Stats
   // -------------------------------------------------------------
   const handleStats = async (ctx) => {
     const userId = ctx.from.id;
@@ -475,8 +703,11 @@ export function createBot(env) {
         `💬 *Total Comments:* \`${stats.total_comments}\``;
 
       const keyboard = Markup.inlineKeyboard([
-        [Markup.button.callback('🔄 Refresh Stats', 'admin_refresh_stats')],
-        [Markup.button.callback('📑 Manage Posts', 'admin_post_list')]
+        [
+          Markup.button.callback('🔄 Refresh Stats', 'admin_refresh_stats'),
+          Markup.button.callback('📑 Manage Posts', 'admin_post_list')
+        ],
+        [Markup.button.callback('🔙 Main Menu', 'admin_main_menu')]
       ]);
 
       if (ctx.callbackQuery) {
@@ -506,29 +737,36 @@ export function createBot(env) {
     }
 
     try {
+      if (ctx.callbackQuery) await ctx.answerCbQuery();
       const posts = await getAllPostsForAdmin(env);
       if (!posts || posts.length === 0) {
         return await ctx.reply('📭 No posts found in database.', {
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('📊 View Stats', 'admin_stats')]
+            [Markup.button.callback('➕ Create New Post', 'admin_menu_addpost')],
+            [Markup.button.callback('🔙 Main Menu', 'admin_main_menu')]
           ])
         });
       }
 
-      const buttons = posts.slice(0, 10).map(p => {
+      const buttons = posts.slice(0, 12).map(p => {
         const statusIcon = p.status === 'published' ? '🟢' : p.status === 'scheduled' ? '🟣' : '🟡';
+        const star = p.is_promoted ? '⭐ ' : '';
         return [
           Markup.button.callback(
-            `${statusIcon} #${p.id} ${p.title.slice(0, 24)}...`,
+            `${statusIcon} ${star}#${p.id} ${p.title.slice(0, 22)}...`,
             `admin_post_view_${p.id}`
           )
         ];
       });
 
-      buttons.unshift([Markup.button.callback('📊 View Hub Stats', 'admin_stats')]);
+      buttons.push([
+        Markup.button.callback('➕ Create New Post', 'admin_menu_addpost'),
+        Markup.button.callback('📊 Stats', 'admin_stats')
+      ]);
+      buttons.push([Markup.button.callback('🔙 Main Menu', 'admin_main_menu')]);
 
       const keyboard = Markup.inlineKeyboard(buttons);
-      return await ctx.reply('👑 *Admin Panel: Posts & Management*\nSelect a post to manage or view stats:', {
+      return await ctx.reply('👑 *Admin Panel: Posts Management*\nSelect any post to edit or manage:', {
         parse_mode: 'Markdown',
         ...keyboard
       });
@@ -540,6 +778,7 @@ export function createBot(env) {
 
   bot.command('admin', handleAdminPosts);
   bot.command('posts', handleAdminPosts);
+  bot.action('admin_post_list', handleAdminPosts);
 
   // -------------------------------------------------------------
   // Admin Single Post View & Detailed Controls
@@ -582,7 +821,8 @@ export function createBot(env) {
           Markup.button.callback('🗑️ Delete Post', `admin_post_del_ask_${post.id}`)
         ],
         [
-          Markup.button.callback('🔙 Back to Posts List', 'admin_post_list')
+          Markup.button.callback('🔙 Back to Posts List', 'admin_post_list'),
+          Markup.button.callback('🏠 Main Menu', 'admin_main_menu')
         ]
       ]);
 
@@ -620,7 +860,6 @@ export function createBot(env) {
       await togglePromotePost(env, postId, newPromoted);
       await ctx.answerCbQuery(newPromoted ? 'Post Featured & Pinned!' : 'Post unfeatured');
       
-      // Refresh post view
       const updated = await getPostById(env, postId, userId, true);
       const statusIcon = updated.status === 'published' ? '🟢 Published' : updated.status === 'scheduled' ? '🟣 Scheduled' : '🟡 Draft';
 
@@ -735,9 +974,136 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
+  // Settings Panel in Telegram (Buttons Only)
+  // -------------------------------------------------------------
+  const handleSettingsMenu = async (ctx) => {
+    const userId = ctx.from?.id;
+    if (String(userId) !== String(env.ADMIN_ID)) return;
+
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
+
+    const settings = await getSettings(env);
+    const channels = await getForceChannels(env);
+
+    const refStatus = settings.referral_enabled ? '🟢 ON' : '🔴 OFF';
+    const shortStatus = settings.shortener_enabled ? '🟢 ON' : '🔴 OFF';
+    const bannerStatus = settings.banner_enabled ? '🟢 ON' : '🔴 OFF';
+    const forceStatus = settings.force_join_enabled ? '🟢 ON' : '🔴 OFF';
+
+    const text = `⚙️ *Hub Settings & Monetization*\n\n` +
+      `• 🎁 *Referrals & Points:* ${refStatus} (\`${settings.referral_points || 10} pts\`)\n` +
+      `• 🔗 *Shortener Locker:* ${shortStatus} (Mode: \`${settings.shortener_mode}\`)\n` +
+      `• 🖼️ *Sponsor Banner:* ${bannerStatus}\n` +
+      `• 📢 *Force Join Channels:* ${forceStatus} (\`${channels.length} channel(s)\`)\n\n` +
+      `Tap any toggle button below:`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`🎁 Referrals: ${refStatus}`, 'admin_toggle_ref'),
+        Markup.button.callback(`🔗 Shortener: ${shortStatus}`, 'admin_toggle_shortener')
+      ],
+      [
+        Markup.button.callback(`🖼️ Banner: ${bannerStatus}`, 'admin_toggle_banner'),
+        Markup.button.callback(`📢 Force Join: ${forceStatus}`, 'admin_toggle_forcejoin')
+      ],
+      [
+        Markup.button.callback('➕ Add Force Channel', 'admin_add_channel_btn'),
+        Markup.button.callback('📋 View Channels', 'admin_view_channels_btn')
+      ],
+      [Markup.button.callback('🔙 Back to Main Menu', 'admin_main_menu')]
+    ]);
+
+    if (ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+      } catch (e) {
+        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+      }
+    } else {
+      return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+    }
+  };
+
+  bot.action('admin_menu_settings', handleSettingsMenu);
+
+  bot.action('admin_toggle_ref', async (ctx) => {
+    const settings = await getSettings(env);
+    await updateSetting(env, 'referral_enabled', !settings.referral_enabled);
+    return await handleSettingsMenu(ctx);
+  });
+
+  bot.action('admin_toggle_shortener', async (ctx) => {
+    const settings = await getSettings(env);
+    await updateSetting(env, 'shortener_enabled', !settings.shortener_enabled);
+    return await handleSettingsMenu(ctx);
+  });
+
+  bot.action('admin_toggle_banner', async (ctx) => {
+    const settings = await getSettings(env);
+    await updateSetting(env, 'banner_enabled', !settings.banner_enabled);
+    return await handleSettingsMenu(ctx);
+  });
+
+  bot.action('admin_toggle_forcejoin', async (ctx) => {
+    const settings = await getSettings(env);
+    await updateSetting(env, 'force_join_enabled', !settings.force_join_enabled);
+    return await handleSettingsMenu(ctx);
+  });
+
+  bot.action('admin_add_channel_btn', async (ctx) => {
+    const userId = ctx.from.id;
+    if (String(userId) !== String(env.ADMIN_ID)) return;
+
+    await setSession(env, userId, { step: 'AWAITING_FORCE_CHANNEL' });
+    await ctx.answerCbQuery();
+
+    return await ctx.reply(
+      '📢 *Add Force Join Channel*\n\n' +
+      'Please send the channel details in the format:\n' +
+      '`<Channel ID> | <Channel Title> | <Invite Link>`\n\n' +
+      '*Example:* `-1001234567890 | Official Channel | https://t.me/mychannel`\n\n' +
+      '*(Make sure this bot is added as an Administrator in your channel!)*',
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', 'admin_menu_settings')]])
+      }
+    );
+  });
+
+  bot.action('admin_view_channels_btn', async (ctx) => {
+    const channels = await getForceChannels(env);
+    await ctx.answerCbQuery();
+
+    if (!channels || channels.length === 0) {
+      return await ctx.reply('📢 No force-join channels added yet.', {
+        ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back to Settings', 'admin_menu_settings')]])
+      });
+    }
+
+    const buttons = channels.map(ch => [
+      Markup.button.callback(`🗑️ Remove ${ch.channel_title}`, `admin_del_channel_${ch.id}`)
+    ]);
+    buttons.push([Markup.button.callback('🔙 Back to Settings', 'admin_menu_settings')]);
+
+    return await ctx.reply(
+      '📢 *Registered Force Join Channels:*\nTap to remove any channel:',
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard(buttons)
+      }
+    );
+  });
+
+  bot.action(/^admin_del_channel_(\d+)$/, async (ctx) => {
+    const id = ctx.match[1];
+    await removeForceChannel(env, id);
+    await ctx.answerCbQuery('Channel removed');
+    return await handleSettingsMenu(ctx);
+  });
+
+  // -------------------------------------------------------------
   // Bot-side Post Inline Editors
   // -------------------------------------------------------------
-  // Edit Title
   bot.action(/^admin_edit_title_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) return;
@@ -760,7 +1126,6 @@ export function createBot(env) {
     );
   });
 
-  // Edit Image
   bot.action(/^admin_edit_img_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) return;
@@ -799,7 +1164,6 @@ export function createBot(env) {
     });
   });
 
-  // Edit Direct Link
   bot.action(/^admin_edit_link_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) return;
@@ -838,7 +1202,6 @@ export function createBot(env) {
     });
   });
 
-  // Add Files / Folders to Existing Post
   bot.action(/^admin_edit_files_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) return;
@@ -858,12 +1221,10 @@ export function createBot(env) {
     return await sendStep3Prompt(ctx, { currentFiles: [], foldersCount: post?.folders?.length || 0, title: post?.title });
   });
 
-  bot.action('admin_post_list', handleAdminPosts);
-
   // -------------------------------------------------------------
-  // Broadcast Command (/broadcast) & Multi-Step Flow
+  // Broadcast Flow (Button Triggered)
   // -------------------------------------------------------------
-  bot.command('broadcast', async (ctx) => {
+  const startBroadcastFlow = async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) {
       return await ctx.reply('⛔ Unauthorized. Admin access only.');
@@ -877,6 +1238,8 @@ export function createBot(env) {
       broadcastBtnUrl: null
     });
 
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
+
     return await ctx.reply(
       '📢 *Step 1/3: Broadcast Announcement*\n\n' +
       'Please send the **Text Message** you would like to broadcast to all registered users (Markdown formatting supported):',
@@ -887,7 +1250,10 @@ export function createBot(env) {
         ])
       }
     );
-  });
+  };
+
+  bot.command('broadcast', startBroadcastFlow);
+  bot.action('admin_menu_broadcast', startBroadcastFlow);
 
   bot.action('broadcast_skip_photo', async (ctx) => {
     const userId = ctx.from.id;
@@ -992,12 +1358,15 @@ export function createBot(env) {
       `• *Total Users:* \`${userIds.length}\`\n` +
       `• *Sent Successfully:* \`${sent}\`\n` +
       `• *Failed / Blocked:* \`${failed}\``,
-      { parse_mode: 'Markdown' }
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'admin_main_menu')]])
+      }
     );
   });
 
   // -------------------------------------------------------------
-  // /cancel Command & Button Callback
+  // Cancel Command & Button Callback
   // -------------------------------------------------------------
   const handleCancel = async (ctx) => {
     const session = await getSession(env, ctx.from.id);
@@ -1011,22 +1380,26 @@ export function createBot(env) {
       }
       await clearSession(env, ctx.from.id);
       if (ctx.callbackQuery) await ctx.answerCbQuery('Action cancelled');
-      return await ctx.reply('❌ Action was cancelled.');
+      return await ctx.reply('❌ Action was cancelled.', {
+        ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+      });
     }
     if (ctx.callbackQuery) await ctx.answerCbQuery('No active action');
-    return await ctx.reply('ℹ️ No active action to cancel.');
+    return await ctx.reply('ℹ️ No active action to cancel.', {
+      ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+    });
   };
 
   bot.command('cancel', handleCancel);
   bot.action('step_cancel', handleCancel);
 
   // -------------------------------------------------------------
-  // /addpost Command (Admin Only)
+  // Post Creation Flow (Button Triggered)
   // -------------------------------------------------------------
-  bot.command('addpost', async (ctx) => {
+  const startAddPostFlow = async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) {
-      return await ctx.reply('⛔ Unauthorized. This command is restricted to the administrator.');
+      return await ctx.reply('⛔ Unauthorized. Admin access only.');
     }
 
     const sessionData = {
@@ -1041,6 +1414,7 @@ export function createBot(env) {
     };
 
     await setSession(env, userId, sessionData);
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
 
     const keyboard = Markup.inlineKeyboard([
       [Markup.button.callback('❌ Cancel', 'step_cancel')]
@@ -1054,11 +1428,11 @@ export function createBot(env) {
         ...keyboard
       }
     );
-  });
+  };
 
-  // -------------------------------------------------------------
-  // Step 2 & Mode Callbacks
-  // -------------------------------------------------------------
+  bot.command('addpost', startAddPostFlow);
+  bot.action('admin_menu_addpost', startAddPostFlow);
+
   bot.action('step_skip_image', async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) return;
@@ -1178,9 +1552,6 @@ export function createBot(env) {
     );
   });
 
-  // -------------------------------------------------------------
-  // /done Command & Finish Callbacks
-  // -------------------------------------------------------------
   const handleFinishFolders = async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) return;
@@ -1188,7 +1559,7 @@ export function createBot(env) {
     const session = await getSession(env, userId);
     if (!session || !session.title) {
       if (ctx.callbackQuery) await ctx.answerCbQuery('No active post creation');
-      return await ctx.reply('ℹ️ You are not currently creating a post. Use /addpost to start.');
+      return await ctx.reply('ℹ️ You are not currently creating a post.');
     }
 
     if (session.currentFiles && session.currentFiles.length > 0) {
@@ -1250,7 +1621,7 @@ export function createBot(env) {
   bot.action('step_finish_folders', handleFinishFolders);
 
   // -------------------------------------------------------------
-  // Publish / Schedule / Draft Callback Queries
+  // Publish / Schedule / Draft Actions
   // -------------------------------------------------------------
   bot.action('action_draft', async (ctx) => {
     const userId = ctx.from.id;
@@ -1259,7 +1630,7 @@ export function createBot(env) {
     const session = await getSession(env, userId);
     if (!session || !session.title) {
       await ctx.answerCbQuery('Session expired.');
-      return await ctx.reply('⚠️ Session expired. Please start over with /addpost.');
+      return await ctx.reply('⚠️ Session expired.');
     }
 
     try {
@@ -1291,7 +1662,13 @@ export function createBot(env) {
         `📝 *Post Saved as Draft!*\n\n` +
         `Post ID: \`${postId}\`\n` +
         `Title: *${escapeMarkdown(session.title)}*`,
-        { parse_mode: 'Markdown' }
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📑 Manage Posts', 'admin_post_list')],
+            [Markup.button.callback('🏠 Main Menu', 'admin_main_menu')]
+          ])
+        }
       );
     } catch (err) {
       console.error('Failed to save draft:', err);
@@ -1306,7 +1683,7 @@ export function createBot(env) {
     const session = await getSession(env, userId);
     if (!session || !session.title) {
       await ctx.answerCbQuery('Session expired.');
-      return await ctx.reply('⚠️ Session expired. Please start over with /addpost.');
+      return await ctx.reply('⚠️ Session expired.');
     }
 
     try {
@@ -1342,7 +1719,14 @@ export function createBot(env) {
         `• *Title:* ${escapeMarkdown(session.title)}\n` +
         `• *Deep Link:* ${deepLink}\n\n` +
         `This post is now live on the Web App and ready for all users.`,
-        { parse_mode: 'Markdown' }
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.url('🔗 Open Post Link', deepLink)],
+            [Markup.button.callback('📑 Manage Posts', 'admin_post_list')],
+            [Markup.button.callback('🏠 Main Menu', 'admin_main_menu')]
+          ])
+        }
       );
     } catch (err) {
       console.error('Failed to publish post:', err);
@@ -1357,7 +1741,7 @@ export function createBot(env) {
     const session = await getSession(env, userId);
     if (!session || !session.title) {
       await ctx.answerCbQuery('Session expired.');
-      return await ctx.reply('⚠️ Session expired. Please start over with /addpost.');
+      return await ctx.reply('⚠️ Session expired.');
     }
 
     session.step = 'AWAITING_SCHEDULE_TIME';
@@ -1381,16 +1765,54 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
-  // Multi-step Message Handler
+  // Reply Keyboard Text Router & Multi-step Message Handler
   // -------------------------------------------------------------
   bot.on('message', async (ctx) => {
-    const userId = ctx.from.id;
-    if (String(userId) !== String(env.ADMIN_ID)) return;
+    const userId = ctx.from?.id;
+    const text = ctx.message.text ? ctx.message.text.trim() : null;
 
+    // 1. Check for persistent reply keyboard button clicks
+    if (text) {
+      if (text === '➕ Add Post') return await startAddPostFlow(ctx);
+      if (text === '📑 Manage Posts') return await handleAdminPosts(ctx);
+      if (text === '📊 Stats' || text === '📊 Hub Stats') return await handleStats(ctx);
+      if (text === '📢 Broadcast') return await startBroadcastFlow(ctx);
+      if (text === '⚙️ Settings') return await handleSettingsMenu(ctx);
+      if (text === '🔍 Browse Posts' || text === '🔍 Browse All Posts') return await handleBrowsePosts(ctx);
+      if (text === '🔖 Saved Posts' || text === '🔖 My Saved Posts') return await handleSavedPosts(ctx);
+      if (text === '🎁 Invite Friends') return await handleInviteFriends(ctx);
+      if (text === '❌ Cancel') return await handleCancel(ctx);
+    }
+
+    // 2. Multi-step session handling
     const session = await getSession(env, userId);
     if (!session || !session.step) return;
 
-    const text = ctx.message.text ? ctx.message.text.trim() : null;
+    // STEP: AWAITING_FORCE_CHANNEL
+    if (session.step === 'AWAITING_FORCE_CHANNEL') {
+      if (!text || !text.includes('|')) {
+        return await ctx.reply('⚠️ Invalid format. Format: `<Channel ID> | <Channel Title> | <Invite Link>`');
+      }
+      const parts = text.split('|').map(s => s.trim());
+      const channel_id = parts[0];
+      const channel_title = parts[1];
+      const invite_link = parts[2];
+
+      if (!channel_id || !channel_title || !invite_link) {
+        return await ctx.reply('⚠️ Please provide Channel ID, Channel Title, and Invite Link separated by `|`.');
+      }
+
+      await addForceChannel(env, { channel_id, channel_title, invite_link });
+      await clearSession(env, userId);
+
+      return await ctx.reply(
+        `✅ *Channel Added Successfully!*\n\n• *Title:* ${escapeMarkdown(channel_title)}\n• *ID:* \`${channel_id}\``,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback('⚙️ Return to Settings', 'admin_menu_settings')]])
+        }
+      );
+    }
 
     // STEP: EDIT_TITLE
     if (session.step === 'EDIT_TITLE') {
@@ -1832,7 +2254,13 @@ export function createBot(env) {
           `• *Title:* ${escapeMarkdown(session.title)}\n` +
           `• *Publish Date (UTC):* ${parsedDate.toUTCString()}\n\n` +
           `The Cloudflare Cron Trigger will automatically publish this post when the scheduled time arrives.`,
-          { parse_mode: 'Markdown' }
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback('📑 Manage Posts', 'admin_post_list')],
+              [Markup.button.callback('🏠 Main Menu', 'admin_main_menu')]
+            ])
+          }
         );
       } catch (err) {
         console.error('Failed to schedule post:', err);
