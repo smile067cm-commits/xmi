@@ -21,7 +21,7 @@ crons = ["*/5 * * * *"]
 # Environment Variables
 # -------------------------------------------------------------
 [vars]
-BOT_USERNAME = "xminty_bot"
+BOT_USERNAME = "Xminty_bot"
 WEB_APP_URL = "https://xmi.lakshminighty1.workers.dev"
 
 # -------------------------------------------------------------

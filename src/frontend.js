@@ -4,7 +4,7 @@
  */
 
 export function getAppHtml(env) {
-  const botUsername = env.BOT_USERNAME || 'xminty_bot';
+  const botUsername = env.BOT_USERNAME || 'Xminty_bot';
   const adminId = env.ADMIN_ID || '';
 
   return `<!DOCTYPE html>
