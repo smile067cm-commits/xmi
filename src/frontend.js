@@ -916,6 +916,7 @@ export function getAppHtml(env) {
       <button class="admin-tab" data-filter="published">Published</button>
       <button class="admin-tab" data-filter="draft">Drafts</button>
       <button class="admin-tab" data-filter="scheduled">Scheduled</button>
+      <button class="admin-tab" id="btnOpenHubStats" style="margin-left: auto; background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.4); color: #60a5fa;">📊 Hub Stats</button>
     </div>
 
     <!-- Controls Bar -->
@@ -965,7 +966,7 @@ export function getAppHtml(env) {
     </div>
   </div>
 
-  <!-- Admin Analytics Modal -->
+  <!-- Admin Post Analytics Modal -->
   <div class="modal-overlay" id="analyticsModal">
     <div class="modal-content">
       <div class="modal-header">
@@ -996,6 +997,128 @@ export function getAppHtml(env) {
         </div>
 
         <div id="analyticsList" style="display: flex; flex-direction: column; gap: 8px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Global Hub Stats Modal -->
+  <div class="modal-overlay" id="globalStatsModal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 class="modal-title">📊 Hub Analytics & Statistics</h3>
+        <button class="modal-close" id="btnGlobalStatsClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px;">
+          <div class="stat-card">
+            <div class="stat-value" id="gStatUsers">0</div>
+            <div class="stat-label">👥 Total Users</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="gStatPosts">0</div>
+            <div class="stat-label">📄 Total Posts</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" style="color: #4ade80;" id="gStatPublished">0</div>
+            <div class="stat-label">🟢 Published</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" style="color: #fbbf24;" id="gStatDrafts">0</div>
+            <div class="stat-label">🟡 Drafts</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" style="color: #c084fc;" id="gStatScheduled">0</div>
+            <div class="stat-label">🟣 Scheduled</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" style="color: #f59e0b;" id="gStatFeatured">0</div>
+            <div class="stat-label">⭐ Featured</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" style="color: #38bdf8;" id="gStatViews">0</div>
+            <div class="stat-label">👁️ Total Views</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" style="color: #a78bfa;" id="gStatAccesses">0</div>
+            <div class="stat-label">📥 File Accesses</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" style="color: #f43f5e;" id="gStatLikes">0</div>
+            <div class="stat-label">❤️ Total Likes</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" style="color: #2dd4bf;" id="gStatComments">0</div>
+            <div class="stat-label">💬 Comments</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary" style="width: 100%;" id="btnRefreshHubStats">
+          🔄 Refresh Statistics
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Post Modal -->
+  <div class="modal-overlay" id="editPostModal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 class="modal-title">✏️ Edit Post</h3>
+        <button class="modal-close" id="btnEditPostClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="editPostForm" style="display: flex; flex-direction: column; gap: 14px;">
+          <input type="hidden" id="editPostId" />
+          
+          <div>
+            <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; color: var(--text-muted);">Title</label>
+            <input type="text" id="editPostTitle" class="comment-input" style="width: 100%;" required />
+          </div>
+
+          <div>
+            <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; color: var(--text-muted);">Preview Image URL</label>
+            <input type="url" id="editPostImage" class="comment-input" style="width: 100%;" placeholder="https://example.com/image.jpg" />
+          </div>
+
+          <div>
+            <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; color: var(--text-muted);">Direct Download / External Link</label>
+            <input type="url" id="editPostLink" class="comment-input" style="width: 100%;" placeholder="https://mega.nz/... or https://drive.google.com/..." />
+          </div>
+
+          <div>
+            <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; color: var(--text-muted);">Button Label</label>
+            <input type="text" id="editPostLinkLabel" class="comment-input" style="width: 100%;" placeholder="e.g. Download HD Pack / Open Drive" />
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+              <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; color: var(--text-muted);">Status</label>
+              <select id="editPostStatus" class="comment-input" style="width: 100%; background: var(--bg-card); color: var(--text-primary);">
+                <option value="published">🟢 Published</option>
+                <option value="draft">🟡 Draft</option>
+                <option value="scheduled">🟣 Scheduled</option>
+              </select>
+            </div>
+            
+            <div id="editScheduledGroup" style="display: none;">
+              <label style="display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; color: var(--text-muted);">Publish Date (UTC)</label>
+              <input type="datetime-local" id="editPostScheduledAt" class="comment-input" style="width: 100%;" />
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+            <input type="checkbox" id="editPostPromoted" style="width: 18px; height: 18px; cursor: pointer;" />
+            <label for="editPostPromoted" style="font-size: 0.9rem; font-weight: 600; cursor: pointer;">⭐ Feature / Pin to Top</label>
+          </div>
+
+          <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button type="submit" class="btn btn-primary" style="flex: 1;" id="btnSavePostEdit">
+              💾 Save Changes
+            </button>
+            <button type="button" class="btn btn-ghost" style="color: #f87171;" id="btnDeleteFromEdit">
+              🗑️ Delete
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>
@@ -1200,7 +1323,8 @@ export function getAppHtml(env) {
             <div class="post-image-container">
               <div class="post-badges-top">
                 \${isPromoted ? '<span class="post-status-badge status-promoted">⭐ Featured</span>' : '<span></span>'}
-                \${isAdmin ? \`<span class="post-status-badge status-\${post.status}">\${post.status}</span>\` : ''}
+                \${(isAdmin && post.status === 'draft') ? '<span class="post-status-badge status-draft">📝 Draft</span>' : ''}
+                \${(isAdmin && post.status === 'scheduled') ? '<span class="post-status-badge status-scheduled">⏰ Scheduled</span>' : ''}
               </div>
               
               \${hasImage ? \`
@@ -1214,14 +1338,14 @@ export function getAppHtml(env) {
             <div class="post-body">
               \${isAdmin ? \`
                 <div class="admin-card-actions">
+                  <button class="admin-btn" onclick="openEditPostModal(\${post.id})">
+                    ✏️ Edit
+                  </button>
                   <button class="admin-btn admin-btn-promote" onclick="togglePromote(\${post.id}, \${!isPromoted})">
                     \${isPromoted ? '⭐ Unfeature' : '⭐ Promote'}
                   </button>
                   <button class="admin-btn" onclick="openAnalyticsModal(\${post.id}, '\${escapeHtml(post.title)}')">
-                    📊 Stats (\${post.view_count || 0})
-                  </button>
-                  <button class="admin-btn" onclick="togglePostStatus(\${post.id}, '\${post.status}')">
-                    \${post.status === 'published' ? '📝 Draft' : '🚀 Publish'}
+                    📊 Analytics (\${post.view_count || 0})
                   </button>
                   <button class="admin-btn admin-btn-delete" onclick="deletePostItem(\${post.id})">
                     🗑️ Delete
@@ -1550,12 +1674,130 @@ export function getAppHtml(env) {
     }
 
     // =========================================================
+    // GLOBAL HUB STATS MODAL
+    // =========================================================
+    async function openGlobalStatsModal() {
+      if (!isAdmin || !currentUser) return;
+      const modal = document.getElementById('globalStatsModal');
+      modal.classList.add('active');
+
+      try {
+        const res = await fetch(\`\${API_BASE_URL}/api/admin/stats?user_id=\${currentUser.id}\`);
+        if (!res.ok) throw new Error('Failed to load stats');
+        const data = await res.json();
+        const s = data.stats || {};
+
+        document.getElementById('gStatUsers').textContent = s.total_users || 0;
+        document.getElementById('gStatPosts').textContent = s.total_posts || 0;
+        document.getElementById('gStatPublished').textContent = s.published_posts || 0;
+        document.getElementById('gStatDrafts').textContent = s.draft_posts || 0;
+        document.getElementById('gStatScheduled').textContent = s.scheduled_posts || 0;
+        document.getElementById('gStatFeatured').textContent = s.promoted_posts || 0;
+        document.getElementById('gStatViews').textContent = s.total_views || 0;
+        document.getElementById('gStatAccesses').textContent = s.total_file_accesses || 0;
+        document.getElementById('gStatLikes').textContent = s.total_likes || 0;
+        document.getElementById('gStatComments').textContent = s.total_comments || 0;
+      } catch (err) {
+        showToast('Error loading stats: ' + err.message);
+      }
+    }
+
+    // =========================================================
+    // EDIT POST MODAL
+    // =========================================================
+    function openEditPostModal(postId) {
+      if (!isAdmin) return;
+      const post = allPosts.find(p => p.id === postId);
+      if (!post) return;
+
+      document.getElementById('editPostId').value = post.id;
+      document.getElementById('editPostTitle').value = post.title || '';
+      document.getElementById('editPostImage').value = post.preview_image || '';
+      document.getElementById('editPostLink').value = post.direct_link || '';
+      document.getElementById('editPostLinkLabel').value = post.direct_link_title || '';
+      document.getElementById('editPostStatus').value = post.status || 'published';
+      document.getElementById('editPostPromoted').checked = Boolean(post.is_promoted);
+
+      const schedGroup = document.getElementById('editScheduledGroup');
+      if (post.status === 'scheduled') {
+        schedGroup.style.display = 'block';
+        if (post.scheduled_at) {
+          try {
+            document.getElementById('editPostScheduledAt').value = new Date(post.scheduled_at).toISOString().slice(0, 16);
+          } catch (e) {}
+        }
+      } else {
+        schedGroup.style.display = 'none';
+      }
+
+      document.getElementById('editPostModal').classList.add('active');
+    }
+
+    async function submitEditPostForm(e) {
+      e.preventDefault();
+      if (!isAdmin || !currentUser) return;
+
+      const postId = document.getElementById('editPostId').value;
+      const title = document.getElementById('editPostTitle').value.trim();
+      const preview_image = document.getElementById('editPostImage').value.trim();
+      const direct_link = document.getElementById('editPostLink').value.trim();
+      const direct_link_title = document.getElementById('editPostLinkLabel').value.trim();
+      const status = document.getElementById('editPostStatus').value;
+      const is_promoted = document.getElementById('editPostPromoted').checked;
+      const scheduledVal = document.getElementById('editPostScheduledAt').value;
+
+      let scheduled_at = null;
+      if (status === 'scheduled' && scheduledVal) {
+        scheduled_at = new Date(scheduledVal).toISOString();
+      }
+
+      const saveBtn = document.getElementById('btnSavePostEdit');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      try {
+        const res = await fetch(\`\${API_BASE_URL}/api/admin/posts/\${postId}/edit\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: currentUser.id,
+            title,
+            preview_image,
+            direct_link,
+            direct_link_title,
+            status,
+            scheduled_at,
+            is_promoted
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Failed to update post');
+        }
+
+        showToast('✅ Post updated successfully!');
+        document.getElementById('editPostModal').classList.remove('active');
+        loadPosts();
+      } catch (err) {
+        showToast('⚠️ ' + err.message);
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '💾 Save Changes';
+      }
+    }
+
+    // =========================================================
     // EVENT LISTENERS
     // =========================================================
     function setupEventListeners() {
       // Admin filter tabs
       document.querySelectorAll('.admin-tab').forEach(tab => {
         tab.addEventListener('click', (e) => {
+          if (e.target.id === 'btnOpenHubStats') {
+            openGlobalStatsModal();
+            return;
+          }
           document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
           e.target.classList.add('active');
           currentFilter = e.target.getAttribute('data-filter');
@@ -1579,6 +1821,12 @@ export function getAppHtml(env) {
         loadPosts();
       });
 
+      // Hub Stats buttons
+      document.getElementById('btnRefreshHubStats').addEventListener('click', () => {
+        showToast('Refreshing stats...');
+        openGlobalStatsModal();
+      });
+
       // Search Filter
       document.getElementById('searchInput').addEventListener('input', () => {
         filterAndRenderPosts();
@@ -1593,15 +1841,45 @@ export function getAppHtml(env) {
         document.getElementById('analyticsModal').classList.remove('active');
       });
 
+      document.getElementById('btnGlobalStatsClose').addEventListener('click', () => {
+        document.getElementById('globalStatsModal').classList.remove('active');
+      });
+
+      document.getElementById('btnEditPostClose').addEventListener('click', () => {
+        document.getElementById('editPostModal').classList.remove('active');
+      });
+
+      // Modal Background Click
       document.getElementById('commentsModal').addEventListener('click', (e) => {
-        if (e.target.id === 'commentsModal') {
-          document.getElementById('commentsModal').classList.remove('active');
-        }
+        if (e.target.id === 'commentsModal') document.getElementById('commentsModal').classList.remove('active');
       });
 
       document.getElementById('analyticsModal').addEventListener('click', (e) => {
-        if (e.target.id === 'analyticsModal') {
-          document.getElementById('analyticsModal').classList.remove('active');
+        if (e.target.id === 'analyticsModal') document.getElementById('analyticsModal').classList.remove('active');
+      });
+
+      document.getElementById('globalStatsModal').addEventListener('click', (e) => {
+        if (e.target.id === 'globalStatsModal') document.getElementById('globalStatsModal').classList.remove('active');
+      });
+
+      document.getElementById('editPostModal').addEventListener('click', (e) => {
+        if (e.target.id === 'editPostModal') document.getElementById('editPostModal').classList.remove('active');
+      });
+
+      // Edit Post Status change handler
+      document.getElementById('editPostStatus').addEventListener('change', (e) => {
+        document.getElementById('editScheduledGroup').style.display = e.target.value === 'scheduled' ? 'block' : 'none';
+      });
+
+      // Edit Post Form Submit
+      document.getElementById('editPostForm').addEventListener('submit', submitEditPostForm);
+
+      // Delete Post from Edit Modal
+      document.getElementById('btnDeleteFromEdit').addEventListener('click', () => {
+        const id = document.getElementById('editPostId').value;
+        if (id) {
+          document.getElementById('editPostModal').classList.remove('active');
+          deletePostItem(Number(id));
         }
       });
 

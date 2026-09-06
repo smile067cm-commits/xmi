@@ -11,7 +11,8 @@ import {
   togglePromotePost,
   recordPostView,
   recordFileAccess,
-  getPostAnalytics
+  getPostAnalytics,
+  getGlobalStats
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
@@ -255,6 +256,65 @@ export function createRouter() {
       return jsonResponse({ success: true, message: 'Post deleted' });
     } catch (err) {
       console.error('API delete post error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/admin/posts/:id/edit - Full Post Edit (Admin Only)
+  // -------------------------------------------------------------
+  router.post('/api/admin/posts/:id/edit', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const body = await request.json();
+      const {
+        user_id,
+        title,
+        preview_image,
+        direct_link,
+        direct_link_title,
+        status,
+        scheduled_at,
+        is_promoted
+      } = body || {};
+
+      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const updatePayload = {};
+      if (title !== undefined) updatePayload.title = title.trim();
+      if (preview_image !== undefined) updatePayload.preview_image = preview_image ? preview_image.trim() : null;
+      if (direct_link !== undefined) updatePayload.direct_link = direct_link ? direct_link.trim() : null;
+      if (direct_link_title !== undefined) updatePayload.direct_link_title = direct_link_title ? direct_link_title.trim() : null;
+      if (status !== undefined) updatePayload.status = status;
+      if (scheduled_at !== undefined) updatePayload.scheduled_at = scheduled_at;
+      if (is_promoted !== undefined) updatePayload.is_promoted = Boolean(is_promoted);
+
+      const updated = await updatePost(env, id, updatePayload);
+      return jsonResponse({ success: true, post: updated });
+    } catch (err) {
+      console.error('API edit post error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // GET /api/admin/stats - Global Hub Statistics (Admin Only)
+  // -------------------------------------------------------------
+  router.get('/api/admin/stats', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin access', 403);
+      }
+
+      const stats = await getGlobalStats(env);
+      return jsonResponse({ success: true, stats });
+    } catch (err) {
+      console.error('API global stats error:', err);
       return errorResponse(err.message, 500);
     }
   });

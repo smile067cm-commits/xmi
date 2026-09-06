@@ -438,6 +438,64 @@ export async function getPostAnalytics(env, postId) {
   };
 }
 
+/**
+ * Fetch Global Hub Analytics & Metrics (Admin Only)
+ */
+export async function getGlobalStats(env) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+
+  try {
+    const [usersRes, postsRes, viewsRes, filesRes, likesRes, commentsRes] = await Promise.all([
+      fetch(`${baseUrl}/users?select=id`, { headers }),
+      fetch(`${baseUrl}/posts?select=id,status,is_promoted`, { headers }),
+      fetch(`${baseUrl}/post_views?select=id`, { headers }),
+      fetch(`${baseUrl}/file_access_logs?select=id`, { headers }),
+      fetch(`${baseUrl}/likes?select=post_id`, { headers }),
+      fetch(`${baseUrl}/comments?select=id`, { headers })
+    ]);
+
+    const users = usersRes.ok ? await usersRes.json() : [];
+    const posts = postsRes.ok ? await postsRes.json() : [];
+    const views = viewsRes.ok ? await viewsRes.json() : [];
+    const files = filesRes.ok ? await filesRes.json() : [];
+    const likes = likesRes.ok ? await likesRes.json() : [];
+    const comments = commentsRes.ok ? await commentsRes.json() : [];
+
+    const publishedCount = posts.filter(p => p.status === 'published').length;
+    const draftsCount = posts.filter(p => p.status === 'draft').length;
+    const scheduledCount = posts.filter(p => p.status === 'scheduled').length;
+    const promotedCount = posts.filter(p => p.is_promoted).length;
+
+    return {
+      total_users: users.length,
+      total_posts: posts.length,
+      published_posts: publishedCount,
+      draft_posts: draftsCount,
+      scheduled_posts: scheduledCount,
+      promoted_posts: promotedCount,
+      total_views: views.length,
+      total_file_accesses: files.length,
+      total_likes: likes.length,
+      total_comments: comments.length
+    };
+  } catch (err) {
+    console.error('Error fetching global stats:', err);
+    return {
+      total_users: 0,
+      total_posts: 0,
+      published_posts: 0,
+      draft_posts: 0,
+      scheduled_posts: 0,
+      promoted_posts: 0,
+      total_views: 0,
+      total_file_accesses: 0,
+      total_likes: 0,
+      total_comments: 0
+    };
+  }
+}
+
 // ------------------------------------------
 // 4. COMMENTS & MODERATION
 // ------------------------------------------

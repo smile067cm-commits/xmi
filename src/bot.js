@@ -9,7 +9,8 @@ import {
   updatePost,
   deletePost,
   createFolder,
-  createFiles
+  createFiles,
+  getGlobalStats
 } from './db.js';
 import { getSession, setSession, clearSession } from './session.js';
 
@@ -207,6 +208,53 @@ export function createBot(env) {
   // -------------------------------------------------------------
   // Admin Management (/admin or /posts)
   // -------------------------------------------------------------
+  // Admin Management (/admin, /posts, /stats)
+  // -------------------------------------------------------------
+  const handleStats = async (ctx) => {
+    const userId = ctx.from.id;
+    if (String(userId) !== String(env.ADMIN_ID)) {
+      return await ctx.reply('⛔ Unauthorized. Admin access only.');
+    }
+
+    try {
+      const stats = await getGlobalStats(env);
+      const text = `📊 *xmi Hub Analytics & Statistics*\n\n` +
+        `👥 *Total Users:* \`${stats.total_users}\`\n\n` +
+        `📄 *Total Posts:* \`${stats.total_posts}\`\n` +
+        `   • 🟢 Published: \`${stats.published_posts}\`\n` +
+        `   • 🟡 Drafts: \`${stats.draft_posts}\`\n` +
+        `   • 🟣 Scheduled: \`${stats.scheduled_posts}\`\n` +
+        `   • ⭐ Featured: \`${stats.promoted_posts}\`\n\n` +
+        `👁️ *Total Impressions / Views:* \`${stats.total_views}\`\n` +
+        `📥 *Total File & Link Accesses:* \`${stats.total_file_accesses}\`\n` +
+        `❤️ *Total Likes:* \`${stats.total_likes}\`\n` +
+        `💬 *Total Comments:* \`${stats.total_comments}\``;
+
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('🔄 Refresh Stats', 'admin_refresh_stats')],
+        [Markup.button.callback('📑 Manage Posts', 'admin_post_list')]
+      ]);
+
+      if (ctx.callbackQuery) {
+        await ctx.answerCbQuery('Stats refreshed');
+        try {
+          return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+        } catch (e) {
+          return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+        }
+      } else {
+        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+      }
+    } catch (err) {
+      console.error('Stats error:', err);
+      return await ctx.reply(`⚠️ Failed to load stats: ${err.message}`);
+    }
+  };
+
+  bot.command('stats', handleStats);
+  bot.action('admin_stats', handleStats);
+  bot.action('admin_refresh_stats', handleStats);
+
   const handleAdminPosts = async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) {
@@ -216,7 +264,11 @@ export function createBot(env) {
     try {
       const posts = await getAllPostsForAdmin(env);
       if (!posts || posts.length === 0) {
-        return await ctx.reply('📭 No posts found in database.');
+        return await ctx.reply('📭 No posts found in database.', {
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📊 View Stats', 'admin_stats')]
+          ])
+        });
       }
 
       const buttons = posts.slice(0, 10).map(p => {
@@ -229,8 +281,10 @@ export function createBot(env) {
         ];
       });
 
+      buttons.unshift([Markup.button.callback('📊 View Hub Stats', 'admin_stats')]);
+
       const keyboard = Markup.inlineKeyboard(buttons);
-      return await ctx.reply('👑 *Admin Panel: All Posts*\nSelect a post to manage:', {
+      return await ctx.reply('👑 *Admin Panel: Posts & Management*\nSelect a post to manage or view stats:', {
         parse_mode: 'Markdown',
         ...keyboard
       });
@@ -274,6 +328,7 @@ export function createBot(env) {
         `• *Title:* ${escapeMarkdown(post.title)}\n` +
         `• *Status:* ${statusIcon}\n` +
         `• *Folders:* ${post.folders?.length || 0}\n` +
+        `• *Views:* ${post.view_count || 0}\n` +
         `• *Likes:* ${post.like_count}\n` +
         `• *Comments:* ${post.comment_count}\n` +
         (post.direct_link ? `• *Direct Link:* ${escapeMarkdown(post.direct_link)}\n` : ''),
@@ -326,9 +381,16 @@ export function createBot(env) {
   const handleCancel = async (ctx) => {
     const session = await getSession(env, ctx.from.id);
     if (session) {
+      if (session.postId) {
+        try {
+          await deletePost(env, session.postId);
+        } catch (e) {
+          console.warn('Could not delete temporary post record on cancel:', e);
+        }
+      }
       await clearSession(env, ctx.from.id);
       if (ctx.callbackQuery) await ctx.answerCbQuery('Action cancelled');
-      return await ctx.reply('❌ Action was cancelled.');
+      return await ctx.reply('❌ Action was cancelled. No post was saved.');
     }
     if (ctx.callbackQuery) await ctx.answerCbQuery('No active action');
     return await ctx.reply('ℹ️ No active action to cancel.');
@@ -503,13 +565,25 @@ export function createBot(env) {
     if (String(userId) !== String(env.ADMIN_ID)) return;
 
     const session = await getSession(env, userId);
-    if (!session || !session.postId) {
+    if (!session || !session.title) {
       if (ctx.callbackQuery) await ctx.answerCbQuery('No active post creation');
       return await ctx.reply('ℹ️ You are not currently creating a post. Use /addpost to start.');
     }
 
     if (session.currentFiles && session.currentFiles.length > 0) {
       try {
+        if (!session.postId) {
+          const post = await createPost(env, {
+            title: session.title,
+            preview_image: session.preview_image || null,
+            direct_link: session.direct_link || null,
+            direct_link_title: session.direct_link_title || null,
+            status: 'draft',
+            created_by: userId
+          });
+          session.postId = post.id;
+        }
+
         const folder = await createFolder(env, {
           post_id: session.postId,
           name: 'General Resources'
@@ -562,21 +636,46 @@ export function createBot(env) {
     if (String(userId) !== String(env.ADMIN_ID)) return;
 
     const session = await getSession(env, userId);
-    if (!session || !session.postId) {
+    if (!session || !session.title) {
       await ctx.answerCbQuery('Session expired.');
       return await ctx.reply('⚠️ Session expired. Please start over with /addpost.');
     }
 
-    await updatePost(env, session.postId, { status: 'draft' });
-    await clearSession(env, userId);
-    await ctx.answerCbQuery('Saved as draft');
+    try {
+      let postId = session.postId;
+      if (!postId) {
+        const created = await createPost(env, {
+          title: session.title,
+          preview_image: session.preview_image || null,
+          direct_link: session.direct_link || null,
+          direct_link_title: session.direct_link_title || null,
+          status: 'draft',
+          created_by: userId
+        });
+        postId = created.id;
+      } else {
+        await updatePost(env, postId, {
+          title: session.title,
+          preview_image: session.preview_image || null,
+          direct_link: session.direct_link || null,
+          direct_link_title: session.direct_link_title || null,
+          status: 'draft'
+        });
+      }
 
-    return await ctx.reply(
-      `📝 *Post Saved as Draft!*\n\n` +
-      `Post ID: \`${session.postId}\`\n` +
-      `Title: *${escapeMarkdown(session.title)}*`,
-      { parse_mode: 'Markdown' }
-    );
+      await clearSession(env, userId);
+      await ctx.answerCbQuery('Saved as draft');
+
+      return await ctx.reply(
+        `📝 *Post Saved as Draft!*\n\n` +
+        `Post ID: \`${postId}\`\n` +
+        `Title: *${escapeMarkdown(session.title)}*`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (err) {
+      console.error('Failed to save draft:', err);
+      return await ctx.reply(`⚠️ Failed to save draft: ${err.message}`);
+    }
   });
 
   bot.action('action_publish', async (ctx) => {
@@ -584,25 +683,50 @@ export function createBot(env) {
     if (String(userId) !== String(env.ADMIN_ID)) return;
 
     const session = await getSession(env, userId);
-    if (!session || !session.postId) {
+    if (!session || !session.title) {
       await ctx.answerCbQuery('Session expired.');
       return await ctx.reply('⚠️ Session expired. Please start over with /addpost.');
     }
 
-    await updatePost(env, session.postId, { status: 'published' });
-    await clearSession(env, userId);
-    await ctx.answerCbQuery('Published!');
+    try {
+      let postId = session.postId;
+      if (!postId) {
+        const created = await createPost(env, {
+          title: session.title,
+          preview_image: session.preview_image || null,
+          direct_link: session.direct_link || null,
+          direct_link_title: session.direct_link_title || null,
+          status: 'published',
+          created_by: userId
+        });
+        postId = created.id;
+      } else {
+        await updatePost(env, postId, {
+          title: session.title,
+          preview_image: session.preview_image || null,
+          direct_link: session.direct_link || null,
+          direct_link_title: session.direct_link_title || null,
+          status: 'published'
+        });
+      }
 
-    const botInfo = await ctx.telegram.getMe();
-    const deepLink = `https://t.me/${botInfo.username}?start=post_${session.postId}`;
+      await clearSession(env, userId);
+      await ctx.answerCbQuery('Published!');
 
-    return await ctx.reply(
-      `🚀 *Post Published Successfully!*\n\n` +
-      `• *Title:* ${escapeMarkdown(session.title)}\n` +
-      `• *Deep Link:* ${deepLink}\n\n` +
-      `This post is now live on the Web App and ready for users.`,
-      { parse_mode: 'Markdown' }
-    );
+      const botInfo = await ctx.telegram.getMe();
+      const deepLink = `https://t.me/${botInfo.username}?start=post_${postId}`;
+
+      return await ctx.reply(
+        `🚀 *Post Published Successfully!*\n\n` +
+        `• *Title:* ${escapeMarkdown(session.title)}\n` +
+        `• *Deep Link:* ${deepLink}\n\n` +
+        `This post is now live on the Web App and ready for all users.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (err) {
+      console.error('Failed to publish post:', err);
+      return await ctx.reply(`⚠️ Failed to publish post: ${err.message}`);
+    }
   });
 
   bot.action('action_schedule', async (ctx) => {
@@ -610,7 +734,7 @@ export function createBot(env) {
     if (String(userId) !== String(env.ADMIN_ID)) return;
 
     const session = await getSession(env, userId);
-    if (!session || !session.postId) {
+    if (!session || !session.title) {
       await ctx.answerCbQuery('Session expired.');
       return await ctx.reply('⚠️ Session expired. Please start over with /addpost.');
     }
@@ -654,36 +778,22 @@ export function createBot(env) {
       }
 
       session.title = text;
+      session.step = 'AWAITING_IMAGE';
+      await setSession(env, userId, session);
 
-      try {
-        const post = await createPost(env, {
-          title: text,
-          preview_image: null,
-          status: 'draft',
-          created_by: userId
-        });
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('⏩ Skip Image', 'step_skip_image')],
+        [Markup.button.callback('❌ Cancel', 'step_cancel')]
+      ]);
 
-        session.postId = post.id;
-        session.step = 'AWAITING_IMAGE';
-        await setSession(env, userId, session);
-
-        const keyboard = Markup.inlineKeyboard([
-          [Markup.button.callback('⏩ Skip Image', 'step_skip_image')],
-          [Markup.button.callback('❌ Cancel', 'step_cancel')]
-        ]);
-
-        return await ctx.reply(
-          `🖼️ *Step 2/3: Preview Image*\n\n` +
-          `Send an image URL (e.g. \`https://example.com/image.jpg\`) or upload a photo, or tap Skip:`,
-          {
-            parse_mode: 'Markdown',
-            ...keyboard
-          }
-        );
-      } catch (e) {
-        console.error('Failed to create post in Supabase:', e);
-        return await ctx.reply(`⚠️ Failed to create post in database: ${e.message}`);
-      }
+      return await ctx.reply(
+        `🖼️ *Step 2/3: Preview Image*\n\n` +
+        `Send an image URL (e.g. \`https://example.com/image.jpg\`) or upload a photo, or tap Skip:`,
+        {
+          parse_mode: 'Markdown',
+          ...keyboard
+        }
+      );
     }
 
     // STEP 2: Awaiting Image
@@ -709,11 +819,7 @@ export function createBot(env) {
 
       if (imageUrl) {
         session.preview_image = imageUrl;
-        try {
-          await updatePost(env, session.postId, { preview_image: imageUrl });
-        } catch (e) {
-          console.warn('Failed to update post preview image:', e);
-        }
+        await setSession(env, userId, session);
       }
 
       return await sendContentChoicePrompt(ctx, session);
@@ -731,37 +837,27 @@ export function createBot(env) {
 
       session.direct_link = urlPart;
       session.direct_link_title = labelParts || 'Open / Download Link';
+      session.step = 'AWAITING_PUBLISH_CHOICE';
+      await setSession(env, userId, session);
 
-      try {
-        await updatePost(env, session.postId, {
-          direct_link: urlPart,
-          direct_link_title: session.direct_link_title
-        });
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('🚀 Publish Now', 'action_publish')],
+        [Markup.button.callback('📅 Schedule', 'action_schedule')],
+        [Markup.button.callback('📝 Save as Draft', 'action_draft')],
+        [Markup.button.callback('❌ Cancel', 'step_cancel')]
+      ]);
 
-        session.step = 'AWAITING_PUBLISH_CHOICE';
-        await setSession(env, userId, session);
-
-        const keyboard = Markup.inlineKeyboard([
-          [Markup.button.callback('🚀 Publish Now', 'action_publish')],
-          [Markup.button.callback('📅 Schedule', 'action_schedule')],
-          [Markup.button.callback('📝 Save as Draft', 'action_draft')]
-        ]);
-
-        return await ctx.reply(
-          `✅ *Direct Link Saved!*\n\n` +
-          `• *Title:* ${escapeMarkdown(session.title)}\n` +
-          `• *Link:* ${escapeMarkdown(urlPart)}\n` +
-          `• *Label:* ${escapeMarkdown(session.direct_link_title)}\n\n` +
-          `Choose how you would like to publish this post:`,
-          {
-            parse_mode: 'Markdown',
-            ...keyboard
-          }
-        );
-      } catch (err) {
-        console.error('Failed to update direct link:', err);
-        return await ctx.reply(`⚠️ Failed to save link: ${err.message}`);
-      }
+      return await ctx.reply(
+        `🎉 *Post Ready!*\n\n` +
+        `• *Title:* ${escapeMarkdown(session.title)}\n` +
+        `• *Direct Link:* ${escapeMarkdown(session.direct_link)}\n` +
+        `• *Button Label:* ${escapeMarkdown(session.direct_link_title)}\n\n` +
+        `Choose how to save this post:`,
+        {
+          parse_mode: 'Markdown',
+          ...keyboard
+        }
+      );
     }
 
     // Folders and Files Mode
@@ -869,6 +965,18 @@ export function createBot(env) {
         }
 
         try {
+          if (!session.postId) {
+            const post = await createPost(env, {
+              title: session.title,
+              preview_image: session.preview_image || null,
+              direct_link: session.direct_link || null,
+              direct_link_title: session.direct_link_title || null,
+              status: 'draft',
+              created_by: userId
+            });
+            session.postId = post.id;
+          }
+
           const folder = await createFolder(env, {
             post_id: session.postId,
             name: text
@@ -927,10 +1035,28 @@ export function createBot(env) {
       }
 
       try {
-        await updatePost(env, session.postId, {
-          status: 'scheduled',
-          scheduled_at: parsedDate.toISOString()
-        });
+        let postId = session.postId;
+        if (!postId) {
+          const post = await createPost(env, {
+            title: session.title,
+            preview_image: session.preview_image || null,
+            direct_link: session.direct_link || null,
+            direct_link_title: session.direct_link_title || null,
+            status: 'scheduled',
+            scheduled_at: parsedDate.toISOString(),
+            created_by: userId
+          });
+          postId = post.id;
+        } else {
+          await updatePost(env, postId, {
+            title: session.title,
+            preview_image: session.preview_image || null,
+            direct_link: session.direct_link || null,
+            direct_link_title: session.direct_link_title || null,
+            status: 'scheduled',
+            scheduled_at: parsedDate.toISOString()
+          });
+        }
 
         await clearSession(env, userId);
 
