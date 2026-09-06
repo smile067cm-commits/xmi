@@ -869,6 +869,7 @@ export async function getSettings(env) {
     points_per_post: Number(map.points_per_post || map.points_per_post_download) || 1,
     points_per_post_download: Number(map.points_per_post_download || map.points_per_post) || 1,
     auto_delete_minutes: (map.auto_delete_minutes !== undefined && map.auto_delete_minutes !== null) ? Number(map.auto_delete_minutes) : 30,
+    protect_all_posts: Boolean(map.protect_all_posts || map.restrict_forwarding_all),
     banner_enabled: Boolean(map.banner_enabled),
     banner_image: map.banner_image || '',
     banner_link: map.banner_link || '',

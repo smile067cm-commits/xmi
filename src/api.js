@@ -209,6 +209,8 @@ export function createRouter() {
         'points_per_post',
         'points_per_post_download',
         'auto_delete_minutes',
+        'protect_all_posts',
+        'restrict_forwarding_all',
         'banner_enabled',
         'banner_image',
         'banner_link',

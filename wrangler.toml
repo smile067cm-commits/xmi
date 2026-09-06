@@ -5,10 +5,10 @@ compatibility_flags = ["nodejs_compat"]
 keep_vars = true
 
 # -------------------------------------------------------------
-# Cron Trigger: Checks every 5 minutes for scheduled posts
+# Cron Trigger: Runs every minute for scheduled posts & auto-deleting ephemeral messages
 # -------------------------------------------------------------
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
 
 # -------------------------------------------------------------
 # KV Namespace (Optional for Multi-step Session Persistence)

@@ -12,6 +12,9 @@ export default {
    */
   async fetch(request, env, ctx) {
     try {
+      if (ctx && typeof ctx.waitUntil === 'function') {
+        ctx.waitUntil(processEphemeralDeletions(env).catch(() => {}));
+      }
       return await router.fetch(request, env, ctx);
     } catch (err) {
       console.error('Fatal Worker Error:', err);

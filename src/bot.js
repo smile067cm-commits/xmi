@@ -35,7 +35,8 @@ import {
   addAdmin,
   deleteAdmin,
   getDatabaseStorageStats,
-  optimizeDatabase
+  optimizeDatabase,
+  recordPostView
 } from './db.js';
 import { getSession, setSession, clearSession } from './session.js';
 
@@ -120,24 +121,33 @@ async function checkLockerPass(ctx, env, userId, postId) {
  * Delivers post details, files, and links (as buttons) to user with auto-deletion timer & content protection
  */
 async function sendPostToUser(ctx, env, post, postId) {
+  // Record view count
+  if (postId && ctx.from?.id) {
+    recordPostView(env, {
+      post_id: Number(postId),
+      user_id: Number(ctx.from.id),
+      username: ctx.from.username || null,
+      first_name: ctx.from.first_name || ''
+    }).catch(e => console.warn('Record view warning in bot:', e.message));
+  }
+
   const folders = await getPostFoldersWithFiles(env, postId);
   const settings = await getSettings(env);
   const postTimer = (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined) ? Number(post.auto_delete_minutes) : null;
   const autoDeleteMinutes = postTimer !== null ? postTimer : Number(settings.auto_delete_minutes !== undefined ? settings.auto_delete_minutes : 30);
-  const protectContent = Boolean(post.protect_content);
-  const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
+  const protectContent = Boolean(settings.protect_all_posts || post.protect_content);
 
   const sentMessageIds = [];
   const inlineButtons = [];
   const physicalFiles = [];
 
-  // 1. Collect Direct Link as Button
+  // 1. Direct Link Button ONLY (if present)
   if (post.direct_link) {
     const linkLabel = post.direct_link_title || 'Open / Download Link';
     inlineButtons.push([Markup.button.url(`📥 ${linkLabel}`, post.direct_link)]);
   }
 
-  // 2. Collect Folder Links as Buttons vs Physical Files
+  // 2. Folder Link Buttons ONLY (if present)
   if (folders && folders.length > 0) {
     for (const folder of folders) {
       const files = folder.files || [];
@@ -153,11 +163,7 @@ async function sendPostToUser(ctx, env, post, postId) {
     }
   }
 
-  // 3. Mini App & Menu Navigation Buttons
-  inlineButtons.push([Markup.button.webApp('🚀 View in Mini App', appUrl)]);
-  inlineButtons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
-
-  // 4. Build Unified Post Message / Caption
+  // 3. Clean Caption (Title, Category, Tags)
   let captionText = `📌 *${escapeMarkdown(post.title)}*\n`;
   if (post.category && post.category !== 'All') {
     captionText += `📁 *Category:* \`${escapeMarkdown(post.category)}\`\n`;
@@ -166,29 +172,20 @@ async function sendPostToUser(ctx, env, post, postId) {
     captionText += `🏷️ *Tags:* \`${escapeMarkdown(post.tags)}\`\n`;
   }
 
-  if (autoDeleteMinutes > 0) {
-    captionText += `\n⏳ ⚠️ *Auto-Delete:* Content will self-destruct in *${autoDeleteMinutes} mins*!\n`;
-    if (protectContent) {
-      captionText += `🔒 *Content protection is enabled (forwarding restricted).*\n`;
-    } else {
-      captionText += `👉 *Save to Saved Messages before it disappears.*\n`;
-    }
-  } else if (protectContent) {
-    captionText += `\n🔒 *Content protection is enabled (forwarding restricted).*\n`;
-  }
-
   if (physicalFiles.length > 0) {
     captionText += `\n📥 *Delivering ${physicalFiles.length} file(s) below:*`;
   }
 
-  // 5. Send Image, Title, and All Buttons in the SAME Message!
+  const keyboardMarkup = inlineButtons.length > 0 ? Markup.inlineKeyboard(inlineButtons) : undefined;
+
+  // 4. Send Image, Title, and Link Buttons in ONE Message
   if (post.preview_image) {
     try {
       const imgMsg = await ctx.replyWithPhoto(post.preview_image, {
         caption: captionText,
         parse_mode: 'Markdown',
         protect_content: protectContent,
-        ...Markup.inlineKeyboard(inlineButtons)
+        ...(keyboardMarkup || {})
       });
       if (imgMsg?.message_id) sentMessageIds.push(imgMsg.message_id);
     } catch (e) {
@@ -196,7 +193,7 @@ async function sendPostToUser(ctx, env, post, postId) {
       const txtMsg = await ctx.reply(captionText, {
         parse_mode: 'Markdown',
         protect_content: protectContent,
-        ...Markup.inlineKeyboard(inlineButtons)
+        ...(keyboardMarkup || {})
       });
       if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
     }
@@ -204,12 +201,12 @@ async function sendPostToUser(ctx, env, post, postId) {
     const txtMsg = await ctx.reply(captionText, {
       parse_mode: 'Markdown',
       protect_content: protectContent,
-      ...Markup.inlineKeyboard(inlineButtons)
+      ...(keyboardMarkup || {})
     });
     if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
   }
 
-  // 6. Send Physical Files Separately ONLY if Physical Files Exist
+  // 5. Send Physical Files Separately ONLY if Physical Files Exist
   if (physicalFiles.length > 0) {
     for (const { folder, file } of physicalFiles) {
       try {
@@ -233,20 +230,39 @@ async function sendPostToUser(ctx, env, post, postId) {
     }
   }
 
-  // 7. Register all sent message IDs for auto-deletion
-  if (autoDeleteMinutes > 0 && sentMessageIds.length > 0) {
-    const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
-    const records = sentMessageIds.map(mid => ({
-      chat_id: ctx.chat.id,
-      message_id: mid,
-      delete_at: deleteAt,
-      is_deleted: false
-    }));
-    addEphemeralMessages(env, records).catch(e => console.error('Error saving ephemeral records:', e));
+  // 6. Send Expires Warning as a SEPARATE MESSAGE
+  if (autoDeleteMinutes > 0) {
+    const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
+      `This message and all files/links above will automatically self-destruct & delete in *${autoDeleteMinutes} minutes*!\n\n` +
+      (protectContent
+        ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
+        : `👉 *Please forward or save to your Saved Messages now before they disappear.*`);
+
+    try {
+      const noticeMsg = await ctx.reply(noticeText, {
+        parse_mode: 'Markdown',
+        protect_content: protectContent
+      });
+      if (noticeMsg?.message_id) sentMessageIds.push(noticeMsg.message_id);
+    } catch (nErr) {
+      console.warn('Failed to send auto-delete notice:', nErr.message);
+    }
+
+    // Register all sent message IDs for auto-deletion
+    if (sentMessageIds.length > 0) {
+      const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
+      const records = sentMessageIds.map(mid => ({
+        chat_id: ctx.chat.id,
+        message_id: mid,
+        delete_at: deleteAt,
+        is_deleted: false
+      }));
+      await addEphemeralMessages(env, records);
+    }
   }
 
   // Background cleanup of any past expired messages
-  processEphemeralDeletions(env).catch(e => console.warn('Ephemeral cleanup warning:', e.message));
+  await processEphemeralDeletions(env).catch(e => console.warn('Ephemeral cleanup warning:', e.message));
 }
 
 /**
@@ -1340,10 +1356,12 @@ export function createBot(env) {
     const shortStatus = settings.shortener_enabled ? '🟢 ON' : '🔴 OFF';
     const bannerStatus = settings.banner_enabled ? '🟢 ON' : '🔴 OFF';
     const forceStatus = settings.force_join_enabled ? '🟢 ON' : '🔴 OFF';
+    const protectAllStatus = settings.protect_all_posts ? '🟢 ON' : '🔴 OFF';
 
     const text = `⚙️ *Hub Settings & Rules*\n\n` +
       `• 🎁 *Referrals & Points:* ${refStatus} (\`${settings.referral_points || 10} pts\`)\n` +
-      `• 🔗 *Shortener Locker:* ${shortStatus} (Mode: \`${settings.shortener_mode}\`)\n` +
+      `• 🔗 *Shortener Locker:* ${shortStatus}\n` +
+      `• 🔒 *Restrict Forward All:* ${protectAllStatus}\n` +
       `• ⏳ *Global Auto-Delete:* \`${settings.auto_delete_minutes || 30} minutes\`\n` +
       `• 🪙 *Points per Download:* \`${settings.points_per_post_download || 1} pt\`\n` +
       `• 🖼️ *Sponsor Banner:* ${bannerStatus}\n` +
@@ -1356,18 +1374,21 @@ export function createBot(env) {
         Markup.button.callback(`🔗 Shortener: ${shortStatus}`, 'admin_toggle_shortener')
       ],
       [
-        Markup.button.callback(`🖼️ Banner: ${bannerStatus}`, 'admin_toggle_banner'),
-        Markup.button.callback(`📢 Force Join: ${forceStatus}`, 'admin_toggle_forcejoin')
+        Markup.button.callback(`🔒 Restrict Forward: ${protectAllStatus}`, 'admin_toggle_protect_all'),
+        Markup.button.callback(`🖼️ Banner: ${bannerStatus}`, 'admin_toggle_banner')
       ],
       [
-        Markup.button.callback('➕ Add Force Channel', 'admin_add_channel_btn'),
-        Markup.button.callback('📋 View Channels', 'admin_view_channels_btn')
+        Markup.button.callback(`📢 Force Join: ${forceStatus}`, 'admin_toggle_forcejoin'),
+        Markup.button.callback('➕ Add Force Channel', 'admin_add_channel_btn')
       ],
       [
-        Markup.button.callback('👥 Manage Admins', 'admin_menu_admins'),
-        Markup.button.callback('💾 Storage Meter', 'admin_menu_storage')
+        Markup.button.callback('📋 View Channels', 'admin_view_channels_btn'),
+        Markup.button.callback('👥 Manage Admins', 'admin_menu_admins')
       ],
-      [Markup.button.callback('🔙 Back to Main Menu', 'admin_main_menu')]
+      [
+        Markup.button.callback('💾 Storage Meter', 'admin_menu_storage'),
+        Markup.button.callback('🔙 Back to Main Menu', 'admin_main_menu')
+      ]
     ]);
 
     if (ctx.callbackQuery) {
@@ -1392,6 +1413,12 @@ export function createBot(env) {
   bot.action('admin_toggle_shortener', async (ctx) => {
     const settings = await getSettings(env);
     await updateSetting(env, 'shortener_enabled', !settings.shortener_enabled);
+    return await handleSettingsMenu(ctx);
+  });
+
+  bot.action('admin_toggle_protect_all', async (ctx) => {
+    const settings = await getSettings(env);
+    await updateSetting(env, 'protect_all_posts', !settings.protect_all_posts);
     return await handleSettingsMenu(ctx);
   });
 
