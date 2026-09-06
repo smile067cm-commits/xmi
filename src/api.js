@@ -339,6 +339,7 @@ export function createRouter() {
         success: true,
         token: result.token,
         verify_url: result.verify_url,
+        bot_verify_link: result.bot_verify_link,
         dest_url: result.dest_url,
         shortener_name: result.shortener_name,
         reward_points: result.reward_points
@@ -390,20 +391,60 @@ export function createRouter() {
     }
   });
 
+  // Generate a new bot destination verify link for admin to shorten
+  router.get('/api/admin/shorteners/generate-link', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const token = 'v_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+      const botUsername = env.BOT_USERNAME || 'Xminty_bot';
+      const botVerifyLink = `https://t.me/${botUsername}?start=verify_${token}`;
+      const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
+      const webVerifyLink = `${appUrl}/verify?token=${token}`;
+
+      return jsonResponse({
+        success: true,
+        token,
+        bot_verify_link: botVerifyLink,
+        web_verify_link: webVerifyLink
+      });
+    } catch (err) {
+      console.error('API generate verify link error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
   router.post('/api/admin/shorteners', async (request, env) => {
     try {
       const body = await request.json();
-      const { user_id, name, api_url, api_key, enabled } = body || {};
+      const { user_id, title, name, shortener_url, api_url, api_key, bot_verify_link, reward_points, enabled } = body || {};
 
       if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
-      if (!name || !api_url) {
-        return errorResponse('Shortener name and api_url are required', 400);
+      const shTitle = title || name || 'Shortener';
+      const shUrl = shortener_url || api_url;
+
+      if (!shTitle || !shUrl) {
+        return errorResponse('Shortener title and shortened link URL are required', 400);
       }
 
-      const added = await addShortener(env, { name, api_url, api_key, enabled: enabled ?? true });
+      const added = await addShortener(env, {
+        title: shTitle,
+        name: shTitle,
+        shortener_url: shUrl,
+        api_url: api_url || '',
+        api_key: api_key || '',
+        bot_verify_link: bot_verify_link || '',
+        reward_points: Number(reward_points) || 5,
+        enabled: enabled ?? true
+      });
       return jsonResponse({ success: true, shortener: added });
     } catch (err) {
       console.error('API add shortener error:', err);

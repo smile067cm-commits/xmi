@@ -26,6 +26,8 @@ import {
   createVerifyToken,
   verifyTokenAndGrantPass,
   checkAndDeductPostAccess,
+  addEphemeralMessages,
+  processEphemeralDeletions,
   getAllUserIds,
   getUser
 } from './db.js';
@@ -109,61 +111,139 @@ async function checkLockerPass(ctx, env, userId, postId) {
 }
 
 /**
- * Delivers post details and download buttons to user
+ * Delivers post details, files, and links (as buttons) to user with auto-deletion timer
  */
 async function sendPostToUser(ctx, env, post, postId) {
   const folders = await getPostFoldersWithFiles(env, postId);
-  const hasFolders = folders && folders.length > 0;
-  const hasDirectLink = Boolean(post.direct_link);
-
-  let messageText = `📌 *${escapeMarkdown(post.title)}*\n\n`;
-
-  const keyboardButtons = [];
-
-  // Direct Link Button
-  if (hasDirectLink) {
-    const linkLabel = post.direct_link_title || '📥 Open / Download Link';
-    keyboardButtons.push([Markup.button.url(`🔗 ${linkLabel}`, post.direct_link)]);
-  }
-
-  // Folder Buttons
-  if (hasFolders) {
-    messageText += `📂 *Content Folders:*\nTap a folder below to access files:\n`;
-    folders.forEach(folder => {
-      const fileCount = folder.files?.length || 0;
-      keyboardButtons.push([
-        Markup.button.callback(
-          `📁 ${folder.name} (${fileCount} item${fileCount === 1 ? '' : 's'})`,
-          `folder_${folder.id}`
-        )
-      ]);
-    });
-  }
-
+  const settings = await getSettings(env);
+  const autoDeleteMinutes = Number(settings.auto_delete_minutes !== undefined ? settings.auto_delete_minutes : 30);
   const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
-  keyboardButtons.push([
-    Markup.button.webApp('🚀 View in Mini App', appUrl),
-    Markup.button.callback('🔙 Main Menu', 'main_menu')
-  ]);
 
-  const keyboard = Markup.inlineKeyboard(keyboardButtons);
+  const sentMessageIds = [];
 
+  let headerText = `📌 *${escapeMarkdown(post.title)}*\n`;
+  if (post.category && post.category !== 'All') {
+    headerText += `📁 *Category:* \`${escapeMarkdown(post.category)}\`\n`;
+  }
+  if (post.tags) {
+    headerText += `🏷️ *Tags:* \`${escapeMarkdown(post.tags)}\`\n`;
+  }
+  headerText += `\n📥 *Delivering post content & files below:*`;
+
+  // 1. Post Preview Image or Header
   if (post.preview_image) {
     try {
-      return await ctx.replyWithPhoto(post.preview_image, {
-        caption: messageText,
-        parse_mode: 'Markdown',
-        ...keyboard
+      const imgMsg = await ctx.replyWithPhoto(post.preview_image, {
+        caption: headerText,
+        parse_mode: 'Markdown'
       });
+      if (imgMsg?.message_id) sentMessageIds.push(imgMsg.message_id);
     } catch (e) {
-      console.warn('Failed to send photo preview, falling back to text:', e.message);
+      const txtMsg = await ctx.reply(headerText, { parse_mode: 'Markdown' });
+      if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
+    }
+  } else {
+    const txtMsg = await ctx.reply(headerText, { parse_mode: 'Markdown' });
+    if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
+  }
+
+  // 2. Direct Link (Sent as Inline Button)
+  if (post.direct_link) {
+    const linkLabel = post.direct_link_title || 'Open / Download Link';
+    try {
+      const directMsg = await ctx.reply(`🔗 *Content Link:*\nTap the button below to access:`, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.url(`📥 ${linkLabel}`, post.direct_link)]
+        ])
+      });
+      if (directMsg?.message_id) sentMessageIds.push(directMsg.message_id);
+    } catch (dErr) {
+      console.warn('Failed to send direct link message:', dErr.message);
     }
   }
 
-  return await ctx.reply(messageText, {
-    parse_mode: 'Markdown',
-    ...keyboard
-  });
+  // 3. Folders & Files (Links sent as buttons, documents sent/copied to chat)
+  if (folders && folders.length > 0) {
+    for (const folder of folders) {
+      const files = folder.files || [];
+      if (files.length > 0) {
+        for (const file of files) {
+          try {
+            const isLink = file.mime_type === 'link' || file.file_id?.startsWith('http://') || file.file_id?.startsWith('https://');
+            if (isLink) {
+              const linkBtnTitle = file.file_name || 'Open Download Link';
+              const fileLinkMsg = await ctx.reply(
+                `🔗 *${escapeMarkdown(folder.name)}* ➔ *${escapeMarkdown(file.file_name || 'Link')}*`,
+                {
+                  parse_mode: 'Markdown',
+                  ...Markup.inlineKeyboard([
+                    [Markup.button.url(`📥 ${linkBtnTitle}`, file.file_id)]
+                  ])
+                }
+              );
+              if (fileLinkMsg?.message_id) sentMessageIds.push(fileLinkMsg.message_id);
+            } else if (file.channel_message_id && env.CHANNEL_ID) {
+              const copied = await ctx.telegram.copyMessage(
+                ctx.chat.id,
+                env.CHANNEL_ID,
+                Number(file.channel_message_id)
+              );
+              if (copied?.message_id) sentMessageIds.push(copied.message_id);
+            } else if (file.file_id) {
+              const sentDoc = await ctx.telegram.sendDocument(ctx.chat.id, file.file_id);
+              if (sentDoc?.message_id) sentMessageIds.push(sentDoc.message_id);
+            }
+          } catch (fileErr) {
+            console.warn(`Failed to deliver file ${file.id}:`, fileErr.message);
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Auto-Delete Notice at the End
+  if (autoDeleteMinutes > 0) {
+    const noticeText = `⏳ ⚠️ *Auto-Delete Notice:*\n\n` +
+      `All files and links above will automatically self-destruct & delete in *${autoDeleteMinutes} minutes*!\n\n` +
+      `👉 *Please forward or save them to your Saved Messages now before they disappear.*`;
+
+    try {
+      const noticeMsg = await ctx.reply(noticeText, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.webApp('🚀 View in Mini App', appUrl)],
+          [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+        ])
+      });
+      if (noticeMsg?.message_id) sentMessageIds.push(noticeMsg.message_id);
+
+      // Register sent message IDs for auto-deletion
+      const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
+      const records = sentMessageIds.map(mid => ({
+        chat_id: ctx.chat.id,
+        message_id: mid,
+        delete_at: deleteAt,
+        is_deleted: false
+      }));
+      addEphemeralMessages(env, records).catch(e => console.error('Error saving ephemeral records:', e));
+    } catch (nErr) {
+      console.warn('Failed to send auto-delete notice:', nErr.message);
+    }
+  } else {
+    try {
+      await ctx.reply(`✅ *All items delivered successfully!*`, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.webApp('🚀 View in Mini App', appUrl)],
+          [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+        ])
+      });
+    } catch (e) {}
+  }
+
+  // Background cleanup of any past expired messages
+  processEphemeralDeletions(env).catch(e => console.warn('Ephemeral cleanup warning:', e.message));
 }
 
 /**

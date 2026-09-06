@@ -190,6 +190,19 @@ ALTER TABLE public.verify_tokens ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ
 CREATE INDEX IF NOT EXISTS idx_verify_tokens_token ON public.verify_tokens(token);
 CREATE INDEX IF NOT EXISTS idx_verify_tokens_user ON public.verify_tokens(user_id);
 
+-- 14. EPHEMERAL MESSAGES (Auto-deletes sent files & links after configured time e.g. 30 mins)
+CREATE TABLE IF NOT EXISTS public.ephemeral_messages (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    chat_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
+    delete_at TIMESTAMPTZ NOT NULL,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ephemeral_messages_delete ON public.ephemeral_messages(delete_at, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_ephemeral_messages_chat ON public.ephemeral_messages(chat_id, message_id);
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.posts ENABLE ROW LEVEL SECURITY;
@@ -204,6 +217,7 @@ ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.force_channels ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_passes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.verify_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ephemeral_messages ENABLE ROW LEVEL SECURITY;
 
 -- Allow full access for service_role key (Drop first if exists to prevent 42710 error)
 DROP POLICY IF EXISTS "Allow service_role full access to users" ON public.users;
@@ -244,3 +258,6 @@ CREATE POLICY "Allow service_role full access to user_passes" ON public.user_pas
 
 DROP POLICY IF EXISTS "Allow service_role full access to verify_tokens" ON public.verify_tokens;
 CREATE POLICY "Allow service_role full access to verify_tokens" ON public.verify_tokens FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to ephemeral_messages" ON public.ephemeral_messages;
+CREATE POLICY "Allow service_role full access to ephemeral_messages" ON public.ephemeral_messages FOR ALL TO service_role USING (true) WITH CHECK (true);

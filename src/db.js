@@ -800,7 +800,7 @@ export async function incrementStatCounter(env, counterName, amount = 1) {
 }
 
 // ------------------------------------------
-// 8. MULTIPLE SHORTENERS MANAGEMENT
+// 8. MULTIPLE SHORTENERS MANAGEMENT (Manual & Direct Shorteners)
 // ------------------------------------------
 export async function getShorteners(env) {
   const settings = await getSettings(env);
@@ -811,14 +811,20 @@ export async function saveShorteners(env, shortenersList) {
   return await updateSetting(env, 'shorteners', shortenersList);
 }
 
-export async function addShortener(env, { name, api_url, api_key, enabled = true }) {
+export async function addShortener(env, { title, name, shortener_url, api_url, api_key, bot_verify_link, reward_points = 5, enabled = true }) {
   const shorteners = await getShorteners(env);
+  const shTitle = title || name || 'Shortener';
   const newShortener = {
     id: 'sh_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
-    name: name || 'Shortener',
+    title: shTitle,
+    name: shTitle,
+    shortener_url: shortener_url || api_url || '',
     api_url: api_url || '',
     api_key: api_key || '',
-    enabled: Boolean(enabled)
+    bot_verify_link: bot_verify_link || '',
+    reward_points: Math.max(1, Number(reward_points) || 5),
+    enabled: Boolean(enabled),
+    created_at: new Date().toISOString()
   };
   shorteners.push(newShortener);
   await saveShorteners(env, shorteners);
@@ -931,55 +937,61 @@ export async function createVerifyToken(env, user_id, target_post_id = null) {
 
   // Generate unique secure verification token
   const token = 'v_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+  const botUsername = env.BOT_USERNAME || 'Xminty_bot';
+  const botVerifyLink = `https://t.me/${botUsername}?start=verify_${token}`;
   const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
   const destUrl = `${appUrl}/verify?token=${token}`;
 
-  const activeShorteners = (settings.shorteners || []).filter(s => s.enabled && s.api_url);
+  const activeShorteners = (settings.shorteners || []).filter(s => s.enabled && (s.shortener_url || s.api_url));
   let shortenerName = 'Direct';
-  let verifyUrl = destUrl;
+  let verifyUrl = botVerifyLink;
+  let rewardPoints = Number(settings.points_per_verify) || 5;
 
   if (activeShorteners.length > 0) {
-    // Pick 1 shortener randomly from active list to distribute traffic
+    // Pick 1 shortener randomly from active list to distribute traffic evenly
     const chosen = activeShorteners[Math.floor(Math.random() * activeShorteners.length)];
-    shortenerName = chosen.name || 'Shortener';
+    shortenerName = chosen.title || chosen.name || 'Shortener';
+    rewardPoints = Number(chosen.reward_points) || rewardPoints;
 
-    try {
-      let callUrl = chosen.api_url;
-      if (callUrl.includes('{KEY}') || callUrl.includes('{URL}')) {
-        callUrl = callUrl
-          .replace('{KEY}', encodeURIComponent(chosen.api_key || ''))
-          .replace('{URL}', encodeURIComponent(destUrl));
-      } else {
-        const sep = callUrl.includes('?') ? '&' : '?';
-        callUrl = `${callUrl}${sep}api=${encodeURIComponent(chosen.api_key || '')}&url=${encodeURIComponent(destUrl)}`;
-      }
+    if (chosen.shortener_url && !chosen.shortener_url.includes('{KEY}') && !chosen.shortener_url.includes('{URL}')) {
+      // Manual Shortened URL configured by admin
+      verifyUrl = chosen.shortener_url;
+    } else if (chosen.api_url) {
+      try {
+        let callUrl = chosen.api_url;
+        if (callUrl.includes('{KEY}') || callUrl.includes('{URL}')) {
+          callUrl = callUrl
+            .replace('{KEY}', encodeURIComponent(chosen.api_key || ''))
+            .replace('{URL}', encodeURIComponent(botVerifyLink));
+        } else {
+          const sep = callUrl.includes('?') ? '&' : '?';
+          callUrl = `${callUrl}${sep}api=${encodeURIComponent(chosen.api_key || '')}&url=${encodeURIComponent(botVerifyLink)}`;
+        }
 
-      // Call shortener API
-      const apiRes = await fetch(callUrl, { method: 'GET' });
-      if (apiRes.ok) {
-        const textData = await apiRes.text();
-        try {
-          const jsonData = JSON.parse(textData);
-          verifyUrl = jsonData.shortenedUrl || jsonData.url || jsonData.short_url || jsonData.link || verifyUrl;
-        } catch {
-          if (textData.startsWith('http')) {
-            verifyUrl = textData.trim();
+        const apiRes = await fetch(callUrl, { method: 'GET' });
+        if (apiRes.ok) {
+          const textData = await apiRes.text();
+          try {
+            const jsonData = JSON.parse(textData);
+            verifyUrl = jsonData.shortenedUrl || jsonData.url || jsonData.short_url || jsonData.link || verifyUrl;
+          } catch {
+            if (textData.startsWith('http')) {
+              verifyUrl = textData.trim();
+            }
           }
         }
+      } catch (e) {
+        console.warn('Shortener API call failed, using fallback verify URL:', e.message);
       }
-    } catch (e) {
-      console.warn('Shortener API call failed, using fallback verify URL:', e.message);
     }
   }
-
-  const rewardPoints = Number(settings.points_per_verify) || 5;
 
   await fetch(`${baseUrl}/verify_tokens`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
       token,
-      user_id,
+      user_id: user_id ? Number(user_id) : null,
       target_post_id: target_post_id ? Number(target_post_id) : null,
       shortener_name: shortenerName,
       reward_points: rewardPoints,
@@ -993,46 +1005,65 @@ export async function createVerifyToken(env, user_id, target_post_id = null) {
     token,
     verify_url: verifyUrl,
     dest_url: destUrl,
+    bot_verify_link: botVerifyLink,
     shortener_name: shortenerName,
     reward_points: rewardPoints
   };
 }
 
-export async function verifyTokenAndGrantPass(env, token) {
+export async function verifyTokenAndGrantPass(env, token, actualUserId = null) {
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
 
   const res = await fetch(`${baseUrl}/verify_tokens?token=eq.${token}&is_used=eq.false`, { headers });
   const rows = res.ok ? await res.json() : [];
-  if (rows.length === 0) return null;
+  
+  let targetUserId = actualUserId;
+  let reward = 5;
+  let targetPostId = null;
 
-  const row = rows[0];
+  if (rows.length > 0) {
+    const row = rows[0];
 
-  // Check expiration (2 hours)
-  if (row.expires_at && new Date(row.expires_at) < new Date()) {
+    // Check expiration (2 hours)
+    if (row.expires_at && new Date(row.expires_at) < new Date()) {
+      return null;
+    }
+
+    targetUserId = actualUserId || row.user_id;
+    reward = Number(row.reward_points) || 5;
+    targetPostId = row.target_post_id;
+
+    // Mark token as used
+    await fetch(`${baseUrl}/verify_tokens?token=eq.${token}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ is_used: true })
+    });
+  } else if (token.startsWith('v_') && actualUserId) {
+    // If it's a general manual verify token used for the first time by this user
+    const settings = await getSettings(env);
+    reward = Number(settings.points_per_verify) || 5;
+  } else {
     return null;
   }
 
-  // Mark token as used
-  await fetch(`${baseUrl}/verify_tokens?token=eq.${token}`, {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify({ is_used: true })
-  });
+  if (!targetUserId) return null;
 
-  const reward = Number(row.reward_points) || 5;
-  const user = await getUser(env, row.user_id);
+  const user = await getUser(env, targetUserId);
   const currentPoints = user ? Number(user.points) || 0 : 0;
   const newPoints = currentPoints + reward;
 
-  await updateUserPoints(env, row.user_id, newPoints);
+  await updateUserPoints(env, targetUserId, newPoints);
 
   // Increment Global Analytics
   incrementStatCounter(env, 'total_verifications', 1);
   incrementStatCounter(env, 'total_points_distributed', reward);
 
   return {
-    ...row,
+    token,
+    user_id: targetUserId,
+    target_post_id: targetPostId,
     reward_points: reward,
     new_points: newPoints
   };
@@ -1077,6 +1108,74 @@ export async function checkAndDeductPostAccess(env, user_id, post_id) {
   };
 }
 
+// ------------------------------------------
+// 13. EPHEMERAL MESSAGES (Auto-Deletion)
+// ------------------------------------------
+export async function addEphemeralMessages(env, records) {
+  if (!records || records.length === 0) return true;
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const res = await fetch(`${baseUrl}/ephemeral_messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(records)
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('Error adding ephemeral messages:', err);
+    return false;
+  }
+}
+
+export async function processEphemeralDeletions(env) {
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const nowIso = new Date().toISOString();
+
+    const fetchUrl = `${baseUrl}/ephemeral_messages?delete_at=lte.${nowIso}&is_deleted=eq.false&limit=100&select=id,chat_id,message_id`;
+    const res = await fetch(fetchUrl, { method: 'GET', headers });
+    if (!res.ok) return 0;
+
+    const pending = await res.json();
+    if (!pending || pending.length === 0) return 0;
+
+    const deletedIds = [];
+    for (const item of pending) {
+      try {
+        const deleteUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/deleteMessage`;
+        await fetch(deleteUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: item.chat_id,
+            message_id: item.message_id
+          })
+        });
+        deletedIds.push(item.id);
+      } catch (delErr) {
+        console.warn(`Failed to delete message ${item.message_id} in chat ${item.chat_id}:`, delErr.message);
+        deletedIds.push(item.id);
+      }
+    }
+
+    if (deletedIds.length > 0) {
+      const markUrl = `${baseUrl}/ephemeral_messages?id=in.(${deletedIds.join(',')})`;
+      await fetch(markUrl, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ is_deleted: true })
+      });
+    }
+
+    return deletedIds.length;
+  } catch (err) {
+    console.error('Error in processEphemeralDeletions:', err);
+    return 0;
+  }
+}
+
 export async function getAllUserIds(env) {
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
@@ -1084,4 +1183,5 @@ export async function getAllUserIds(env) {
   const rows = res.ok ? await res.json() : [];
   return rows.map(r => r.id);
 }
+
 

@@ -1,9 +1,8 @@
+// Frontend generator script
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const projectDir = '/storage/emulated/0/termux/ai/bot';
 
 const rawHtml = `<!DOCTYPE html>
 <html lang="en">
@@ -33,7 +32,6 @@ const rawHtml = `<!DOCTYPE html>
       --accent-heart: #f43f5e;
       --accent-admin: #fbbf24;
       --accent-promoted: #f59e0b;
-      --accent-save: #38bdf8;
       --border-radius: 16px;
       --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
@@ -207,6 +205,7 @@ const rawHtml = `<!DOCTYPE html>
       transition: var(--transition);
       border: none;
       outline: none;
+      text-decoration: none;
     }
 
     .btn-sm {
@@ -745,53 +744,29 @@ const rawHtml = `<!DOCTYPE html>
     .action-btn.saved { color: var(--primary); }
     .action-btn.saved svg { fill: var(--primary); stroke: var(--primary); }
 
-    .post-buttons-group {
+    /* Single Open In Bot Button */
+    .btn-open-bot-full {
+      width: 100%;
+      padding: 10px 14px;
+      margin-top: 10px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      color: #04101e;
+      box-shadow: 0 4px 14px var(--primary-glow);
       display: flex;
       align-items: center;
-      gap: 6px;
-    }
-
-    .btn-open-bot {
-      background: rgba(56, 189, 248, 0.12);
-      color: var(--primary);
-      border: 1px solid rgba(56, 189, 248, 0.25);
-      padding: 6px 10px;
-      border-radius: 8px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: var(--transition);
+      justify-content: center;
+      gap: 8px;
       cursor: pointer;
-    }
-
-    .btn-open-bot:hover {
-      background: var(--primary);
-      color: #04101e;
-      box-shadow: 0 4px 12px var(--primary-glow);
-    }
-
-    .btn-direct-link {
-      background: rgba(34, 197, 94, 0.15);
-      color: #4ade80;
-      border: 1px solid rgba(34, 197, 94, 0.3);
-      padding: 6px 10px;
-      border-radius: 8px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
+      border: none;
       transition: var(--transition);
     }
 
-    .btn-direct-link:hover {
-      background: #22c55e;
-      color: #04101e;
-      box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
+    .btn-open-bot-full:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px var(--primary-glow);
     }
 
     /* Modals */
@@ -1107,31 +1082,58 @@ const rawHtml = `<!DOCTYPE html>
         <div class="posts-grid" id="adminPostsGrid"></div>
       </div>
 
-      <!-- Admin Tab 2: Multiple Shorteners -->
+      <!-- Admin Tab 2: Multiple Manual Shorteners -->
       <div id="adminTabShorteners" style="display: none;">
         <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 16px; margin-bottom: 16px;">
-          <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 8px;">➕ Add Monetized Shortener Service</h3>
-          <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 14px;">
-            Add multiple shorteners (GPLinks, Droplink, Shareus, etc.). Users will be randomly distributed across active shorteners.
+          <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 6px;">➕ Create / Add Manual Shortener</h3>
+          <p style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 12px; line-height: 1.4;">
+            1. Copy the auto-generated Destination / Verify Link below.<br/>
+            2. Shorten it on your preferred shortener site (e.g. GPLinks, Droplink).<br/>
+            3. Paste the resulting shortened link below and save!
           </p>
+
           <form id="formAddShortener" style="display: flex; flex-direction: column; gap: 10px;">
             <div>
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Shortener Name</label>
-              <input type="text" id="addShName" class="form-input" placeholder="e.g. GPLinks, Droplink" required />
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Shortener Title / Name</label>
+              <input type="text" id="addShTitle" class="form-input" placeholder="e.g. GPLinks Main, Droplink VIP" required />
             </div>
+
+            <!-- Destination Verify Link Generator -->
+            <div style="background: rgba(30, 41, 59, 0.5); border: 1px dashed rgba(56, 189, 248, 0.3); border-radius: 10px; padding: 10px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                <label style="font-size: 0.74rem; font-weight: 700; color: var(--primary);">🎯 Bot Destination / Verify Link (To Shorten)</label>
+                <button type="button" class="btn btn-sm btn-ghost" id="btnRefreshDestLink" style="font-size: 0.72rem; padding: 2px 6px;">🔄 New Link</button>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <input type="text" id="addShDestLink" class="form-input" style="font-size: 0.78rem; font-family: monospace;" readonly />
+                <button type="button" class="btn btn-secondary btn-sm" id="btnCopyDestLink" style="flex-shrink: 0;">📋 Copy</button>
+              </div>
+            </div>
+
             <div>
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">API URL Template (supports {KEY} and {URL} or standard ?api=&url=)</label>
-              <input type="url" id="addShUrl" class="form-input" placeholder="https://api.gplinks.in/api?api={KEY}&url={URL}" required />
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Final Shortened URL (Paste link from your shortener website)</label>
+              <input type="url" id="addShUrl" class="form-input" placeholder="https://gplinks.co/xyz123 or https://droplink.co/..." required />
             </div>
-            <div>
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">API Key</label>
-              <input type="text" id="addShKey" class="form-input" placeholder="Your API Key from shortener dashboard" />
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">🪙 Reward Points</label>
+                <input type="number" id="addShPoints" class="form-input" min="1" value="5" />
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 18px;">
+                <span style="font-size: 0.8rem; font-weight: 600;">Active</span>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="addShEnabled" checked />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
             </div>
-            <button type="submit" class="btn btn-primary" style="margin-top: 4px;">➕ Save Shortener</button>
+
+            <button type="submit" class="btn btn-primary" style="margin-top: 6px; padding: 12px;">➕ Save Shortener</button>
           </form>
         </div>
 
-        <h4 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 8px;">Active Shorteners List</h4>
+        <h4 style="font-size: 0.9rem; font-weight: 700; margin-bottom: 8px;">Active Shorteners Pool</h4>
         <div id="shortenersList" style="display: flex; flex-direction: column; gap: 8px;"></div>
       </div>
 
@@ -1159,6 +1161,16 @@ const rawHtml = `<!DOCTYPE html>
                 <label style="font-size: 0.74rem; font-weight: 600; color: var(--text-muted);">🪙 Points Cost Per Post</label>
                 <input type="number" id="setPointsPerPost" class="form-input" min="0" value="1" />
               </div>
+            </div>
+          </div>
+
+          <!-- Auto-Delete Configuration -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px;">
+            <div style="font-weight: 700; font-size: 0.92rem; margin-bottom: 2px;">⏳ Auto-Delete Files & Links Timer</div>
+            <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 8px;">Automatically deletes sent files and links from Telegram chat after specified minutes (0 to disable).</div>
+            <div>
+              <label style="font-size: 0.74rem; font-weight: 600; color: var(--text-muted);">⏱️ Auto-Delete After (Minutes)</label>
+              <input type="number" id="setAutoDeleteMinutes" class="form-input" min="0" value="30" />
             </div>
           </div>
 
@@ -1328,7 +1340,7 @@ const rawHtml = `<!DOCTYPE html>
           </a>
 
           <button class="btn btn-secondary" id="btnRegenerateVerify">
-            🔄 Generate / Refresh Verify Link
+            🔄 Generate / Next Task Link
           </button>
 
           <button class="btn btn-ghost" id="btnCopyInviteLink">
@@ -1462,12 +1474,29 @@ const rawHtml = `<!DOCTYPE html>
         document.getElementById('badgeAdmin').style.display = 'inline-block';
         document.getElementById('adminModeBar').style.display = 'flex';
         document.getElementById('btnAdminQuick').style.display = 'inline-flex';
+        generateNewDestLink();
       }
 
       await loadSettingsAndUser();
       await loadPosts();
 
       setupEventListeners();
+    }
+
+    // Generate Destination Link for Admin to Shorten
+    async function generateNewDestLink() {
+      try {
+        const res = await fetch('/api/admin/shorteners/generate-link?user_id=' + currentUserId);
+        const data = await res.json();
+        if (data.success && data.bot_verify_link) {
+          const input = document.getElementById('addShDestLink');
+          if (input) input.value = data.bot_verify_link;
+        }
+      } catch (e) {
+        const fallback = 'https://t.me/' + botUsername + '?start=verify_v_' + Math.random().toString(36).substring(2, 10);
+        const input = document.getElementById('addShDestLink');
+        if (input) input.value = fallback;
+      }
     }
 
     // Load Settings & User Balance
@@ -1524,7 +1553,7 @@ const rawHtml = `<!DOCTYPE html>
       }
     }
 
-    // Render Public Feed with Category & Segmented Sort Filter
+    // Render Public Feed (Only 1 primary action button: Open in Bot)
     function renderFeed() {
       const grid = document.getElementById('postsGrid');
       grid.innerHTML = '';
@@ -1576,10 +1605,6 @@ const rawHtml = `<!DOCTYPE html>
         }
 
         let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted">⭐ Featured</span>' : '<span></span>';
-        let directBtnHtml = '';
-        if (post.direct_link) {
-          directBtnHtml = '<button class="btn-direct-link" data-act="unlock-direct" data-id="' + post.id + '" data-url="' + escapeHtml(post.direct_link) + '">🔗 ' + escapeHtml(post.direct_link_title || 'Get Link') + '</button>';
-        }
 
         card.innerHTML = '<div class="post-image-container">' + imgHtml + '<div class="post-badges-top">' + promotedBadge + '<span class="category-badge-card">' + escapeHtml(post.category || 'All') + '</span></div></div>' +
           '<div class="post-body">' +
@@ -1591,8 +1616,9 @@ const rawHtml = `<!DOCTYPE html>
           '<button class="action-btn" data-act="comment" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg><span>' + (post.comment_count || 0) + '</span></button>' +
           '<button class="action-btn ' + (isSaved ? 'saved' : '') + '" data-act="save" data-id="' + post.id + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="' + (isSaved ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>' +
           '</div>' +
-          '<div class="post-buttons-group">' + directBtnHtml + '<button class="btn-open-bot" data-act="unlock-bot" data-id="' + post.id + '">📂 Files</button></div>' +
-          '</div></div>';
+          '</div>' +
+          '<button class="btn-open-bot-full" data-act="open-in-bot" data-id="' + post.id + '">🚀 Open in Bot</button>' +
+          '</div>';
 
         grid.appendChild(card);
       });
@@ -1624,7 +1650,7 @@ const rawHtml = `<!DOCTYPE html>
               (post.is_promoted ? '<span class="post-status-badge status-promoted">⭐ Pin</span>' : '') + '</div></div>' +
               '<div class="post-body">' +
               '<h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom: 4px;">' + escapeHtml(post.title) + '</h4>' +
-              '<div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 10px;">👁️ ' + (post.post_views?.length || 0) + ' views • ❤️ ' + (post.likes?.length || 0) + ' likes • 📥 ' + (post.file_access_logs?.length || 0) + ' accesses</div>' +
+              '<div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 10px;">👁️ ' + (post.view_count || 0) + ' views • ❤️ ' + (post.like_count || 0) + ' likes • 📥 ' + (post.access_count || 0) + ' accesses</div>' +
               '<div style="display: flex; gap: 6px; margin-top: auto;">' +
               '<button class="btn btn-sm btn-secondary" style="flex: 1;" data-aact="edit" data-id="' + post.id + '">✏️ Edit</button>' +
               '<button class="btn btn-sm btn-ghost" style="color: #f87171;" data-aact="del" data-id="' + post.id + '">🗑️</button>' +
@@ -1649,17 +1675,22 @@ const rawHtml = `<!DOCTYPE html>
         if (data.success) {
           const shorteners = data.shorteners || [];
           if (shorteners.length === 0) {
-            list.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-muted);">No monetized shorteners added yet. Add one above!</div>';
+            list.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-muted);">No manual shorteners added yet. Create one above!</div>';
             return;
           }
 
           list.innerHTML = '';
           shorteners.forEach(sh => {
             const item = document.createElement('div');
-            item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 10px; border: 1px solid var(--card-border);';
-            item.innerHTML = '<div><div style="font-weight: 700; font-size: 0.88rem;">' + escapeHtml(sh.name) + '</div>' +
-              '<div style="font-size: 0.72rem; color: var(--text-muted); word-break: break-all;">' + escapeHtml(sh.api_url) + '</div></div>' +
-              '<div style="display: flex; align-items: center; gap: 8px;"><button class="btn btn-sm btn-ghost" style="color: #f87171;" data-delsh="' + sh.id + '">🗑️ Delete</button></div>';
+            item.style.cssText = 'background: rgba(15, 23, 42, 0.6); padding: 12px 14px; border-radius: 12px; border: 1px solid var(--card-border); display: flex; flex-direction: column; gap: 6px;';
+            item.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between;">' +
+              '<strong style="font-size: 0.9rem; color: #ffffff;">' + escapeHtml(sh.title || sh.name) + '</strong>' +
+              '<div style="display: flex; align-items: center; gap: 8px;">' +
+              '<span style="background: rgba(251, 191, 36, 0.15); border: 1px solid rgba(251, 191, 36, 0.4); color: #fbbf24; font-size: 0.72rem; font-weight: 700; padding: 2px 6px; border-radius: 6px;">🪙 +' + (sh.reward_points || 5) + ' pts</span>' +
+              '<button class="btn btn-sm btn-ghost" style="color: #f87171; padding: 3px 8px;" data-delsh="' + sh.id + '">🗑️ Delete</button>' +
+              '</div></div>' +
+              '<div style="font-size: 0.75rem; color: var(--text-muted); word-break: break-all;">🔗 Short Link: <a href="' + escapeHtml(sh.shortener_url) + '" target="_blank" style="color: var(--primary);">' + escapeHtml(sh.shortener_url) + '</a></div>' +
+              (sh.bot_verify_link ? '<div style="font-size: 0.72rem; color: var(--text-muted); word-break: break-all;">🎯 Target Bot: <code style="color: #cbd5e1;">' + escapeHtml(sh.bot_verify_link) + '</code></div>' : '');
             list.appendChild(item);
           });
         }
@@ -1749,17 +1780,32 @@ const rawHtml = `<!DOCTYPE html>
         document.getElementById('adminTabAnalytics').style.display = atab === 'analytics' ? 'block' : 'none';
 
         if (atab === 'posts') loadAdminPosts();
-        if (atab === 'shorteners') loadShorteners();
+        if (atab === 'shorteners') {
+          loadShorteners();
+          generateNewDestLink();
+        }
         if (atab === 'analytics') loadAdminAnalytics();
         if (atab === 'settings') {
           document.getElementById('setShortenerToggle').checked = Boolean(globalSettings.shortener_enabled);
           document.getElementById('setPointsPerVerify').value = globalSettings.points_per_verify || 5;
           document.getElementById('setPointsPerPost').value = globalSettings.points_per_post ?? 1;
+          document.getElementById('setAutoDeleteMinutes').value = globalSettings.auto_delete_minutes ?? 30;
           document.getElementById('setReferralToggle').checked = Boolean(globalSettings.referral_enabled);
           document.getElementById('setReferralPointsVal').value = globalSettings.referral_points || 10;
           document.getElementById('setForceJoinToggle').checked = Boolean(globalSettings.force_join_enabled);
         }
       });
+
+      // Destination Link Copy & Refresh in Shortener Form
+      document.getElementById('btnCopyDestLink')?.addEventListener('click', () => {
+        const link = document.getElementById('addShDestLink').value;
+        if (link) {
+          navigator.clipboard.writeText(link);
+          showToast('📋 Destination link copied!');
+        }
+      });
+
+      document.getElementById('btnRefreshDestLink')?.addEventListener('click', generateNewDestLink);
 
       // User Nav Bar (Browse vs Saved vs Earn Points)
       document.querySelector('.user-nav-bar')?.addEventListener('click', (e) => {
@@ -1802,7 +1848,7 @@ const rawHtml = `<!DOCTYPE html>
         renderFeed();
       });
 
-      // Post Card Actions (Like, Save, Comments, Unlock)
+      // Post Card Actions (Like, Save, Comments, Single Open-in-Bot)
       document.getElementById('postsGrid')?.addEventListener('click', async (e) => {
         const likeBtn = e.target.closest('[data-act="like"]');
         if (likeBtn) {
@@ -1862,24 +1908,16 @@ const rawHtml = `<!DOCTYPE html>
           return;
         }
 
-        // Direct link unlock
-        const directBtn = e.target.closest('[data-act="unlock-direct"]');
-        if (directBtn) {
-          const postId = directBtn.dataset.id;
-          const url = directBtn.dataset.url;
-          await handlePostUnlock(postId, () => {
-            window.open(url, '_blank');
-          });
-          return;
-        }
-
-        // Files unlock -> Open bot
-        const botBtn = e.target.closest('[data-act="unlock-bot"]');
-        if (botBtn) {
-          const postId = botBtn.dataset.id;
-          await handlePostUnlock(postId, () => {
-            window.location.href = 'https://t.me/' + botUsername + '?start=post_' + postId;
-          });
+        // Single "Open in Bot" button click
+        const openBotBtn = e.target.closest('[data-act="open-in-bot"]');
+        if (openBotBtn) {
+          const postId = openBotBtn.dataset.id;
+          const botUrl = 'https://t.me/' + botUsername + '?start=post_' + postId;
+          if (tg && tg.openTelegramLink) {
+            tg.openTelegramLink(botUrl);
+          } else {
+            window.location.href = botUrl;
+          }
           return;
         }
       });
@@ -1909,12 +1947,12 @@ const rawHtml = `<!DOCTYPE html>
             shortBtn.href = data.verify_url;
             document.getElementById('taskRewardPts').textContent = data.reward_points || 5;
             shortBtn.style.display = 'flex';
-            showToast('✅ Verification link generated!');
+            showToast('✅ Shortener task link ready!');
           }
         } catch (e) {
           showToast('Failed to generate link');
         } finally {
-          btn.textContent = '🔄 Generate / Refresh Verify Link';
+          btn.textContent = '🔄 Generate / Next Task Link';
           btn.disabled = false;
         }
       });
@@ -1932,6 +1970,7 @@ const rawHtml = `<!DOCTYPE html>
           shortener_enabled: document.getElementById('setShortenerToggle').checked,
           points_per_verify: Number(document.getElementById('setPointsPerVerify').value) || 5,
           points_per_post: Number(document.getElementById('setPointsPerPost').value) || 1,
+          auto_delete_minutes: Number(document.getElementById('setAutoDeleteMinutes').value) ?? 30,
           referral_enabled: document.getElementById('setReferralToggle').checked,
           referral_points: Number(document.getElementById('setReferralPointsVal').value) || 10,
           force_join_enabled: document.getElementById('setForceJoinToggle').checked
@@ -1956,20 +1995,24 @@ const rawHtml = `<!DOCTYPE html>
       // Add Shortener Form
       document.getElementById('formAddShortener')?.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const name = document.getElementById('addShName').value.trim();
-        const api_url = document.getElementById('addShUrl').value.trim();
-        const api_key = document.getElementById('addShKey').value.trim();
+        const title = document.getElementById('addShTitle').value.trim();
+        const shortener_url = document.getElementById('addShUrl').value.trim();
+        const bot_verify_link = document.getElementById('addShDestLink').value.trim();
+        const reward_points = Number(document.getElementById('addShPoints').value) || 5;
+        const enabled = document.getElementById('addShEnabled').checked;
 
         try {
           const res = await fetch('/api/admin/shorteners', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_id: currentUserId, name, api_url, api_key, enabled: true })
+            body: JSON.stringify({ user_id: currentUserId, title, shortener_url, bot_verify_link, reward_points, enabled })
           });
           const data = await res.json();
           if (data.success) {
-            showToast('✅ Shortener added!');
-            document.getElementById('formAddShortener').reset();
+            showToast('✅ Shortener saved!');
+            document.getElementById('addShTitle').value = '';
+            document.getElementById('addShUrl').value = '';
+            generateNewDestLink();
             loadShorteners();
           }
         } catch (err) {
@@ -1998,41 +2041,6 @@ const rawHtml = `<!DOCTYPE html>
 
       // Refresh Stats
       document.getElementById('btnRefreshAdminStats')?.addEventListener('click', loadAdminAnalytics);
-    }
-
-    // Points-Based Content Unlock Check
-    async function handlePostUnlock(postId, onUnlocked) {
-      if (isAdmin) {
-        onUnlocked();
-        return;
-      }
-
-      const pointsCost = Number(globalSettings.points_per_post) || 0;
-      if (!globalSettings.shortener_enabled || pointsCost <= 0) {
-        onUnlocked();
-        return;
-      }
-
-      try {
-        const res = await fetch('/api/posts/' + postId + '/unlock', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ user_id: currentUserId })
-        });
-        const data = await res.json();
-        if (data.success && data.allowed) {
-          if (data.remaining_points !== undefined) {
-            userPoints = data.remaining_points;
-            document.getElementById('headerPointsVal').textContent = userPoints;
-          }
-          onUnlocked();
-        } else {
-          // Insufficient points -> Open Points Modal
-          openPointsModal('⚠️ You need ' + data.required_points + ' Point' + (data.required_points > 1 ? 's' : '') + ' to download this content.');
-        }
-      } catch (err) {
-        onUnlocked();
-      }
     }
 
     function openPointsModal(customMsg = null) {
@@ -2133,5 +2141,7 @@ export function getAppHtml(env) {
 }
 `;
 
-fs.writeFileSync(path.join(__dirname, '..', 'src', 'frontend.js'), frontendJs, 'utf8');
-console.log('✅ Generated clean and syntax-valid src/frontend.js!');
+fs.writeFileSync(path.join(projectDir, 'src', 'frontend.js'), frontendJs, 'utf8');
+fs.writeFileSync(path.join(projectDir, 'scripts', 'make-frontend.js'), `// Frontend generator script\n` + fs.readFileSync('/data/data/com.termux/files/home/.gemini/antigravity-cli/brain/ffe2fe34-2450-47ff-8c4e-611646556d65/scratch/generate.js', 'utf8'), 'utf8');
+
+console.log('✅ Generated clean and syntax-valid src/frontend.js and scripts/make-frontend.js!');
