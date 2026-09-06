@@ -457,13 +457,14 @@ export async function getGlobalStats(env) {
   const headers = getSupabaseHeaders(env);
 
   try {
-    const [usersRes, postsRes, viewsRes, filesRes, likesRes, commentsRes] = await Promise.all([
-      fetch(`${baseUrl}/users?select=id`, { headers }),
-      fetch(`${baseUrl}/posts?select=id,status,is_promoted`, { headers }),
+    const [usersRes, postsRes, viewsRes, filesRes, likesRes, commentsRes, settingsRes] = await Promise.all([
+      fetch(`${baseUrl}/users?select=id,points`, { headers }),
+      fetch(`${baseUrl}/posts?select=id,title,status,is_promoted,post_views(id),likes(user_id)`, { headers }),
       fetch(`${baseUrl}/post_views?select=id`, { headers }),
       fetch(`${baseUrl}/file_access_logs?select=id`, { headers }),
       fetch(`${baseUrl}/likes?select=post_id`, { headers }),
-      fetch(`${baseUrl}/comments?select=id`, { headers })
+      fetch(`${baseUrl}/comments?select=id`, { headers }),
+      fetch(`${baseUrl}/settings?key=eq.stats_counters&select=value`, { headers })
     ]);
 
     const users = usersRes.ok ? await usersRes.json() : [];
@@ -472,11 +473,38 @@ export async function getGlobalStats(env) {
     const files = filesRes.ok ? await filesRes.json() : [];
     const likes = likesRes.ok ? await likesRes.json() : [];
     const comments = commentsRes.ok ? await commentsRes.json() : [];
+    
+    let statsCounters = {};
+    if (settingsRes.ok) {
+      const rows = await settingsRes.json();
+      if (rows.length > 0) {
+        statsCounters = typeof rows[0].value === 'string' ? JSON.parse(rows[0].value) : rows[0].value;
+      }
+    }
 
     const publishedCount = posts.filter(p => p.status === 'published').length;
     const draftsCount = posts.filter(p => p.status === 'draft').length;
     const scheduledCount = posts.filter(p => p.status === 'scheduled').length;
     const promotedCount = posts.filter(p => p.is_promoted).length;
+
+    // Calculate Top 5 Viewed & Top 5 Liked Posts
+    const topViews = [...posts]
+      .map(p => ({
+        id: p.id,
+        title: p.title,
+        view_count: p.post_views ? p.post_views.length : 0
+      }))
+      .sort((a, b) => b.view_count - a.view_count)
+      .slice(0, 5);
+
+    const topLikes = [...posts]
+      .map(p => ({
+        id: p.id,
+        title: p.title,
+        like_count: p.likes ? p.likes.length : 0
+      }))
+      .sort((a, b) => b.like_count - a.like_count)
+      .slice(0, 5);
 
     return {
       total_users: users.length,
@@ -488,7 +516,14 @@ export async function getGlobalStats(env) {
       total_views: views.length,
       total_file_accesses: files.length,
       total_likes: likes.length,
-      total_comments: comments.length
+      total_comments: comments.length,
+      total_verifications: Number(statsCounters.total_verifications) || 0,
+      total_referrals: Number(statsCounters.total_referrals) || 0,
+      total_force_joins: Number(statsCounters.total_force_joins) || 0,
+      total_points_distributed: Number(statsCounters.total_points_distributed) || 0,
+      total_points_spent: Number(statsCounters.total_points_spent) || 0,
+      top_views: topViews,
+      top_likes: topLikes
     };
   } catch (err) {
     console.error('Error fetching global stats:', err);
@@ -502,7 +537,14 @@ export async function getGlobalStats(env) {
       total_views: 0,
       total_file_accesses: 0,
       total_likes: 0,
-      total_comments: 0
+      total_comments: 0,
+      total_verifications: 0,
+      total_referrals: 0,
+      total_force_joins: 0,
+      total_points_distributed: 0,
+      total_points_spent: 0,
+      top_views: [],
+      top_likes: []
     };
   }
 }
@@ -648,7 +690,7 @@ export async function publishScheduledPosts(env) {
 }
 
 // ------------------------------------------
-// 5. BOOKMARKS / SAVED POSTS
+// 6. BOOKMARKS / SAVED POSTS
 // ------------------------------------------
 export async function toggleSavePost(env, user_id, post_id) {
   const baseUrl = getSupabaseBaseUrl(env);
@@ -699,7 +741,7 @@ export async function getSavedPosts(env, user_id) {
 }
 
 // ------------------------------------------
-// 6. GLOBAL SETTINGS (Referrals, Monetization, Ads, Force Join)
+// 7. GLOBAL SETTINGS & STAT COUNTERS
 // ------------------------------------------
 export async function getSettings(env) {
   const baseUrl = getSupabaseBaseUrl(env);
@@ -710,21 +752,20 @@ export async function getSettings(env) {
   list.forEach(item => {
     map[item.key] = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
   });
+
   return {
     referral_enabled: map.referral_enabled ?? false,
-    referral_points: map.referral_points ?? 10,
+    referral_points: Number(map.referral_points) || 10,
     shortener_enabled: map.shortener_enabled ?? false,
-    shortener_api_url: map.shortener_api_url ?? '',
-    shortener_api_key: map.shortener_api_key ?? '',
-    shortener_mode: map.shortener_mode ?? 'time', // 'time' or 'count'
-    shortener_duration_hours: map.shortener_duration_hours ?? 24,
-    shortener_posts_count: map.shortener_posts_count ?? 5,
+    points_per_verify: Number(map.points_per_verify) || 5,
+    points_per_post: Number(map.points_per_post) || 1,
     banner_enabled: map.banner_enabled ?? false,
     banner_image: map.banner_image ?? '',
     banner_link: map.banner_link ?? '',
     banner_title: map.banner_title ?? '',
     banner_text: map.banner_text ?? '',
-    force_join_enabled: map.force_join_enabled ?? false
+    force_join_enabled: map.force_join_enabled ?? false,
+    shorteners: Array.isArray(map.shorteners) ? map.shorteners : []
   };
 }
 
@@ -739,8 +780,60 @@ export async function updateSetting(env, key, value) {
   return res.ok;
 }
 
+export async function incrementStatCounter(env, counterName, amount = 1) {
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const res = await fetch(`${baseUrl}/settings?key=eq.stats_counters&select=value`, { headers });
+    let counters = {};
+    if (res.ok) {
+      const rows = await res.json();
+      if (rows.length > 0) {
+        counters = typeof rows[0].value === 'string' ? JSON.parse(rows[0].value) : rows[0].value;
+      }
+    }
+    counters[counterName] = (Number(counters[counterName]) || 0) + Number(amount);
+    await updateSetting(env, 'stats_counters', counters);
+  } catch (err) {
+    console.warn('Failed to increment stat counter:', counterName, err.message);
+  }
+}
+
 // ------------------------------------------
-// 7. FORCE JOIN CHANNELS
+// 8. MULTIPLE SHORTENERS MANAGEMENT
+// ------------------------------------------
+export async function getShorteners(env) {
+  const settings = await getSettings(env);
+  return settings.shorteners || [];
+}
+
+export async function saveShorteners(env, shortenersList) {
+  return await updateSetting(env, 'shorteners', shortenersList);
+}
+
+export async function addShortener(env, { name, api_url, api_key, enabled = true }) {
+  const shorteners = await getShorteners(env);
+  const newShortener = {
+    id: 'sh_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+    name: name || 'Shortener',
+    api_url: api_url || '',
+    api_key: api_key || '',
+    enabled: Boolean(enabled)
+  };
+  shorteners.push(newShortener);
+  await saveShorteners(env, shorteners);
+  return newShortener;
+}
+
+export async function deleteShortener(env, id) {
+  const shorteners = await getShorteners(env);
+  const filtered = shorteners.filter(s => s.id !== id);
+  await saveShorteners(env, filtered);
+  return true;
+}
+
+// ------------------------------------------
+// 9. FORCE JOIN CHANNELS
 // ------------------------------------------
 export async function getForceChannels(env) {
   const baseUrl = getSupabaseBaseUrl(env);
@@ -771,8 +864,19 @@ export async function removeForceChannel(env, id) {
 }
 
 // ------------------------------------------
-// 8. REFERRAL & POINTS
+// 10. REFERRALS & USER POINTS
 // ------------------------------------------
+export async function updateUserPoints(env, userId, newPoints) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+  const res = await fetch(`${baseUrl}/users?id=eq.${userId}`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ points: Math.max(0, Number(newPoints) || 0) })
+  });
+  return res.ok;
+}
+
 export async function processReferral(env, newUserId, referrerId) {
   if (!referrerId || String(newUserId) === String(referrerId)) return false;
   const baseUrl = getSupabaseBaseUrl(env);
@@ -802,6 +906,10 @@ export async function processReferral(env, newUserId, referrerId) {
         referral_count: currentCount + 1
       })
     });
+    
+    // Increment Stats
+    incrementStatCounter(env, 'total_referrals', 1);
+    incrementStatCounter(env, 'total_points_distributed', pointsToAdd);
   }
 
   await fetch(`${baseUrl}/users?id=eq.${newUserId}`, {
@@ -814,91 +922,57 @@ export async function processReferral(env, newUserId, referrerId) {
 }
 
 // ------------------------------------------
-// 9. USER PASSES & VERIFY TOKENS (Shortener)
+// 11. VERIFY TOKENS & SHORTENER REDIRECTION
 // ------------------------------------------
-export async function checkUserPass(env, user_id) {
-  const settings = await getSettings(env);
-  if (!settings.shortener_enabled) {
-    return { has_pass: true, reason: 'shortener_disabled' };
-  }
-
-  const baseUrl = getSupabaseBaseUrl(env);
-  const headers = getSupabaseHeaders(env);
-
-  const res = await fetch(`${baseUrl}/user_passes?user_id=eq.${user_id}`, { headers });
-  const rows = res.ok ? await res.json() : [];
-  if (rows.length === 0) {
-    return { has_pass: false };
-  }
-
-  const pass = rows[0];
-  const now = new Date();
-
-  if (settings.shortener_mode === 'time') {
-    if (pass.pass_expires_at && new Date(pass.pass_expires_at) > now) {
-      return { has_pass: true, expires_at: pass.pass_expires_at };
-    }
-  } else {
-    if (pass.posts_left > 0) {
-      return { has_pass: true, posts_left: pass.posts_left };
-    }
-  }
-
-  return { has_pass: false };
-}
-
-export async function grantUserPass(env, user_id) {
-  const settings = await getSettings(env);
-  const baseUrl = getSupabaseBaseUrl(env);
-  const headers = getSupabaseHeaders(env);
-
-  let pass_expires_at = null;
-  let posts_left = 0;
-
-  if (settings.shortener_mode === 'time') {
-    const hours = Number(settings.shortener_duration_hours) || 24;
-    const exp = new Date();
-    exp.setHours(exp.getHours() + hours);
-    pass_expires_at = exp.toISOString();
-  } else {
-    posts_left = Number(settings.shortener_posts_count) || 5;
-  }
-
-  await fetch(`${baseUrl}/user_passes`, {
-    method: 'POST',
-    headers: { ...headers, 'Prefer': 'resolution=merge-duplicates' },
-    body: JSON.stringify({
-      user_id,
-      pass_expires_at,
-      posts_left,
-      last_verified_at: new Date().toISOString()
-    })
-  });
-
-  return { pass_expires_at, posts_left };
-}
-
-export async function consumeUserPass(env, user_id) {
-  const settings = await getSettings(env);
-  if (!settings.shortener_enabled || settings.shortener_mode !== 'count') return;
-
-  const baseUrl = getSupabaseBaseUrl(env);
-  const headers = getSupabaseHeaders(env);
-  const res = await fetch(`${baseUrl}/user_passes?user_id=eq.${user_id}`, { headers });
-  const rows = res.ok ? await res.json() : [];
-  if (rows.length > 0 && rows[0].posts_left > 0) {
-    await fetch(`${baseUrl}/user_passes?user_id=eq.${user_id}`, {
-      method: 'PATCH',
-      headers,
-      body: JSON.stringify({ posts_left: rows[0].posts_left - 1 })
-    });
-  }
-}
-
 export async function createVerifyToken(env, user_id, target_post_id = null) {
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
+  const settings = await getSettings(env);
+
+  // Generate unique secure verification token
   const token = 'v_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+  const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
+  const destUrl = `${appUrl}/verify?token=${token}`;
+
+  const activeShorteners = (settings.shorteners || []).filter(s => s.enabled && s.api_url);
+  let shortenerName = 'Direct';
+  let verifyUrl = destUrl;
+
+  if (activeShorteners.length > 0) {
+    // Pick 1 shortener randomly from active list to distribute traffic
+    const chosen = activeShorteners[Math.floor(Math.random() * activeShorteners.length)];
+    shortenerName = chosen.name || 'Shortener';
+
+    try {
+      let callUrl = chosen.api_url;
+      if (callUrl.includes('{KEY}') || callUrl.includes('{URL}')) {
+        callUrl = callUrl
+          .replace('{KEY}', encodeURIComponent(chosen.api_key || ''))
+          .replace('{URL}', encodeURIComponent(destUrl));
+      } else {
+        const sep = callUrl.includes('?') ? '&' : '?';
+        callUrl = `${callUrl}${sep}api=${encodeURIComponent(chosen.api_key || '')}&url=${encodeURIComponent(destUrl)}`;
+      }
+
+      // Call shortener API
+      const apiRes = await fetch(callUrl, { method: 'GET' });
+      if (apiRes.ok) {
+        const textData = await apiRes.text();
+        try {
+          const jsonData = JSON.parse(textData);
+          verifyUrl = jsonData.shortenedUrl || jsonData.url || jsonData.short_url || jsonData.link || verifyUrl;
+        } catch {
+          if (textData.startsWith('http')) {
+            verifyUrl = textData.trim();
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Shortener API call failed, using fallback verify URL:', e.message);
+    }
+  }
+
+  const rewardPoints = Number(settings.points_per_verify) || 5;
 
   await fetch(`${baseUrl}/verify_tokens`, {
     method: 'POST',
@@ -907,12 +981,21 @@ export async function createVerifyToken(env, user_id, target_post_id = null) {
       token,
       user_id,
       target_post_id: target_post_id ? Number(target_post_id) : null,
+      shortener_name: shortenerName,
+      reward_points: rewardPoints,
       created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
       is_used: false
     })
   });
 
-  return token;
+  return {
+    token,
+    verify_url: verifyUrl,
+    dest_url: destUrl,
+    shortener_name: shortenerName,
+    reward_points: rewardPoints
+  };
 }
 
 export async function verifyTokenAndGrantPass(env, token) {
@@ -924,14 +1007,74 @@ export async function verifyTokenAndGrantPass(env, token) {
   if (rows.length === 0) return null;
 
   const row = rows[0];
+
+  // Check expiration (2 hours)
+  if (row.expires_at && new Date(row.expires_at) < new Date()) {
+    return null;
+  }
+
+  // Mark token as used
   await fetch(`${baseUrl}/verify_tokens?token=eq.${token}`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify({ is_used: true })
   });
 
-  await grantUserPass(env, row.user_id);
-  return row;
+  const reward = Number(row.reward_points) || 5;
+  const user = await getUser(env, row.user_id);
+  const currentPoints = user ? Number(user.points) || 0 : 0;
+  const newPoints = currentPoints + reward;
+
+  await updateUserPoints(env, row.user_id, newPoints);
+
+  // Increment Global Analytics
+  incrementStatCounter(env, 'total_verifications', 1);
+  incrementStatCounter(env, 'total_points_distributed', reward);
+
+  return {
+    ...row,
+    reward_points: reward,
+    new_points: newPoints
+  };
+}
+
+// ------------------------------------------
+// 12. CHECK & DEDUCT POST ACCESS (Points Economy)
+// ------------------------------------------
+export async function checkAndDeductPostAccess(env, user_id, post_id) {
+  if (String(user_id) === String(env.ADMIN_ID)) {
+    return { allowed: true, is_admin: true };
+  }
+
+  const settings = await getSettings(env);
+  if (!settings.shortener_enabled) {
+    return { allowed: true, free: true };
+  }
+
+  const requiredPoints = Number(settings.points_per_post) || 1;
+  if (requiredPoints <= 0) {
+    return { allowed: true, free: true };
+  }
+
+  const user = await getUser(env, user_id);
+  const currentPoints = user ? Number(user.points) || 0 : 0;
+
+  if (currentPoints >= requiredPoints) {
+    const remainingPoints = currentPoints - requiredPoints;
+    await updateUserPoints(env, user_id, remainingPoints);
+    incrementStatCounter(env, 'total_points_spent', requiredPoints);
+    return {
+      allowed: true,
+      points_deducted: requiredPoints,
+      remaining_points: remainingPoints
+    };
+  }
+
+  return {
+    allowed: false,
+    required_points: requiredPoints,
+    current_points: currentPoints
+  };
 }
 
 export async function getAllUserIds(env) {
@@ -941,3 +1084,4 @@ export async function getAllUserIds(env) {
   const rows = res.ok ? await res.json() : [];
   return rows.map(r => r.id);
 }
+

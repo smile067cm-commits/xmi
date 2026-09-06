@@ -20,7 +20,12 @@ import {
   getForceChannels,
   addForceChannel,
   removeForceChannel,
+  getShorteners,
+  addShortener,
+  deleteShortener,
+  createVerifyToken,
   verifyTokenAndGrantPass,
+  checkAndDeductPostAccess,
   getAllUserIds,
   getUser
 } from './db.js';
@@ -318,46 +323,319 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
-  // GET /verify & POST /api/verify - Shortener Token Verification
+  // POST /api/verify/generate - Generate / Regenerate Verification Link
+  // -------------------------------------------------------------
+  router.post('/api/verify/generate', async (request, env) => {
+    try {
+      const body = await request.json();
+      const { user_id, target_post_id } = body || {};
+
+      if (!user_id) {
+        return errorResponse('user_id is required', 400);
+      }
+
+      const result = await createVerifyToken(env, user_id, target_post_id);
+      return jsonResponse({
+        success: true,
+        token: result.token,
+        verify_url: result.verify_url,
+        dest_url: result.dest_url,
+        shortener_name: result.shortener_name,
+        reward_points: result.reward_points
+      });
+    } catch (err) {
+      console.error('API /api/verify/generate error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/posts/:id/unlock - Points-Based Post Unlock & File Access Check
+  // -------------------------------------------------------------
+  router.post('/api/posts/:id/unlock', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const body = await request.json();
+      const { user_id } = body || {};
+
+      if (!user_id) {
+        return errorResponse('user_id is required', 400);
+      }
+
+      const result = await checkAndDeductPostAccess(env, user_id, id);
+      return jsonResponse({ success: true, ...result });
+    } catch (err) {
+      console.error('API /api/posts/:id/unlock error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // Multiple Shorteners Management (Admin Only)
+  // -------------------------------------------------------------
+  router.get('/api/admin/shorteners', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const shorteners = await getShorteners(env);
+      return jsonResponse({ success: true, shorteners });
+    } catch (err) {
+      console.error('API /api/admin/shorteners error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  router.post('/api/admin/shorteners', async (request, env) => {
+    try {
+      const body = await request.json();
+      const { user_id, name, api_url, api_key, enabled } = body || {};
+
+      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      if (!name || !api_url) {
+        return errorResponse('Shortener name and api_url are required', 400);
+      }
+
+      const added = await addShortener(env, { name, api_url, api_key, enabled: enabled ?? true });
+      return jsonResponse({ success: true, shortener: added });
+    } catch (err) {
+      console.error('API add shortener error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  router.delete('/api/admin/shorteners/:id', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      await deleteShortener(env, id);
+      return jsonResponse({ success: true, message: 'Shortener deleted' });
+    } catch (err) {
+      console.error('API delete shortener error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // GET /verify - Shortener Token Verification Landing Page
   // -------------------------------------------------------------
   router.get('/verify', async (request, env) => {
     try {
       const url = new URL(request.url);
       const token = url.searchParams.get('token');
       if (!token) {
-        return htmlResponse('<h2>⚠️ Invalid or missing verification token.</h2>');
+        return htmlResponse(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>Invalid Token</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: #0b1120; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+              .card { background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 20px; padding: 32px 24px; max-width: 420px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+              h2 { color: #f87171; margin-bottom: 12px; }
+              p { color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h2>⚠️ Missing Token</h2>
+              <p>No verification token was provided in the link. Please open the bot or app to generate a fresh verification link.</p>
+            </div>
+          </body>
+          </html>
+        `);
       }
 
       const record = await verifyTokenAndGrantPass(env, token);
       if (!record) {
-        return htmlResponse('<h2>⚠️ Verification token expired or already used.</h2>');
+        return htmlResponse(`
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>Expired Token</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif; background: #0b1120; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center; }
+              .card { background: rgba(30, 41, 59, 0.9); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 20px; padding: 32px 24px; max-width: 420px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+              h2 { color: #fbbf24; margin-bottom: 12px; }
+              p { color: #94a3b8; font-size: 0.95rem; line-height: 1.5; margin-bottom: 20px; }
+              .btn { display: inline-block; background: #38bdf8; color: #04101e; text-decoration: none; padding: 12px 24px; border-radius: 12px; font-weight: 700; font-size: 0.95rem; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <h2>⚠️ Token Expired or Used</h2>
+              <p>This verification link has already been claimed or has expired. Please regenerate a new verify link.</p>
+              <a href="${env.WEB_APP_URL || '/'}" class="btn">🚀 Open App</a>
+            </div>
+          </body>
+          </html>
+        `);
       }
 
       const appUrl = env.WEB_APP_URL || url.origin;
       const botUsername = env.BOT_USERNAME || 'Xminty_bot';
       const redirectUrl = record.target_post_id ? `https://t.me/${botUsername}?start=post_${record.target_post_id}` : appUrl;
+      const rewardPoints = record.reward_points || 5;
+
+      // Send Instant Notification to Telegram user
+      if (env.BOT_TOKEN && record.user_id) {
+        const sendMsgUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`;
+        fetch(sendMsgUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: record.user_id,
+            text: `🎉 *Verification Completed!*\\n\\n` +
+              `🪙 *+${rewardPoints} Points* have been added to your balance!\\n` +
+              `Total Balance: *${record.new_points || rewardPoints} Points*\\n\\n` +
+              `You can now unlock posts and download files.`,
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                record.target_post_id ? [{ text: '📥 Open Post Files', callback_data: `user_view_post_${record.target_post_id}` }] : [{ text: '🚀 Open Mini App', web_app: { url: appUrl } }]
+              ]
+            }
+          })
+        }).catch(err => console.warn('Telegram notify error:', err.message));
+      }
 
       return htmlResponse(`
         <!DOCTYPE html>
         <html>
         <head>
           <meta charset="UTF-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>Verification Successful</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+          <title>Access Verified & Points Claimed</title>
           <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f172a; color: #f8fafc; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; text-align: center; }
-            .card { background: #1e293b; padding: 32px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); max-width: 400px; }
-            .btn { display: inline-block; background: #38bdf8; color: #0f172a; text-decoration: none; padding: 12px 24px; border-radius: 10px; font-weight: 700; margin-top: 20px; }
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+              background: linear-gradient(135deg, #0b1120 0%, #171d36 50%, #070a12 100%);
+              color: #f8fafc;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              padding: 20px;
+              text-align: center;
+              overflow-x: hidden;
+            }
+            .card {
+              background: rgba(26, 36, 56, 0.85);
+              backdrop-filter: blur(16px);
+              border: 1px solid rgba(56, 189, 248, 0.4);
+              border-radius: 24px;
+              padding: 36px 24px;
+              max-width: 440px;
+              width: 100%;
+              box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 30px rgba(56, 189, 248, 0.2);
+              animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            }
+            @keyframes popIn {
+              0% { transform: scale(0.9); opacity: 0; }
+              100% { transform: scale(1); opacity: 1; }
+            }
+            .icon-badge {
+              width: 76px;
+              height: 76px;
+              border-radius: 50%;
+              background: linear-gradient(135deg, #10b981, #059669);
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              font-size: 38px;
+              margin-bottom: 16px;
+              box-shadow: 0 8px 24px rgba(16, 185, 129, 0.4);
+            }
+            .title {
+              font-size: 1.4rem;
+              font-weight: 800;
+              color: #ffffff;
+              margin-bottom: 8px;
+            }
+            .reward-box {
+              background: rgba(251, 191, 36, 0.15);
+              border: 1px solid rgba(251, 191, 36, 0.4);
+              color: #fbbf24;
+              font-size: 1.15rem;
+              font-weight: 800;
+              padding: 10px 16px;
+              border-radius: 12px;
+              display: inline-flex;
+              align-items: center;
+              gap: 8px;
+              margin: 14px 0 16px 0;
+            }
+            .desc {
+              font-size: 0.88rem;
+              color: #94a3b8;
+              line-height: 1.5;
+              margin-bottom: 24px;
+            }
+            .btn {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 8px;
+              background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+              color: #04101e;
+              text-decoration: none;
+              padding: 14px 24px;
+              border-radius: 14px;
+              font-weight: 700;
+              font-size: 1rem;
+              box-shadow: 0 8px 20px rgba(56, 189, 248, 0.35);
+              transition: transform 0.2s ease;
+            }
+            .btn:hover { transform: translateY(-2px); }
+            .countdown {
+              font-size: 0.75rem;
+              color: #64748b;
+              margin-top: 14px;
+            }
           </style>
         </head>
         <body>
           <div class="card">
-            <h1>🎉 Access Verified!</h1>
-            <p>Your access pass has been granted. You can now access full posts and files.</p>
-            <a href="${redirectUrl}" class="btn">🚀 Return to Post / App</a>
+            <div class="icon-badge">✅</div>
+            <h1 class="title">Verification Successful!</h1>
+            <div>
+              <span class="reward-box">🪙 +${rewardPoints} Points Credited!</span>
+            </div>
+            <p class="desc">Your verification was confirmed. Your points balance has been updated and you can now download posts and access direct links.</p>
+            <a href="${redirectUrl}" class="btn" id="btnRedirect">
+              🚀 Continue to App / Content
+            </a>
+            <div class="countdown">Redirecting automatically in <span id="timer">2</span>s...</div>
           </div>
           <script>
-            setTimeout(() => { window.location.href = "${redirectUrl}"; }, 1500);
+            let sec = 2;
+            const timerEl = document.getElementById('timer');
+            const interval = setInterval(() => {
+              sec--;
+              if (timerEl) timerEl.textContent = sec;
+              if (sec <= 0) {
+                clearInterval(interval);
+                window.location.href = "${redirectUrl}";
+              }
+            }, 1000);
           </script>
         </body>
         </html>

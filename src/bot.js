@@ -19,11 +19,13 @@ import {
   getForceChannels,
   addForceChannel,
   removeForceChannel,
+  getShorteners,
+  addShortener,
+  deleteShortener,
   processReferral,
-  checkUserPass,
-  consumeUserPass,
   createVerifyToken,
   verifyTokenAndGrantPass,
+  checkAndDeductPostAccess,
   getAllUserIds,
   getUser
 } from './db.js';
@@ -74,31 +76,30 @@ async function checkForceJoin(ctx, env, userId) {
 }
 
 /**
- * Checks if user has an active pass for monetized shortener locker
+ * Checks if user has points to unlock content or generates multi-shortener verify link
  */
 async function checkLockerPass(ctx, env, userId, postId) {
   if (String(userId) === String(env.ADMIN_ID)) return { passed: true };
   try {
-    const passCheck = await checkUserPass(env, userId);
-    if (passCheck.has_pass) {
-      await consumeUserPass(env, userId);
-      return { passed: true };
+    const result = await checkAndDeductPostAccess(env, userId, postId);
+    if (result.allowed) {
+      return {
+        passed: true,
+        pointsDeducted: result.points_deducted,
+        remainingPoints: result.remaining_points
+      };
     }
 
+    const tokenObj = await createVerifyToken(env, userId, postId);
     const settings = await getSettings(env);
-    if (!settings.shortener_enabled) return { passed: true };
-
-    const token = await createVerifyToken(env, userId, postId);
-    const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
-    let verifyUrl = `${appUrl}/verify?token=${token}`;
-
-    if (settings.shortener_api_url && settings.shortener_api_key) {
-      verifyUrl = `${settings.shortener_api_url}?api=${encodeURIComponent(settings.shortener_api_key)}&url=${encodeURIComponent(verifyUrl)}`;
-    }
 
     return {
       passed: false,
-      verifyUrl,
+      verifyUrl: tokenObj.verify_url,
+      rewardPoints: tokenObj.reward_points,
+      requiredPoints: result.required_points,
+      currentPoints: result.current_points,
+      shortenerName: tokenObj.shortener_name,
       settings
     };
   } catch (err) {
@@ -261,10 +262,8 @@ export function createBot(env) {
     } else {
       // Regular User Panel
       let userPoints = 0;
-      if (settings.referral_enabled) {
-        const u = await getUser(env, userId);
-        userPoints = u?.points || 0;
-      }
+      const u = await getUser(env, userId);
+      userPoints = u?.points || 0;
 
       const inlineButtons = [
         [Markup.button.webApp('🚀 Launch Mini App', appUrl)],
@@ -274,23 +273,30 @@ export function createBot(env) {
         ]
       ];
 
+      const userFeaturesRow = [];
+      if (settings.shortener_enabled) {
+        userFeaturesRow.push(Markup.button.callback('🔗 Earn Points', 'user_earn_points'));
+      }
       if (settings.referral_enabled) {
-        inlineButtons.push([
-          Markup.button.callback(`🎁 Invite & Earn (🪙 ${userPoints} pts)`, 'user_menu_invite')
-        ]);
+        userFeaturesRow.push(Markup.button.callback(`🎁 Invite & Earn (🪙 ${userPoints} pts)`, 'user_menu_invite'));
+      }
+      if (userFeaturesRow.length > 0) {
+        inlineButtons.push(userFeaturesRow);
       }
 
       const replyButtons = [
         [Markup.button.webApp('🚀 Launch App', appUrl), '🔍 Browse Posts'],
         ['🔖 Saved Posts']
       ];
-      if (settings.referral_enabled) {
-        replyButtons[1].push('🎁 Invite Friends');
-      }
+      const bottomRow = [];
+      if (settings.shortener_enabled) bottomRow.push('🔗 Earn Points');
+      if (settings.referral_enabled) bottomRow.push('🎁 Invite Friends');
+      if (bottomRow.length > 0) replyButtons.push(bottomRow);
 
       const replyKeyboard = Markup.keyboard(replyButtons).resize();
 
       let text = `👋 *Welcome ${escapeMarkdown(ctx.from?.first_name || 'there')}!*\n\n` +
+        `🪙 *Your Points Balance:* \`${userPoints} Points\`\n\n` +
         `Explore published posts, curated folders, and downloadable resources.\n` +
         `Tap any button below to get started:`;
 
@@ -342,14 +348,16 @@ export function createBot(env) {
         if (record) {
           const buttons = [];
           if (record.target_post_id) {
-            buttons.push([Markup.button.callback('📥 Open Post Now', `user_view_post_${record.target_post_id}`)]);
+            buttons.push([Markup.button.callback('📥 Open Post Files', `user_view_post_${record.target_post_id}`)]);
           }
           buttons.push([Markup.button.webApp('🚀 Open Mini App', appUrl)]);
           buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
 
           return await ctx.reply(
-            `🎉 *Access Pass Granted!*\n\n` +
-            `Your verification was successful! You now have unrestricted access to all posts & downloads.`,
+            `🎉 *Verification Successful!*\n\n` +
+            `🪙 *+${record.reward_points} Points* have been added to your balance!\n` +
+            `Total Balance: *${record.new_points || record.reward_points} Points*\n\n` +
+            `You can now access and download posts.`,
             {
               parse_mode: 'Markdown',
               ...Markup.inlineKeyboard(buttons)
@@ -357,7 +365,10 @@ export function createBot(env) {
           );
         } else {
           return await ctx.reply('⚠️ This verification link has expired or has already been used.', {
-            ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback('🔄 Generate New Link', 'user_earn_points')],
+              [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+            ])
           });
         }
       } catch (vErr) {
@@ -403,24 +414,22 @@ export function createBot(env) {
           );
         }
 
-        // Shortener Pass Locker Check
+        // Shortener & Points Locker Check
         const locker = await checkLockerPass(ctx, env, ctx.from?.id, postId);
         if (!locker.passed) {
-          const modeText = locker.settings.shortener_mode === 'time'
-            ? `⏱️ *Unlock Pass:* ${locker.settings.shortener_duration_hours || 24} Hours full access to all posts`
-            : `📦 *Unlock Pass:* Full access for ${locker.settings.shortener_posts_count || 5} posts`;
-
           const buttons = [
-            [Markup.button.url('🔓 Verify Link & Unlock Access', locker.verifyUrl)],
-            [Markup.button.callback('🔄 Check Access', `check_pass_post_${postId}`)],
+            [Markup.button.url(`🔗 Complete Task (+${locker.rewardPoints} Pts)`, locker.verifyUrl)],
+            [Markup.button.callback('🔄 Regenerate Link', `regen_verify_${postId}`)],
+            [Markup.button.callback('🎁 Invite Friends', 'user_menu_invite')],
             [Markup.button.callback('🔙 Main Menu', 'main_menu')]
           ];
 
           return await ctx.reply(
-            `🔐 *Access Verification Required*\n\n` +
-            `To access *"${escapeMarkdown(post.title)}"*, complete a quick verification.\n\n` +
-            `${modeText}\n\n` +
-            `Tap the button below to verify:`,
+            `🔐 *Points Required for Download*\n\n` +
+            `• *Post Title:* \`${escapeMarkdown(post.title)}\`\n` +
+            `• *Points Required:* \`${locker.requiredPoints} Points\` 🪙\n` +
+            `• *Your Current Balance:* \`${locker.currentPoints} Points\` 🪙\n\n` +
+            `Complete a quick monetized shortener task (+${locker.rewardPoints} Points) or invite friends to unlock access:`,
             {
               parse_mode: 'Markdown',
               ...Markup.inlineKeyboard(buttons)
@@ -645,6 +654,68 @@ export function createBot(env) {
 
   bot.action('user_saved_posts', handleSavedPosts);
 
+  // -------------------------------------------------------------
+  // User Actions: Earn Points & Regenerate Verify Link
+  // -------------------------------------------------------------
+  const handleEarnPoints = async (ctx) => {
+    try {
+      if (ctx.callbackQuery) await ctx.answerCbQuery('Generating verify task link...');
+      const userId = ctx.from.id;
+      const tokenObj = await createVerifyToken(env, userId);
+      const u = await getUser(env, userId);
+      const points = u?.points || 0;
+
+      const text = `🪙 *Earn Points & Unlock Downloads*\n\n` +
+        `• *Your Current Balance:* \`${points} Points\` 🪙\n` +
+        `• *Reward Per Task:* \`+${tokenObj.reward_points} Points\`\n\n` +
+        `Complete the quick shortlink task below in your browser to instantly earn points:`;
+
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.url(`🔗 Complete Task (+${tokenObj.reward_points} Pts)`, tokenObj.verify_url)],
+        [Markup.button.callback('🔄 Regenerate Task Link', 'user_earn_points')],
+        [Markup.button.callback('🎁 Invite Friends', 'user_menu_invite')],
+        [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+      ]);
+
+      if (ctx.callbackQuery) {
+        try {
+          return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+        } catch {
+          return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+        }
+      } else {
+        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+      }
+    } catch (err) {
+      console.error('Error in earn points:', err);
+      return await ctx.reply('⚠️ Failed to generate verification task link.');
+    }
+  };
+
+  bot.action('user_earn_points', handleEarnPoints);
+
+  bot.action(/^regen_verify_(\d+)$/, async (ctx) => {
+    const postId = ctx.match[1];
+    await ctx.answerCbQuery('Generating fresh verify link...');
+    const userId = ctx.from.id;
+    const tokenObj = await createVerifyToken(env, userId, postId);
+
+    const text = `🔄 *Fresh Verification Link Generated!*\n\n` +
+      `Complete this task to earn \`+${tokenObj.reward_points} Points\` and unlock post #${postId}:`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.url(`🔗 Complete Task (+${tokenObj.reward_points} Pts)`, tokenObj.verify_url)],
+      [Markup.button.callback('🔄 Regenerate Again', `regen_verify_${postId}`)],
+      [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+    ]);
+
+    try {
+      return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+    } catch {
+      return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+    }
+  });
+
   const handleInviteFriends = async (ctx) => {
     try {
       if (ctx.callbackQuery) await ctx.answerCbQuery();
@@ -653,24 +724,33 @@ export function createBot(env) {
       const u = await getUser(env, ctx.from.id);
       const points = u?.points || 0;
       const refCount = u?.referral_count || 0;
+      const settings = await getSettings(env);
+      const rewardPts = settings.referral_points || 10;
 
       const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(refLink)}&text=${encodeURIComponent('Join ' + botInfo.username + ' to access premium files, courses, and resources!')}`;
 
       const text = `🎁 *Invite Friends & Earn Points*\n\n` +
         `• *Your Current Balance:* \`${points} Points\` 🪙\n` +
-        `• *Friends Invited:* \`${refCount}\` 👥\n\n` +
+        `• *Friends Invited:* \`${refCount}\` 👥\n` +
+        `• *Reward Per Friend:* \`+${rewardPts} Points\` 🪙\n\n` +
         `Share your personal referral link with friends:\n` +
         `\`${refLink}\``;
 
       const keyboard = Markup.inlineKeyboard([
         [Markup.button.url('✈️ Share on Telegram', shareUrl)],
+        [Markup.button.callback('🔗 Earn Points via Shortlink', 'user_earn_points')],
         [Markup.button.callback('🔙 Main Menu', 'main_menu')]
       ]);
 
-      return await ctx.reply(text, {
-        parse_mode: 'Markdown',
-        ...keyboard
-      });
+      if (ctx.callbackQuery) {
+        try {
+          return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+        } catch {
+          return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+        }
+      } else {
+        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+      }
     } catch (err) {
       console.error('Error in invite friends:', err);
       return await ctx.reply('⚠️ Failed to load referral information.');
@@ -690,7 +770,7 @@ export function createBot(env) {
 
     try {
       const stats = await getGlobalStats(env);
-      const text = `📊 *xmi Hub Analytics & Statistics*\n\n` +
+      let text = `📊 *xmi Hub Analytics & Statistics*\n\n` +
         `👥 *Total Users:* \`${stats.total_users}\`\n\n` +
         `📄 *Total Posts:* \`${stats.total_posts}\`\n` +
         `   • 🟢 Published: \`${stats.published_posts}\`\n` +
@@ -698,9 +778,27 @@ export function createBot(env) {
         `   • 🟣 Scheduled: \`${stats.scheduled_posts}\`\n` +
         `   • ⭐ Featured: \`${stats.promoted_posts}\`\n\n` +
         `👁️ *Total Impressions / Views:* \`${stats.total_views}\`\n` +
-        `📥 *Total File & Link Accesses:* \`${stats.total_file_accesses}\`\n` +
+        `📥 *Total File Downloads:* \`${stats.total_file_accesses}\`\n` +
         `❤️ *Total Likes:* \`${stats.total_likes}\`\n` +
-        `💬 *Total Comments:* \`${stats.total_comments}\``;
+        `💬 *Total Comments:* \`${stats.total_comments}\`\n\n` +
+        `🔗 *Monetized Verifications:* \`${stats.total_verifications}\`\n` +
+        `🎁 *Total Referrals:* \`${stats.total_referrals}\`\n` +
+        `🛡️ *Force Join Checks:* \`${stats.total_force_joins}\`\n` +
+        `🪙 *Points Awarded:* \`${stats.total_points_distributed}\` | *Spent:* \`${stats.total_points_spent}\``;
+
+      if (stats.top_views && stats.top_views.length > 0) {
+        text += `\n\n🔥 *Top 5 Most Popular Posts:*\n`;
+        stats.top_views.forEach((p, i) => {
+          text += `  ${i + 1}. *${escapeMarkdown(p.title)}* — \`${p.view_count} views\`\n`;
+        });
+      }
+
+      if (stats.top_likes && stats.top_likes.length > 0) {
+        text += `\n❤️ *Top 5 Most Liked Posts:*\n`;
+        stats.top_likes.forEach((p, i) => {
+          text += `  ${i + 1}. *${escapeMarkdown(p.title)}* — \`${p.like_count} likes\`\n`;
+        });
+      }
 
       const keyboard = Markup.inlineKeyboard([
         [

@@ -171,16 +171,24 @@ CREATE TABLE IF NOT EXISTS public.user_passes (
     last_verified_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 13. VERIFY TOKENS (Temporary verification tokens for shortener redirection)
+-- 13. VERIFY TOKENS (Anti-bypass Single-Use Verification Tokens)
 CREATE TABLE IF NOT EXISTS public.verify_tokens (
     token TEXT PRIMARY KEY,
     user_id BIGINT NOT NULL,
     target_post_id BIGINT,
+    shortener_name TEXT,
+    reward_points INTEGER DEFAULT 5,
+    is_used BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    is_used BOOLEAN NOT NULL DEFAULT FALSE
+    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '2 hours')
 );
 
+ALTER TABLE public.verify_tokens ADD COLUMN IF NOT EXISTS shortener_name TEXT;
+ALTER TABLE public.verify_tokens ADD COLUMN IF NOT EXISTS reward_points INTEGER DEFAULT 5;
+ALTER TABLE public.verify_tokens ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '2 hours');
+
 CREATE INDEX IF NOT EXISTS idx_verify_tokens_token ON public.verify_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_verify_tokens_user ON public.verify_tokens(user_id);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
