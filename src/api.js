@@ -858,7 +858,14 @@ export function createRouter() {
     try {
       const { id } = request.params;
       const url = new URL(request.url);
-      const userId = url.searchParams.get('user_id');
+      let userId = url.searchParams.get('user_id');
+
+      if (!userId) {
+        try {
+          const body = await request.json();
+          userId = body?.user_id;
+        } catch (e) {}
+      }
 
       if (!userId || String(userId) !== String(env.ADMIN_ID)) {
         return errorResponse('Unauthorized admin action', 403);
@@ -892,19 +899,22 @@ export function createRouter() {
         is_promoted
       } = body || {};
 
-      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+      const url = new URL(request.url);
+      const actualUserId = user_id || url.searchParams.get('user_id');
+
+      if (!actualUserId || String(actualUserId) !== String(env.ADMIN_ID)) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
       const updatePayload = {};
-      if (title !== undefined) updatePayload.title = title.trim();
+      if (title !== undefined) updatePayload.title = title ? title.trim() : 'Untitled Post';
       if (preview_image !== undefined) updatePayload.preview_image = preview_image ? preview_image.trim() : null;
       if (direct_link !== undefined) updatePayload.direct_link = direct_link ? direct_link.trim() : null;
       if (direct_link_title !== undefined) updatePayload.direct_link_title = direct_link_title ? direct_link_title.trim() : null;
       if (category !== undefined) updatePayload.category = category || 'All';
       if (tags !== undefined) updatePayload.tags = tags || '';
       if (status !== undefined) updatePayload.status = status;
-      if (scheduled_at !== undefined) updatePayload.scheduled_at = scheduled_at;
+      if (scheduled_at !== undefined) updatePayload.scheduled_at = scheduled_at ? scheduled_at : null;
       if (is_promoted !== undefined) updatePayload.is_promoted = Boolean(is_promoted);
 
       const updated = await updatePost(env, id, updatePayload);

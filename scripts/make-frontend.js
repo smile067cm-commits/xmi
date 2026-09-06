@@ -1756,6 +1756,37 @@ const rawHtml = `<!DOCTYPE html>
       }
     }
 
+    // Render Force Channels List in Admin Hub
+    async function loadChannels() {
+      if (!isAdmin) return;
+      const list = document.getElementById('forceChannelsList');
+      if (!list) return;
+      list.innerHTML = '<div style="padding: 10px;">Loading force channels...</div>';
+
+      try {
+        const res = await fetch('/api/admin/force-channels?user_id=' + currentUserId);
+        const data = await res.json();
+        if (data.success) {
+          const channels = data.channels || [];
+          if (channels.length === 0) {
+            list.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-muted); padding: 8px 0;">No mandatory channels added yet.</div>';
+            return;
+          }
+
+          list.innerHTML = '';
+          channels.forEach(ch => {
+            const item = document.createElement('div');
+            item.style.cssText = 'background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 12px; border: 1px solid var(--card-border); display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+            item.innerHTML = '<div><strong style="font-size: 0.88rem; color: #ffffff;">' + escapeHtml(ch.channel_title) + '</strong><div style="font-size: 0.74rem; color: var(--text-muted);">' + escapeHtml(ch.channel_id) + '</div></div>' +
+              '<div style="display: flex; align-items: center; gap: 6px;"><a href="' + escapeHtml(ch.invite_link) + '" target="_blank" class="btn btn-sm btn-secondary" style="padding: 3px 8px;">🔗 View</a><button class="btn btn-sm btn-ghost" style="color: #f87171; padding: 3px 8px;" data-delch="' + ch.id + '">🗑️</button></div>';
+            list.appendChild(item);
+          });
+        }
+      } catch (e) {
+        list.innerHTML = '<div style="color: #f87171;">Failed to load channels.</div>';
+      }
+    }
+
     // Event Handlers
     function setupEventListeners() {
       // Admin Mode Switcher
@@ -1799,7 +1830,15 @@ const rawHtml = `<!DOCTYPE html>
           loadShorteners();
           generateNewDestLink();
         }
+        if (atab === 'channels') loadChannels();
         if (atab === 'analytics') loadAdminAnalytics();
+        if (atab === 'banner') {
+          document.getElementById('setBannerToggle').checked = Boolean(globalSettings.banner_enabled);
+          document.getElementById('setBannerTitle').value = globalSettings.banner_title || '';
+          document.getElementById('setBannerText').value = globalSettings.banner_text || '';
+          document.getElementById('setBannerImg').value = globalSettings.banner_image || '';
+          document.getElementById('setBannerLink').value = globalSettings.banner_link || '';
+        }
         if (atab === 'settings') {
           document.getElementById('setShortenerToggle').checked = Boolean(globalSettings.shortener_enabled);
           document.getElementById('setPointsPerVerify').value = globalSettings.points_per_verify || 5;
@@ -1808,6 +1847,135 @@ const rawHtml = `<!DOCTYPE html>
           document.getElementById('setReferralToggle').checked = Boolean(globalSettings.referral_enabled);
           document.getElementById('setReferralPointsVal').value = globalSettings.referral_points || 10;
           document.getElementById('setForceJoinToggle').checked = Boolean(globalSettings.force_join_enabled);
+        }
+      });
+
+      // Admin Posts Grid: Edit and Delete Actions
+      document.getElementById('adminPostsGrid')?.addEventListener('click', async (e) => {
+        const editBtn = e.target.closest('[data-aact="edit"]');
+        if (editBtn) {
+          const postId = editBtn.dataset.id;
+          try {
+            const res = await fetch('/api/posts/' + postId + '?user_id=' + currentUserId);
+            const data = await res.json();
+            if (data.success && data.post) {
+              const post = data.post;
+              document.getElementById('editPostId').value = post.id;
+              document.getElementById('editPostTitle').value = post.title || '';
+              document.getElementById('editPostCategory').value = post.category || 'All';
+              document.getElementById('editPostTags').value = post.tags || '';
+              document.getElementById('editPostImage').value = post.preview_image || '';
+              document.getElementById('editPostLink').value = post.direct_link || '';
+              document.getElementById('editPostLinkLabel').value = post.direct_link_title || '';
+              document.getElementById('editPostStatus').value = post.status || 'published';
+              document.getElementById('editPostPromoted').checked = Boolean(post.is_promoted);
+              if (post.scheduled_at) {
+                document.getElementById('editPostScheduledAt').value = post.scheduled_at.substring(0, 16);
+              } else {
+                document.getElementById('editPostScheduledAt').value = '';
+              }
+              document.getElementById('editScheduledGroup').style.display = post.status === 'scheduled' ? 'block' : 'none';
+              document.getElementById('editPostModal').classList.add('active');
+            } else {
+              showToast('Post details not found');
+            }
+          } catch (err) {
+            showToast('Failed to load post for editing');
+          }
+          return;
+        }
+
+        const delBtn = e.target.closest('[data-aact="del"]');
+        if (delBtn) {
+          const postId = delBtn.dataset.id;
+          if (!confirm('⚠️ Are you sure you want to permanently delete this post? This cannot be undone.')) return;
+          try {
+            const res = await fetch('/api/admin/posts/' + postId + '?user_id=' + currentUserId, {
+              method: 'DELETE'
+            });
+            const data = await res.json();
+            if (data.success) {
+              showToast('🗑️ Post deleted successfully!');
+              loadAdminPosts();
+              loadPosts();
+            } else {
+              showToast(data.error || 'Failed to delete post');
+            }
+          } catch (err) {
+            showToast('Error deleting post');
+          }
+          return;
+        }
+      });
+
+      // Status selector change inside Edit Post Modal
+      document.getElementById('editPostStatus')?.addEventListener('change', (e) => {
+        document.getElementById('editScheduledGroup').style.display = e.target.value === 'scheduled' ? 'block' : 'none';
+      });
+
+      // Close Edit Post Modal
+      document.getElementById('btnEditPostClose')?.addEventListener('click', () => {
+        document.getElementById('editPostModal').classList.remove('active');
+      });
+
+      // Submit Edit Post Form
+      document.getElementById('editPostForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const postId = document.getElementById('editPostId').value;
+        const payload = {
+          user_id: currentUserId,
+          title: document.getElementById('editPostTitle').value.trim(),
+          category: document.getElementById('editPostCategory').value.trim() || 'All',
+          tags: document.getElementById('editPostTags').value.trim(),
+          preview_image: document.getElementById('editPostImage').value.trim(),
+          direct_link: document.getElementById('editPostLink').value.trim(),
+          direct_link_title: document.getElementById('editPostLinkLabel').value.trim(),
+          status: document.getElementById('editPostStatus').value,
+          is_promoted: document.getElementById('editPostPromoted').checked,
+          scheduled_at: document.getElementById('editPostScheduledAt').value || null
+        };
+
+        try {
+          const res = await fetch('/api/admin/posts/' + postId + '/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (data.success) {
+            document.getElementById('editPostModal').classList.remove('active');
+            showToast('✅ Post updated successfully!');
+            loadAdminPosts();
+            loadPosts();
+          } else {
+            showToast(data.error || 'Failed to update post');
+          }
+        } catch (err) {
+          showToast('Error saving post updates');
+        }
+      });
+
+      // Delete Button inside Edit Modal
+      document.getElementById('btnDeleteFromEdit')?.addEventListener('click', async () => {
+        const postId = document.getElementById('editPostId').value;
+        if (!postId) return;
+        if (!confirm('⚠️ Are you sure you want to permanently delete this post?')) return;
+
+        try {
+          const res = await fetch('/api/admin/posts/' + postId + '?user_id=' + currentUserId, {
+            method: 'DELETE'
+          });
+          const data = await res.json();
+          if (data.success) {
+            document.getElementById('editPostModal').classList.remove('active');
+            showToast('🗑️ Post deleted successfully!');
+            loadAdminPosts();
+            loadPosts();
+          } else {
+            showToast(data.error || 'Failed to delete post');
+          }
+        } catch (err) {
+          showToast('Error deleting post');
         }
       });
 
@@ -2058,6 +2226,117 @@ const rawHtml = `<!DOCTYPE html>
           }
         } catch (err) {
           showToast('Failed to remove shortener');
+        }
+      });
+
+      // Add Force Channel Form
+      document.getElementById('formAddChannel')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const channel_id = document.getElementById('addChId').value.trim();
+        const channel_title = document.getElementById('addChTitle').value.trim();
+        const invite_link = document.getElementById('addChLink').value.trim();
+
+        try {
+          const res = await fetch('/api/admin/force-channels', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: currentUserId, channel_id, channel_title, invite_link })
+          });
+          const data = await res.json();
+          if (data.success) {
+            showToast('✅ Force channel added!');
+            document.getElementById('addChId').value = '';
+            document.getElementById('addChTitle').value = '';
+            document.getElementById('addChLink').value = '';
+            loadChannels();
+          }
+        } catch (err) {
+          showToast('Failed to add channel');
+        }
+      });
+
+      // Delete Force Channel
+      document.getElementById('forceChannelsList')?.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-delch]');
+        if (!btn) return;
+        const chId = btn.dataset.delch;
+        if (!confirm('Remove this mandatory force channel?')) return;
+
+        try {
+          const res = await fetch('/api/admin/force-channels/' + chId + '?user_id=' + currentUserId, { method: 'DELETE' });
+          const data = await res.json();
+          if (data.success) {
+            showToast('Channel removed');
+            loadChannels();
+          }
+        } catch (err) {
+          showToast('Failed to delete channel');
+        }
+      });
+
+      // Save Banner Form
+      document.getElementById('formAdminBanner')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const settings = {
+          banner_enabled: document.getElementById('setBannerToggle').checked,
+          banner_title: document.getElementById('setBannerTitle').value.trim(),
+          banner_text: document.getElementById('setBannerText').value.trim(),
+          banner_image: document.getElementById('setBannerImg').value.trim(),
+          banner_link: document.getElementById('setBannerLink').value.trim()
+        };
+
+        try {
+          const res = await fetch('/api/admin/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: currentUserId, settings })
+          });
+          const data = await res.json();
+          if (data.success) {
+            showToast('✅ Sponsored Banner saved!');
+            await loadSettingsAndUser();
+          }
+        } catch (err) {
+          showToast('Failed to save banner');
+        }
+      });
+
+      // Push Broadcast Form
+      document.getElementById('formAdminBroadcast')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('btnSendBroadcast');
+        const message = document.getElementById('bcMessage').value.trim();
+        const photo_url = document.getElementById('bcPhoto').value.trim();
+        const button_text = document.getElementById('bcBtnText').value.trim();
+        const button_url = document.getElementById('bcBtnUrl').value.trim();
+
+        if (!message) return;
+        if (!confirm('🚀 Send this broadcast message to ALL users now?')) return;
+
+        btn.disabled = true;
+        btn.textContent = '⏳ Sending broadcast...';
+
+        try {
+          const res = await fetch('/api/admin/broadcast', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: currentUserId, message, photo_url, button_text, button_url })
+          });
+          const data = await res.json();
+          if (data.success) {
+            showToast('🎉 Broadcast sent! Sent: ' + (data.sent_count || 0) + ', Failed: ' + (data.failed_count || 0));
+            document.getElementById('bcMessage').value = '';
+            document.getElementById('bcPhoto').value = '';
+            document.getElementById('bcBtnText').value = '';
+            document.getElementById('bcBtnUrl').value = '';
+          } else {
+            showToast(data.error || 'Failed to send broadcast');
+          }
+        } catch (err) {
+          showToast('Error broadcasting message');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '🚀 Send Broadcast Now';
         }
       });
 

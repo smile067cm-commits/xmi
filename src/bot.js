@@ -928,12 +928,13 @@ export function createBot(env) {
         });
       }
 
-      const buttons = posts.slice(0, 12).map(p => {
+      const buttons = posts.slice(0, 15).map(p => {
         const statusIcon = p.status === 'published' ? '🟢' : p.status === 'scheduled' ? '🟣' : '🟡';
         const star = p.is_promoted ? '⭐ ' : '';
+        const displayTitle = p.title.length > 26 ? p.title.slice(0, 26) + '…' : p.title;
         return [
           Markup.button.callback(
-            `${statusIcon} ${star}#${p.id} ${p.title.slice(0, 22)}...`,
+            `${statusIcon} ${star}${displayTitle}`,
             `admin_post_view_${p.id}`
           )
         ];

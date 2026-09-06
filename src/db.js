@@ -294,7 +294,7 @@ export async function updatePost(env, postId, updateFields) {
   }
 
   const data = await res.json();
-  return data[0];
+  return Array.isArray(data) ? (data[0] || null) : data;
 }
 
 export async function togglePromotePost(env, postId, isPromoted) {
@@ -302,11 +302,35 @@ export async function togglePromotePost(env, postId, isPromoted) {
 }
 
 export async function deletePost(env, postId) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}`;
-  
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+
+  // Safely clean related tables to prevent FK constraint failures
+  try {
+    const foldersRes = await fetch(`${baseUrl}/folders?post_id=eq.${postId}&select=id`, { headers });
+    if (foldersRes.ok) {
+      const folders = await foldersRes.json();
+      if (Array.isArray(folders)) {
+        for (const f of folders) {
+          await fetch(`${baseUrl}/files?folder_id=eq.${f.id}`, { method: 'DELETE', headers }).catch(() => {});
+        }
+      }
+    }
+    await fetch(`${baseUrl}/folders?post_id=eq.${postId}`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${baseUrl}/likes?post_id=eq.${postId}`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${baseUrl}/comments?post_id=eq.${postId}`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${baseUrl}/bookmarks?post_id=eq.${postId}`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${baseUrl}/views_log?post_id=eq.${postId}`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${baseUrl}/file_access_logs?post_id=eq.${postId}`, { method: 'DELETE', headers }).catch(() => {});
+    await fetch(`${baseUrl}/ephemeral_messages?target_post_id=eq.${postId}`, { method: 'DELETE', headers }).catch(() => {});
+  } catch (e) {
+    console.warn('Cascade pre-clean error:', e);
+  }
+
+  const url = `${baseUrl}/posts?id=eq.${postId}`;
   const res = await fetch(url, {
     method: 'DELETE',
-    headers: getSupabaseHeaders(env)
+    headers: headers
   });
 
   if (!res.ok) {
