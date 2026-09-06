@@ -139,12 +139,27 @@ ALTER TABLE public.likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.post_views ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.file_access_logs ENABLE ROW LEVEL SECURITY;
 
--- Allow full access for service_role key
+-- Allow full access for service_role key (Drop first if exists to prevent 42710 error)
+DROP POLICY IF EXISTS "Allow service_role full access to users" ON public.users;
 CREATE POLICY "Allow service_role full access to users" ON public.users FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to posts" ON public.posts;
 CREATE POLICY "Allow service_role full access to posts" ON public.posts FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to folders" ON public.folders;
 CREATE POLICY "Allow service_role full access to folders" ON public.folders FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to files" ON public.files;
 CREATE POLICY "Allow service_role full access to files" ON public.files FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to comments" ON public.comments;
 CREATE POLICY "Allow service_role full access to comments" ON public.comments FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to likes" ON public.likes;
 CREATE POLICY "Allow service_role full access to likes" ON public.likes FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to post_views" ON public.post_views;
 CREATE POLICY "Allow service_role full access to post_views" ON public.post_views FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow service_role full access to file_access_logs" ON public.file_access_logs;
 CREATE POLICY "Allow service_role full access to file_access_logs" ON public.file_access_logs FOR ALL TO service_role USING (true) WITH CHECK (true);
