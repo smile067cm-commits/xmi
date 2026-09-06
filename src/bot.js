@@ -128,142 +128,121 @@ async function sendPostToUser(ctx, env, post, postId) {
   const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
 
   const sentMessageIds = [];
+  const inlineButtons = [];
+  const physicalFiles = [];
 
-  let headerText = `📌 *${escapeMarkdown(post.title)}*\n`;
-  if (post.category && post.category !== 'All') {
-    headerText += `📁 *Category:* \`${escapeMarkdown(post.category)}\`\n`;
-  }
-  if (post.tags) {
-    headerText += `🏷️ *Tags:* \`${escapeMarkdown(post.tags)}\`\n`;
-  }
-  headerText += `\n📥 *Delivering post content & files below:*`;
-
-  // 1. Post Preview Image or Header
-  if (post.preview_image) {
-    try {
-      const imgMsg = await ctx.replyWithPhoto(post.preview_image, {
-        caption: headerText,
-        parse_mode: 'Markdown',
-        protect_content: protectContent
-      });
-      if (imgMsg?.message_id) sentMessageIds.push(imgMsg.message_id);
-    } catch (e) {
-      const txtMsg = await ctx.reply(headerText, {
-        parse_mode: 'Markdown',
-        protect_content: protectContent
-      });
-      if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
-    }
-  } else {
-    const txtMsg = await ctx.reply(headerText, {
-      parse_mode: 'Markdown',
-      protect_content: protectContent
-    });
-    if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
-  }
-
-  // 2. Direct Link (Sent as Inline Button)
+  // 1. Collect Direct Link as Button
   if (post.direct_link) {
     const linkLabel = post.direct_link_title || 'Open / Download Link';
-    try {
-      const directMsg = await ctx.reply(`🔗 *Content Link:*\nTap the button below to access:`, {
-        parse_mode: 'Markdown',
-        protect_content: protectContent,
-        ...Markup.inlineKeyboard([
-          [Markup.button.url(`📥 ${linkLabel}`, post.direct_link)]
-        ])
-      });
-      if (directMsg?.message_id) sentMessageIds.push(directMsg.message_id);
-    } catch (dErr) {
-      console.warn('Failed to send direct link message:', dErr.message);
-    }
+    inlineButtons.push([Markup.button.url(`📥 ${linkLabel}`, post.direct_link)]);
   }
 
-  // 3. Folders & Files (Links sent as buttons, documents sent/copied to chat)
+  // 2. Collect Folder Links as Buttons vs Physical Files
   if (folders && folders.length > 0) {
     for (const folder of folders) {
       const files = folder.files || [];
-      if (files.length > 0) {
-        for (const file of files) {
-          try {
-            const isLink = file.mime_type === 'link' || file.file_id?.startsWith('http://') || file.file_id?.startsWith('https://');
-            if (isLink) {
-              const linkBtnTitle = file.file_name || 'Open Download Link';
-              const fileLinkMsg = await ctx.reply(
-                `🔗 *${escapeMarkdown(folder.name)}* ➔ *${escapeMarkdown(file.file_name || 'Link')}*`,
-                {
-                  parse_mode: 'Markdown',
-                  protect_content: protectContent,
-                  ...Markup.inlineKeyboard([
-                    [Markup.button.url(`📥 ${linkBtnTitle}`, file.file_id)]
-                  ])
-                }
-              );
-              if (fileLinkMsg?.message_id) sentMessageIds.push(fileLinkMsg.message_id);
-            } else if (file.channel_message_id && env.CHANNEL_ID) {
-              const copied = await ctx.telegram.copyMessage(
-                ctx.chat.id,
-                env.CHANNEL_ID,
-                Number(file.channel_message_id),
-                { protect_content: protectContent }
-              );
-              if (copied?.message_id) sentMessageIds.push(copied.message_id);
-            } else if (file.file_id) {
-              const sentDoc = await ctx.telegram.sendDocument(ctx.chat.id, file.file_id, {
-                protect_content: protectContent
-              });
-              if (sentDoc?.message_id) sentMessageIds.push(sentDoc.message_id);
-            }
-          } catch (fileErr) {
-            console.warn(`Failed to deliver file ${file.id}:`, fileErr.message);
-          }
+      for (const file of files) {
+        const isLink = file.mime_type === 'link' || file.file_id?.startsWith('http://') || file.file_id?.startsWith('https://');
+        if (isLink) {
+          const linkBtnTitle = file.file_name || `${folder.name} Link`;
+          inlineButtons.push([Markup.button.url(`🔗 ${linkBtnTitle}`, file.file_id)]);
+        } else {
+          physicalFiles.push({ folder, file });
         }
       }
     }
   }
 
-  // 4. Auto-Delete Notice at the End
-  if (autoDeleteMinutes > 0) {
-    const noticeText = `⏳ ⚠️ *Auto-Delete Notice:*\n\n` +
-      `All files and links above will automatically self-destruct & delete in *${autoDeleteMinutes} minutes*!\n\n` +
-      (protectContent
-        ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
-        : `👉 *Please forward or save them to your Saved Messages now before they disappear.*`);
+  // 3. Mini App & Menu Navigation Buttons
+  inlineButtons.push([Markup.button.webApp('🚀 View in Mini App', appUrl)]);
+  inlineButtons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
 
+  // 4. Build Unified Post Message / Caption
+  let captionText = `📌 *${escapeMarkdown(post.title)}*\n`;
+  if (post.category && post.category !== 'All') {
+    captionText += `📁 *Category:* \`${escapeMarkdown(post.category)}\`\n`;
+  }
+  if (post.tags) {
+    captionText += `🏷️ *Tags:* \`${escapeMarkdown(post.tags)}\`\n`;
+  }
+
+  if (autoDeleteMinutes > 0) {
+    captionText += `\n⏳ ⚠️ *Auto-Delete:* Content will self-destruct in *${autoDeleteMinutes} mins*!\n`;
+    if (protectContent) {
+      captionText += `🔒 *Content protection is enabled (forwarding restricted).*\n`;
+    } else {
+      captionText += `👉 *Save to Saved Messages before it disappears.*\n`;
+    }
+  } else if (protectContent) {
+    captionText += `\n🔒 *Content protection is enabled (forwarding restricted).*\n`;
+  }
+
+  if (physicalFiles.length > 0) {
+    captionText += `\n📥 *Delivering ${physicalFiles.length} file(s) below:*`;
+  }
+
+  // 5. Send Image, Title, and All Buttons in the SAME Message!
+  if (post.preview_image) {
     try {
-      const noticeMsg = await ctx.reply(noticeText, {
+      const imgMsg = await ctx.replyWithPhoto(post.preview_image, {
+        caption: captionText,
         parse_mode: 'Markdown',
         protect_content: protectContent,
-        ...Markup.inlineKeyboard([
-          [Markup.button.webApp('🚀 View in Mini App', appUrl)],
-          [Markup.button.callback('🔙 Main Menu', 'main_menu')]
-        ])
+        ...Markup.inlineKeyboard(inlineButtons)
       });
-      if (noticeMsg?.message_id) sentMessageIds.push(noticeMsg.message_id);
-
-      // Register sent message IDs for auto-deletion
-      const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
-      const records = sentMessageIds.map(mid => ({
-        chat_id: ctx.chat.id,
-        message_id: mid,
-        delete_at: deleteAt,
-        is_deleted: false
-      }));
-      addEphemeralMessages(env, records).catch(e => console.error('Error saving ephemeral records:', e));
-    } catch (nErr) {
-      console.warn('Failed to send auto-delete notice:', nErr.message);
+      if (imgMsg?.message_id) sentMessageIds.push(imgMsg.message_id);
+    } catch (e) {
+      console.warn('Could not send photo, falling back to text:', e.message);
+      const txtMsg = await ctx.reply(captionText, {
+        parse_mode: 'Markdown',
+        protect_content: protectContent,
+        ...Markup.inlineKeyboard(inlineButtons)
+      });
+      if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
     }
   } else {
-    try {
-      await ctx.reply(`✅ *All items delivered successfully!*` + (protectContent ? `\n🔒 *Content protection is enabled.*` : ''), {
-        parse_mode: 'Markdown',
-        protect_content: protectContent,
-        ...Markup.inlineKeyboard([
-          [Markup.button.webApp('🚀 View in Mini App', appUrl)],
-          [Markup.button.callback('🔙 Main Menu', 'main_menu')]
-        ])
-      });
-    } catch (e) {}
+    const txtMsg = await ctx.reply(captionText, {
+      parse_mode: 'Markdown',
+      protect_content: protectContent,
+      ...Markup.inlineKeyboard(inlineButtons)
+    });
+    if (txtMsg?.message_id) sentMessageIds.push(txtMsg.message_id);
+  }
+
+  // 6. Send Physical Files Separately ONLY if Physical Files Exist
+  if (physicalFiles.length > 0) {
+    for (const { folder, file } of physicalFiles) {
+      try {
+        if (file.channel_message_id && env.CHANNEL_ID) {
+          const copied = await ctx.telegram.copyMessage(
+            ctx.chat.id,
+            env.CHANNEL_ID,
+            Number(file.channel_message_id),
+            { protect_content: protectContent }
+          );
+          if (copied?.message_id) sentMessageIds.push(copied.message_id);
+        } else if (file.file_id) {
+          const sentDoc = await ctx.telegram.sendDocument(ctx.chat.id, file.file_id, {
+            protect_content: protectContent
+          });
+          if (sentDoc?.message_id) sentMessageIds.push(sentDoc.message_id);
+        }
+      } catch (fileErr) {
+        console.warn(`Failed to deliver file ${file.id}:`, fileErr.message);
+      }
+    }
+  }
+
+  // 7. Register all sent message IDs for auto-deletion
+  if (autoDeleteMinutes > 0 && sentMessageIds.length > 0) {
+    const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
+    const records = sentMessageIds.map(mid => ({
+      chat_id: ctx.chat.id,
+      message_id: mid,
+      delete_at: deleteAt,
+      is_deleted: false
+    }));
+    addEphemeralMessages(env, records).catch(e => console.error('Error saving ephemeral records:', e));
   }
 
   // Background cleanup of any past expired messages

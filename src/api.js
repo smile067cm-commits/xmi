@@ -187,19 +187,41 @@ export function createRouter() {
   // -------------------------------------------------------------
   router.post('/api/admin/settings', async (request, env) => {
     try {
-      const body = await request.json();
-      const { user_id, settings } = body || {};
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const body = await request.json().catch(() => ({}));
+      const user_id = queryUserId || body.user_id || body.admin_id;
 
       if (!user_id || !(await isAdminUser(env, user_id))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
+      const settings = (body.settings && typeof body.settings === 'object') ? body.settings : body;
       if (!settings || typeof settings !== 'object') {
         return errorResponse('Invalid settings object', 400);
       }
 
+      const allowedKeys = [
+        'referral_enabled',
+        'referral_points',
+        'shortener_enabled',
+        'points_per_verify',
+        'points_per_post',
+        'points_per_post_download',
+        'auto_delete_minutes',
+        'banner_enabled',
+        'banner_image',
+        'banner_link',
+        'banner_title',
+        'banner_text',
+        'force_join_enabled',
+        'shorteners'
+      ];
+
       for (const [key, value] of Object.entries(settings)) {
-        await updateSetting(env, key, value);
+        if (allowedKeys.includes(key)) {
+          await updateSetting(env, key, value);
+        }
       }
 
       const updated = await getSettings(env);
@@ -385,12 +407,16 @@ export function createRouter() {
   // -------------------------------------------------------------
   router.post('/api/admin/broadcast', async (request, env) => {
     try {
-      const body = await request.json();
-      const { user_id, message, photo_url, button_text, button_url } = body || {};
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const body = await request.json().catch(() => ({}));
+      const user_id = queryUserId || body.user_id || body.admin_id || body.sender_id;
 
       if (!user_id || !(await isAdminUser(env, user_id))) {
-        return errorResponse('Unauthorized admin action', 403);
+        return errorResponse('Unauthorized admin access', 403);
       }
+
+      const { message, photo_url, button_text, button_url } = body;
 
       if (!message || !message.trim()) {
         return errorResponse('Broadcast message is required', 400);
@@ -442,7 +468,9 @@ export function createRouter() {
         success: true,
         total_users: userIds.length,
         sent_count: sentCount,
-        failed_count: failedCount
+        failed_count: failedCount,
+        sent: sentCount,
+        failed: failedCount
       });
     } catch (err) {
       console.error('API broadcast error:', err);
@@ -1002,14 +1030,21 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
-  // POST /api/admin/posts/:id/edit - Full Post Edit (Admin Only)
+  // Post Edit (Admin Only) - Supports POST /edit, PATCH, PUT, POST
   // -------------------------------------------------------------
-  router.post('/api/admin/posts/:id/edit', async (request, env) => {
+  const handleEditPost = async (request, env) => {
     try {
       const { id } = request.params;
-      const body = await request.json();
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const body = await request.json().catch(() => ({}));
+      const actualUserId = queryUserId || body.user_id || body.admin_id;
+
+      if (!actualUserId || !(await isAdminUser(env, actualUserId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
       const {
-        user_id,
         title,
         preview_image,
         direct_link,
@@ -1022,13 +1057,6 @@ export function createRouter() {
         auto_delete_minutes,
         protect_content
       } = body || {};
-
-      const url = new URL(request.url);
-      const actualUserId = user_id || url.searchParams.get('user_id');
-
-      if (!actualUserId || !(await isAdminUser(env, actualUserId))) {
-        return errorResponse('Unauthorized admin action', 403);
-      }
 
       const updatePayload = {};
       if (title !== undefined) updatePayload.title = title ? title.trim() : 'Untitled Post';
@@ -1051,7 +1079,12 @@ export function createRouter() {
       console.error('API edit post error:', err);
       return errorResponse(err.message, 500);
     }
-  });
+  };
+
+  router.post('/api/admin/posts/:id/edit', handleEditPost);
+  router.patch('/api/admin/posts/:id', handleEditPost);
+  router.post('/api/admin/posts/:id', handleEditPost);
+  router.put('/api/admin/posts/:id', handleEditPost);
 
   // -------------------------------------------------------------
   // GET /api/admin/stats - Global Hub Statistics (Admin Only)

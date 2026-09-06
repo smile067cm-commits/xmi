@@ -854,21 +854,27 @@ export async function getSettings(env) {
   const list = res.ok ? await res.json() : [];
   const map = {};
   list.forEach(item => {
-    map[item.key] = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
+    try {
+      map[item.key] = typeof item.value === 'string' ? JSON.parse(item.value) : item.value;
+    } catch (e) {
+      map[item.key] = item.value;
+    }
   });
 
   return {
-    referral_enabled: map.referral_enabled ?? false,
+    referral_enabled: Boolean(map.referral_enabled),
     referral_points: Number(map.referral_points) || 10,
-    shortener_enabled: map.shortener_enabled ?? false,
+    shortener_enabled: Boolean(map.shortener_enabled),
     points_per_verify: Number(map.points_per_verify) || 5,
-    points_per_post: Number(map.points_per_post) || 1,
-    banner_enabled: map.banner_enabled ?? false,
-    banner_image: map.banner_image ?? '',
-    banner_link: map.banner_link ?? '',
-    banner_title: map.banner_title ?? '',
-    banner_text: map.banner_text ?? '',
-    force_join_enabled: map.force_join_enabled ?? false,
+    points_per_post: Number(map.points_per_post || map.points_per_post_download) || 1,
+    points_per_post_download: Number(map.points_per_post_download || map.points_per_post) || 1,
+    auto_delete_minutes: (map.auto_delete_minutes !== undefined && map.auto_delete_minutes !== null) ? Number(map.auto_delete_minutes) : 30,
+    banner_enabled: Boolean(map.banner_enabled),
+    banner_image: map.banner_image || '',
+    banner_link: map.banner_link || '',
+    banner_title: map.banner_title || '',
+    banner_text: map.banner_text || '',
+    force_join_enabled: Boolean(map.force_join_enabled),
     shorteners: Array.isArray(map.shorteners) ? map.shorteners : []
   };
 }
