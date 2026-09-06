@@ -5,6 +5,7 @@
 
 export function getAppHtml(env) {
   const botUsername = env.BOT_USERNAME || 'YourTelegramBot';
+  const adminId = env.ADMIN_ID || '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -32,6 +33,7 @@ export function getAppHtml(env) {
       --primary-hover: #0ea5e9;
       --primary-glow: rgba(56, 189, 248, 0.25);
       --accent-heart: #f43f5e;
+      --accent-admin: #fbbf24;
       --accent-telegram: #229ed9;
       --border-radius: 16px;
       --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -54,14 +56,14 @@ export function getAppHtml(env) {
       flex-direction: column;
     }
 
-    /* Top Navigation Bar */
+    /* Header */
     header {
       position: sticky;
       top: 0;
       z-index: 50;
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
-      background: rgba(15, 23, 42, 0.85);
+      background: rgba(15, 23, 42, 0.88);
       border-bottom: 1px solid var(--card-border);
       padding: 12px 20px;
       display: flex;
@@ -90,8 +92,8 @@ export function getAppHtml(env) {
     }
 
     .brand-title {
-      font-weight: 700;
-      font-size: 1.15rem;
+      font-weight: 800;
+      font-size: 1.25rem;
       letter-spacing: -0.02em;
     }
 
@@ -104,7 +106,18 @@ export function getAppHtml(env) {
     .user-auth-area {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
+    }
+
+    .admin-badge {
+      background: rgba(251, 191, 36, 0.2);
+      border: 1px solid rgba(251, 191, 36, 0.4);
+      color: var(--accent-admin);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
     }
 
     .user-profile-badge {
@@ -170,10 +183,6 @@ export function getAppHtml(env) {
       font-size: 0.85rem;
     }
 
-    .btn-telegram:hover {
-      background: #1e8bbd;
-    }
-
     .btn-ghost {
       background: transparent;
       color: var(--text-muted);
@@ -191,7 +200,35 @@ export function getAppHtml(env) {
       max-width: 900px;
       width: 100%;
       margin: 0 auto;
-      padding: 24px 16px 60px 16px;
+      padding: 20px 16px 60px 16px;
+    }
+
+    /* Admin Filter Tabs */
+    .admin-tabs-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .admin-tab {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: var(--transition);
+    }
+
+    .admin-tab.active {
+      background: var(--primary);
+      color: #04101e;
+      border-color: var(--primary);
     }
 
     /* Search & Filter Bar */
@@ -256,7 +293,7 @@ export function getAppHtml(env) {
       }
     }
 
-    /* Post Card */
+    /* Uniform Post Card */
     .post-card {
       background: var(--card-bg);
       backdrop-filter: blur(12px);
@@ -266,6 +303,7 @@ export function getAppHtml(env) {
       overflow: hidden;
       display: flex;
       flex-direction: column;
+      height: 100%;
       transition: var(--transition);
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
     }
@@ -276,31 +314,76 @@ export function getAppHtml(env) {
       box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
     }
 
+    /* Full Image with Blurred Ambient Side Backdrop */
     .post-image-container {
       width: 100%;
-      height: 190px;
-      background: linear-gradient(135deg, #1e293b, #0f172a);
+      height: 220px;
       position: relative;
       overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
+      background: #090d16;
     }
 
-    .post-image {
+    .post-image-backdrop {
+      position: absolute;
+      inset: -15px;
+      background-size: cover;
+      background-position: center;
+      filter: blur(20px) brightness(0.55);
+      transform: scale(1.15);
+      z-index: 1;
+    }
+
+    .post-image-fg {
+      position: relative;
+      z-index: 2;
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain;
       transition: transform 0.4s ease;
     }
 
-    .post-card:hover .post-image {
-      transform: scale(1.04);
+    .post-card:hover .post-image-fg {
+      transform: scale(1.03);
     }
 
     .post-image-placeholder {
-      font-size: 40px;
+      font-size: 44px;
       opacity: 0.4;
+      z-index: 2;
+    }
+
+    .post-status-badge {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 3;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      backdrop-filter: blur(8px);
+    }
+
+    .status-published {
+      background: rgba(34, 197, 94, 0.25);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .status-draft {
+      background: rgba(245, 158, 11, 0.25);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .status-scheduled {
+      background: rgba(168, 85, 247, 0.25);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.4);
     }
 
     .post-body {
@@ -321,10 +404,44 @@ export function getAppHtml(env) {
     .post-meta {
       font-size: 0.78rem;
       color: var(--text-muted);
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       display: flex;
       align-items: center;
       gap: 6px;
+    }
+
+    /* Admin Actions Row */
+    .admin-card-actions {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.1);
+    }
+
+    .admin-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .admin-btn:hover {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    .admin-btn-delete {
+      color: #f87171;
+      border-color: rgba(248, 113, 113, 0.3);
+    }
+
+    .admin-btn-delete:hover {
+      background: rgba(248, 113, 113, 0.2);
     }
 
     .post-actions-row {
@@ -332,6 +449,7 @@ export function getAppHtml(env) {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 8px;
       padding-top: 12px;
       border-top: 1px solid rgba(255, 255, 255, 0.08);
     }
@@ -339,7 +457,7 @@ export function getAppHtml(env) {
     .social-counters {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
 
     .action-btn {
@@ -371,18 +489,24 @@ export function getAppHtml(env) {
       stroke: var(--accent-heart);
     }
 
+    .post-buttons-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     .btn-open-bot {
       background: rgba(56, 189, 248, 0.12);
       color: var(--primary);
       border: 1px solid rgba(56, 189, 248, 0.25);
-      padding: 7px 14px;
+      padding: 7px 12px;
       border-radius: 10px;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       font-weight: 600;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       transition: var(--transition);
     }
 
@@ -390,6 +514,26 @@ export function getAppHtml(env) {
       background: var(--primary);
       color: #04101e;
       box-shadow: 0 4px 12px var(--primary-glow);
+    }
+
+    .btn-direct-link {
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      padding: 7px 12px;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: var(--transition);
+    }
+
+    .btn-direct-link:hover {
+      background: #22c55e;
+      color: #04101e;
     }
 
     /* Modal / Drawer for Comments & Details */
@@ -523,6 +667,12 @@ export function getAppHtml(env) {
       padding: 12px;
       border-radius: 12px;
       border: 1px solid rgba(255, 255, 255, 0.05);
+      position: relative;
+    }
+
+    .comment-item.is-hidden {
+      opacity: 0.6;
+      border: 1px dashed #f87171;
     }
 
     .comment-author {
@@ -548,6 +698,28 @@ export function getAppHtml(env) {
       line-height: 1.4;
       color: #e2e8f0;
       white-space: pre-wrap;
+    }
+
+    .comment-admin-actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .comment-mod-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .comment-mod-btn:hover {
+      color: white;
+      background: rgba(255, 255, 255, 0.15);
     }
 
     .modal-footer {
@@ -636,13 +808,19 @@ export function getAppHtml(env) {
       </div>
     </a>
 
-    <div class="user-auth-area" id="authArea">
-      <!-- Auth buttons / user profile rendered here by JS -->
-    </div>
+    <div class="user-auth-area" id="authArea"></div>
   </header>
 
   <!-- Main Content Area -->
   <main>
+    <!-- Admin Tabs (Visible for Admin only) -->
+    <div class="admin-tabs-bar" id="adminTabsBar" style="display: none;">
+      <button class="admin-tab active" data-filter="all">All Posts</button>
+      <button class="admin-tab" data-filter="published">Published</button>
+      <button class="admin-tab" data-filter="draft">Drafts</button>
+      <button class="admin-tab" data-filter="scheduled">Scheduled</button>
+    </div>
+
     <!-- Controls Bar -->
     <div class="controls-bar">
       <div class="search-input-wrapper">
@@ -658,9 +836,7 @@ export function getAppHtml(env) {
     </div>
 
     <!-- Feed Container -->
-    <div id="postsFeed" class="posts-grid">
-      <!-- Posts or Skeletons injected here -->
-    </div>
+    <div id="postsFeed" class="posts-grid"></div>
   </main>
 
   <!-- Comments Modal / Drawer -->
@@ -696,21 +872,17 @@ export function getAppHtml(env) {
   <div id="toast">Message</div>
 
   <script>
-    // =========================================================
-    // STATE & CONFIG (Unified Single Worker Host)
-    // =========================================================
     const API_BASE_URL = window.location.origin;
-    let botUsername = '${botUsername}';
+    const BOT_USERNAME = '${botUsername}';
+    const ADMIN_ID = '${adminId}';
 
     let currentUser = null;
+    let isAdmin = false;
     let allPosts = [];
+    let currentFilter = 'all';
     let currentModalPostId = null;
 
-    // =========================================================
-    // INITIALIZATION & TELEGRAM WEBAPP AUTH
-    // =========================================================
     function init() {
-      // 1. Detect Telegram WebApp Context
       if (window.Telegram && window.Telegram.WebApp) {
         window.Telegram.WebApp.ready();
         window.Telegram.WebApp.expand();
@@ -727,7 +899,6 @@ export function getAppHtml(env) {
         }
       }
 
-      // 2. Load stored user from LocalStorage if not in WebApp
       if (!currentUser) {
         const saved = localStorage.getItem('tg_user');
         if (saved) {
@@ -735,12 +906,19 @@ export function getAppHtml(env) {
         }
       }
 
+      checkAdminStatus();
       renderAuthUI();
       loadPosts();
       setupEventListeners();
     }
 
-    // Telegram Login Callback (Used by Login Prompt)
+    function checkAdminStatus() {
+      if (currentUser && ADMIN_ID && String(currentUser.id) === String(ADMIN_ID)) {
+        isAdmin = true;
+        document.getElementById('adminTabsBar').style.display = 'flex';
+      }
+    }
+
     window.onTelegramAuth = function(user) {
       currentUser = {
         id: user.id,
@@ -749,7 +927,9 @@ export function getAppHtml(env) {
         username: user.username || user.first_name
       };
       localStorage.setItem('tg_user', JSON.stringify(currentUser));
+      checkAdminStatus();
       renderAuthUI();
+      loadPosts();
       showToast('Welcome, ' + currentUser.first_name + '!');
     };
 
@@ -757,6 +937,7 @@ export function getAppHtml(env) {
       const authArea = document.getElementById('authArea');
       if (currentUser) {
         authArea.innerHTML = \`
+          \${isAdmin ? '<span class="admin-badge">👑 Admin</span>' : ''}
           <div class="user-profile-badge">
             <div class="user-avatar">\${(currentUser.first_name || 'U')[0].toUpperCase()}</div>
             <span>\${escapeHtml(currentUser.first_name)}</span>
@@ -803,7 +984,11 @@ export function getAppHtml(env) {
       \`).join('');
 
       try {
-        const res = await fetch(\`\${API_BASE_URL}/api/posts\`);
+        const endpoint = isAdmin 
+          ? \`\${API_BASE_URL}/api/admin/posts?user_id=\${currentUser.id}\`
+          : \`\${API_BASE_URL}/api/posts\`;
+
+        const res = await fetch(endpoint);
         const data = await res.json();
         
         if (!res.ok || !data.success) {
@@ -811,21 +996,30 @@ export function getAppHtml(env) {
         }
         
         allPosts = data.posts || [];
-        renderPosts(allPosts);
+        filterAndRenderPosts();
       } catch (err) {
         console.error('Failed to load posts:', err);
         feed.innerHTML = \`
           <div class="empty-state" style="grid-column: 1 / -1;">
             <div class="empty-state-icon">⚡</div>
-            <h3>Database Connection Setup Required</h3>
+            <h3>Could not load posts</h3>
             <p style="margin-top: 6px; font-size: 0.9rem; color: #f87171;">\${escapeHtml(err.message)}</p>
-            <p style="margin-top: 8px; font-size: 0.85rem; color: var(--text-muted);">
-              Make sure you ran <code>supabase_schema.sql</code> in your Supabase SQL Editor and set your Supabase secrets in Cloudflare.
-            </p>
             <button class="btn btn-primary btn-sm" style="margin-top: 16px;" onclick="loadPosts()">Retry</button>
           </div>
         \`;
       }
+    }
+
+    function filterAndRenderPosts() {
+      let posts = allPosts;
+      if (isAdmin && currentFilter !== 'all') {
+        posts = posts.filter(p => p.status === currentFilter);
+      }
+      const query = document.getElementById('searchInput').value.toLowerCase().trim();
+      if (query) {
+        posts = posts.filter(p => p.title.toLowerCase().includes(query));
+      }
+      renderPosts(posts);
     }
 
     function renderPosts(posts) {
@@ -835,8 +1029,8 @@ export function getAppHtml(env) {
         feed.innerHTML = \`
           <div class="empty-state" style="grid-column: 1 / -1;">
             <div class="empty-state-icon">📭</div>
-            <h3>No Published Posts Yet</h3>
-            <p style="margin-top: 6px;">New posts published via the Telegram Bot will appear here live.</p>
+            <h3>No Posts Found</h3>
+            <p style="margin-top: 6px;">New posts will appear here live.</p>
           </div>
         \`;
         return;
@@ -847,20 +1041,35 @@ export function getAppHtml(env) {
           month: 'short', day: 'numeric', year: 'numeric'
         }) : '';
 
-        const botLink = \`https://t.me/\${botUsername}?start=post_\${post.id}\`;
+        const botLink = \`https://t.me/\${BOT_USERNAME}?start=post_\${post.id}\`;
+        const hasImage = Boolean(post.preview_image);
 
         return \`
           <div class="post-card" data-id="\${post.id}">
+            <!-- Full Image with Blurred Side Backdrop -->
             <div class="post-image-container">
-              \${post.preview_image ? \`
-                <img src="\${escapeHtml(post.preview_image)}" class="post-image" alt="\${escapeHtml(post.title)}" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
-                <div class="post-image-placeholder" style="display:none;">🖼️</div>
+              \${isAdmin ? \`<span class="post-status-badge status-\${post.status}">\${post.status}</span>\` : ''}
+              
+              \${hasImage ? \`
+                <div class="post-image-backdrop" style="background-image: url('\${escapeHtml(post.preview_image)}');"></div>
+                <img src="\${escapeHtml(post.preview_image)}" class="post-image-fg" alt="\${escapeHtml(post.title)}" onerror="this.style.display='none';" />
               \` : \`
                 <div class="post-image-placeholder">📂</div>
               \`}
             </div>
 
             <div class="post-body">
+              \${isAdmin ? \`
+                <div class="admin-card-actions">
+                  <button class="admin-btn" onclick="togglePostStatus(\${post.id}, '\${post.status}')">
+                    \${post.status === 'published' ? '📝 Set Draft' : '🚀 Publish'}
+                  </button>
+                  <button class="admin-btn admin-btn-delete" onclick="deletePostItem(\${post.id})">
+                    🗑️ Delete
+                  </button>
+                </div>
+              \` : ''}
+
               <h2 class="post-title">\${escapeHtml(post.title)}</h2>
               <div class="post-meta">
                 <span>📅 \${dateStr}</span>
@@ -879,15 +1088,74 @@ export function getAppHtml(env) {
                   </button>
                 </div>
 
-                <a href="\${botLink}" target="_blank" class="btn-open-bot">
-                  <span>Open in Bot</span>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-                </a>
+                <div class="post-buttons-group">
+                  \${post.direct_link ? \`
+                    <a href="\${escapeHtml(post.direct_link)}" target="_blank" class="btn-direct-link">
+                      <span>\${escapeHtml(post.direct_link_title || '🔗 Link')}</span>
+                    </a>
+                  \` : ''}
+
+                  <a href="\${botLink}" target="_blank" class="btn-open-bot">
+                    <span>Open in Bot</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+                  </a>
+                </div>
               </div>
             </div>
           </div>
         \`;
       }).join('');
+    }
+
+    // =========================================================
+    // ADMIN ACTIONS (Post & Comment Moderation)
+    // =========================================================
+    async function togglePostStatus(postId, currentStatus) {
+      if (!isAdmin) return;
+      try {
+        const res = await fetch(\`\${API_BASE_URL}/api/admin/posts/\${postId}/toggle\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: currentUser.id, status: currentStatus })
+        });
+        if (!res.ok) throw new Error('Action failed');
+        showToast('Status updated!');
+        loadPosts();
+      } catch (e) {
+        showToast('Error updating status');
+      }
+    }
+
+    async function deletePostItem(postId) {
+      if (!isAdmin) return;
+      if (!confirm('Are you sure you want to delete this post?')) return;
+      try {
+        const res = await fetch(\`\${API_BASE_URL}/api/admin/posts/\${postId}?user_id=\${currentUser.id}\`, {
+          method: 'DELETE'
+        });
+        if (!res.ok) throw new Error('Delete failed');
+        showToast('Post deleted!');
+        loadPosts();
+      } catch (e) {
+        showToast('Error deleting post');
+      }
+    }
+
+    async function moderateCommentAction(commentId, action) {
+      if (!isAdmin) return;
+      try {
+        const res = await fetch(\`\${API_BASE_URL}/api/comments/moderate\`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comment_id: commentId, user_id: currentUser.id, action })
+        });
+        if (!res.ok) throw new Error('Moderation failed');
+        showToast(\`Comment \${action === 'delete' ? 'deleted' : action === 'hide' ? 'hidden' : 'visible'}!\`);
+        openCommentsModal(currentModalPostId);
+        loadPosts();
+      } catch (e) {
+        showToast('Error moderating comment');
+      }
     }
 
     // =========================================================
@@ -917,7 +1185,6 @@ export function getAppHtml(env) {
         if (!res.ok) throw new Error('Failed to toggle like');
         const data = await res.json();
 
-        // Update UI
         const countSpan = btnElement.querySelector('.like-count');
         if (countSpan) countSpan.textContent = data.like_count;
         
@@ -956,13 +1223,12 @@ export function getAppHtml(env) {
         const post = data.post;
         modalTitle.textContent = post.title;
 
-        // Render Folders Badge List if any
         if (post.folders && post.folders.length > 0) {
           foldersContainer.style.display = 'block';
           foldersContainer.innerHTML = \`
-            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">Included Folders:</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">Available Folders:</div>
             <div class="folders-badge-container">
-              \${post.folders.map(f => \`<span class="folder-badge">📁 \${escapeHtml(f.name)}</span>\`).join('')}
+              \${post.folders.map(f => \`<span class="folder-badge">📁 \${escapeHtml(f.name)} (\${f.files ? f.files.length : 0} items)</span>\`).join('')}
             </div>
           \`;
         } else {
@@ -986,12 +1252,23 @@ export function getAppHtml(env) {
       commentsList.innerHTML = comments.map(c => {
         const timeStr = c.created_at ? new Date(c.created_at).toLocaleString() : '';
         return \`
-          <div class="comment-item">
+          <div class="comment-item \${c.is_hidden ? 'is-hidden' : ''}">
             <div class="comment-author">
-              <span class="comment-username">@\${escapeHtml(c.username)}</span>
+              <span class="comment-username">@\${escapeHtml(c.username)} \${c.is_hidden ? '<span style="color:#f87171; font-size:0.75rem;">(Hidden from users)</span>' : ''}</span>
               <span class="comment-time">\${timeStr}</span>
             </div>
             <div class="comment-text">\${escapeHtml(c.text)}</div>
+            
+            \${isAdmin ? \`
+              <div class="comment-admin-actions">
+                <button class="comment-mod-btn" onclick="moderateCommentAction(\${c.id}, '\${c.is_hidden ? 'unhide' : 'hide'}')">
+                  \${c.is_hidden ? '👁️ Unhide' : '🚫 Hide'}
+                </button>
+                <button class="comment-mod-btn" style="color: #f87171;" onclick="moderateCommentAction(\${c.id}, 'delete')">
+                  🗑️ Delete
+                </button>
+              </div>
+            \` : ''}
           </div>
         \`;
       }).join('');
@@ -1001,6 +1278,16 @@ export function getAppHtml(env) {
     // EVENT LISTENERS
     // =========================================================
     function setupEventListeners() {
+      // Admin filter tabs
+      document.querySelectorAll('.admin-tab').forEach(tab => {
+        tab.addEventListener('click', (e) => {
+          document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+          e.target.classList.add('active');
+          currentFilter = e.target.getAttribute('data-filter');
+          filterAndRenderPosts();
+        });
+      });
+
       // Refresh Button
       document.getElementById('btnRefresh').addEventListener('click', () => {
         showToast('Refreshing...');
@@ -1008,10 +1295,8 @@ export function getAppHtml(env) {
       });
 
       // Search Filter
-      document.getElementById('searchInput').addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase().trim();
-        const filtered = allPosts.filter(p => p.title.toLowerCase().includes(query));
-        renderPosts(filtered);
+      document.getElementById('searchInput').addEventListener('input', () => {
+        filterAndRenderPosts();
       });
 
       // Close Modal
@@ -1063,9 +1348,6 @@ export function getAppHtml(env) {
       });
     }
 
-    // =========================================================
-    // UTILS
-    // =========================================================
     function escapeHtml(str) {
       if (!str) return '';
       return String(str)
@@ -1083,7 +1365,6 @@ export function getAppHtml(env) {
       setTimeout(() => toast.classList.remove('show'), 2500);
     }
 
-    // Launch
     window.addEventListener('DOMContentLoaded', init);
   </script>
 </body>

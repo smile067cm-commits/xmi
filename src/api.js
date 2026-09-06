@@ -1,16 +1,17 @@
 import { AutoRouter } from 'itty-router';
 import {
   getPublishedPosts,
+  getAllPostsForAdmin,
   getPostById,
   addComment,
-  toggleLike
+  moderateComment,
+  toggleLike,
+  updatePost,
+  deletePost
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
 
-/**
- * Standard CORS Headers
- */
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
@@ -18,9 +19,6 @@ export const corsHeaders = {
   'Access-Control-Max-Age': '86400'
 };
 
-/**
- * Helper to return JSON Response with CORS
- */
 export function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -31,16 +29,10 @@ export function jsonResponse(data, status = 200) {
   });
 }
 
-/**
- * Helper for error response
- */
 export function errorResponse(message, status = 400) {
   return jsonResponse({ success: false, error: message }, status);
 }
 
-/**
- * Helper to return HTML response
- */
 export function htmlResponse(html) {
   return new Response(html, {
     status: 200,
@@ -52,20 +44,11 @@ export function htmlResponse(html) {
   });
 }
 
-/**
- * Creates and configures the unified itty-router instance
- */
 export function createRouter() {
   const router = AutoRouter();
 
-  // -------------------------------------------------------------
-  // CORS Preflight Options
-  // -------------------------------------------------------------
   router.options('*', () => new Response(null, { headers: corsHeaders }));
 
-  // -------------------------------------------------------------
-  // Web App Frontend (Served directly from Worker root & /app)
-  // -------------------------------------------------------------
   const serveApp = (request, env) => {
     return htmlResponse(getAppHtml(env));
   };
@@ -73,18 +56,15 @@ export function createRouter() {
   router.get('/', serveApp);
   router.get('/app', serveApp);
 
-  // -------------------------------------------------------------
-  // Health Check
-  // -------------------------------------------------------------
   router.get('/api/health', () => jsonResponse({
     ok: true,
-    service: 'telegram-bot-and-app',
+    service: 'xmi-hub',
     status: 'online',
     timestamp: Date.now()
   }));
 
   // -------------------------------------------------------------
-  // GET /api/posts - Fetch all published posts
+  // GET /api/posts - Public posts
   // -------------------------------------------------------------
   router.get('/api/posts', async (request, env) => {
     try {
@@ -97,20 +77,41 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
-  // GET /api/posts/:id - Fetch post details
+  // GET /api/admin/posts - All posts for Admin (Draft, Scheduled, Published)
+  // -------------------------------------------------------------
+  router.get('/api/admin/posts', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin access', 403);
+      }
+
+      const posts = await getAllPostsForAdmin(env);
+      return jsonResponse({ success: true, posts });
+    } catch (err) {
+      console.error('API /api/admin/posts error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // GET /api/posts/:id - Post details
   // -------------------------------------------------------------
   router.get('/api/posts/:id', async (request, env) => {
     try {
       const { id } = request.params;
       const url = new URL(request.url);
       const userId = url.searchParams.get('user_id');
+      const isAdmin = Boolean(userId && String(userId) === String(env.ADMIN_ID));
 
-      const post = await getPostById(env, id, userId);
+      const post = await getPostById(env, id, userId, isAdmin);
       if (!post) {
         return errorResponse('Post not found', 404);
       }
 
-      return jsonResponse({ success: true, post });
+      return jsonResponse({ success: true, post, is_admin: isAdmin });
     } catch (err) {
       console.error('API /api/posts/:id error:', err);
       return errorResponse(err.message, 500);
@@ -118,7 +119,51 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
-  // POST /api/comments - Add a comment
+  // POST /api/admin/posts/:id/toggle - Toggle Status (Admin Only)
+  // -------------------------------------------------------------
+  router.post('/api/admin/posts/:id/toggle', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const body = await request.json();
+      const { user_id, status } = body || {};
+
+      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const newStatus = status === 'published' ? 'draft' : 'published';
+      const updated = await updatePost(env, id, { status: newStatus });
+
+      return jsonResponse({ success: true, post: updated });
+    } catch (err) {
+      console.error('API toggle status error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // DELETE /api/admin/posts/:id - Delete Post (Admin Only)
+  // -------------------------------------------------------------
+  router.delete('/api/admin/posts/:id', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const url = new URL(request.url);
+      const userId = url.searchParams.get('user_id');
+
+      if (!userId || String(userId) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      await deletePost(env, id);
+      return jsonResponse({ success: true, message: 'Post deleted' });
+    } catch (err) {
+      console.error('API delete post error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/comments - Add Comment
   // -------------------------------------------------------------
   router.post('/api/comments', async (request, env) => {
     try {
@@ -144,7 +189,31 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
-  // POST /api/likes - Toggle like
+  // POST /api/comments/moderate - Hide/Unhide or Delete Comment (Admin Only)
+  // -------------------------------------------------------------
+  router.post('/api/comments/moderate', async (request, env) => {
+    try {
+      const body = await request.json();
+      const { comment_id, user_id, action } = body || {};
+
+      if (!user_id || String(user_id) !== String(env.ADMIN_ID)) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      if (!comment_id || !action) {
+        return errorResponse('Missing comment_id or action');
+      }
+
+      const result = await moderateComment(env, { comment_id, action });
+      return jsonResponse({ success: true, result });
+    } catch (err) {
+      console.error('API /api/comments/moderate error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/likes - Toggle Like
   // -------------------------------------------------------------
   router.post('/api/likes', async (request, env) => {
     try {
@@ -172,7 +241,7 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
-  // POST /webhook & /api/webhook - Telegram Bot Webhook
+  // Telegram Bot Webhook
   // -------------------------------------------------------------
   const handleTelegramWebhook = async (request, env) => {
     try {
@@ -180,7 +249,6 @@ export function createRouter() {
         return new Response('Method Not Allowed', { status: 405 });
       }
 
-      // Validate secret token if configured
       if (env.SECRET_TOKEN) {
         const headerToken = request.headers.get('X-Telegram-Bot-Api-Secret-Token');
         if (headerToken !== env.SECRET_TOKEN) {
@@ -190,8 +258,6 @@ export function createRouter() {
 
       const update = await request.json();
       const bot = createBot(env);
-
-      // Handle the Telegram update
       await bot.handleUpdate(update);
 
       return new Response('OK', { status: 200 });
@@ -205,7 +271,7 @@ export function createRouter() {
   router.post('/api/webhook', handleTelegramWebhook);
 
   // -------------------------------------------------------------
-  // GET /set-webhook - Helper to quickly register Telegram webhook
+  // GET /set-webhook - Helper to quickly register Telegram webhook & menu button
   // -------------------------------------------------------------
   router.get('/set-webhook', async (request, env) => {
     try {
@@ -225,7 +291,6 @@ export function createRouter() {
       const webhookRes = await fetch(apiUrl);
       const webhookData = await webhookRes.json();
 
-      // Configure the bottom-left Telegram Menu Button globally for all users
       let menuButtonData = null;
       try {
         const menuBtnUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/setChatMenuButton`;

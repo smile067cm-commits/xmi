@@ -3,10 +3,6 @@
  * All requests use native fetch to run seamlessly on Cloudflare Workers.
  */
 
-// ==========================================
-// SUPABASE REST API (All Data & Users)
-// ==========================================
-
 function getSupabaseHeaders(env, extraHeaders = {}) {
   return {
     'apikey': env.SUPABASE_SERVICE_KEY,
@@ -28,16 +24,11 @@ function getSupabaseBaseUrl(env) {
 // 1. USERS (Profiles & Activity Tracking)
 // ------------------------------------------
 
-/**
- * Save or update Telegram user details & interaction count in Supabase
- */
 export async function saveOrUpdateUser(env, user) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY || !user || !user.id) return null;
 
   try {
     const baseUrl = getSupabaseBaseUrl(env);
-    
-    // Check if user already exists
     const checkUrl = `${baseUrl}/users?id=eq.${user.id}&select=id,interactions,first_seen`;
     const checkRes = await fetch(checkUrl, {
       method: 'GET',
@@ -47,10 +38,9 @@ export async function saveOrUpdateUser(env, user) {
     const existingUsers = checkRes.ok ? await checkRes.json() : [];
 
     if (existingUsers && existingUsers.length > 0) {
-      // User exists -> Update last_activity and increment interactions
       const existing = existingUsers[0];
       const updateUrl = `${baseUrl}/users?id=eq.${user.id}`;
-      const updateRes = await fetch(updateUrl, {
+      await fetch(updateUrl, {
         method: 'PATCH',
         headers: getSupabaseHeaders(env),
         body: JSON.stringify({
@@ -62,13 +52,8 @@ export async function saveOrUpdateUser(env, user) {
           interactions: (Number(existing.interactions) || 0) + 1
         })
       });
-
-      if (!updateRes.ok) {
-        console.warn('Supabase update user warning:', await updateRes.text());
-      }
       return existing;
     } else {
-      // User does not exist -> Insert new user profile
       const insertUrl = `${baseUrl}/users`;
       const insertRes = await fetch(insertUrl, {
         method: 'POST',
@@ -84,10 +69,6 @@ export async function saveOrUpdateUser(env, user) {
           interactions: 1
         })
       });
-
-      if (!insertRes.ok) {
-        console.warn('Supabase insert user warning:', await insertRes.text());
-      }
       const inserted = await insertRes.json();
       return inserted ? inserted[0] : null;
     }
@@ -97,9 +78,6 @@ export async function saveOrUpdateUser(env, user) {
   }
 }
 
-/**
- * Get user profile from Supabase
- */
 export async function getUser(env, userId) {
   if (!env.SUPABASE_URL || !userId) return null;
   try {
@@ -122,10 +100,10 @@ export async function getUser(env, userId) {
 // ------------------------------------------
 
 /**
- * Fetch all published posts with like and comment counts
+ * Fetch published posts for public view
  */
 export async function getPublishedPosts(env) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?status=eq.published&order=created_at.desc&select=id,title,preview_image,status,created_at,likes(user_id),comments(id)`;
+  const url = `${getSupabaseBaseUrl(env)}/posts?status=eq.published&order=created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,status,created_at,likes(user_id),comments(id,is_hidden)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -142,7 +120,40 @@ export async function getPublishedPosts(env) {
     id: post.id,
     title: post.title,
     preview_image: post.preview_image,
+    direct_link: post.direct_link,
+    direct_link_title: post.direct_link_title,
     status: post.status,
+    created_at: post.created_at,
+    like_count: post.likes ? post.likes.length : 0,
+    comment_count: post.comments ? post.comments.filter(c => !c.is_hidden).length : 0
+  }));
+}
+
+/**
+ * Fetch ALL posts (draft, scheduled, published) for Admin Management
+ */
+export async function getAllPostsForAdmin(env) {
+  const url = `${getSupabaseBaseUrl(env)}/posts?order=created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,status,scheduled_at,created_at,likes(user_id),comments(id)`;
+  
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: getSupabaseHeaders(env)
+  });
+
+  if (!res.ok) {
+    throw new Error(`Supabase error (${res.status}): ${await res.text()}`);
+  }
+
+  const posts = await res.json();
+  
+  return posts.map(post => ({
+    id: post.id,
+    title: post.title,
+    preview_image: post.preview_image,
+    direct_link: post.direct_link,
+    direct_link_title: post.direct_link_title,
+    status: post.status,
+    scheduled_at: post.scheduled_at,
     created_at: post.created_at,
     like_count: post.likes ? post.likes.length : 0,
     comment_count: post.comments ? post.comments.length : 0
@@ -150,10 +161,10 @@ export async function getPublishedPosts(env) {
 }
 
 /**
- * Fetch single post with folders, comments and user's liked status
+ * Fetch single post with folders, direct links, comments, and like status
  */
-export async function getPostById(env, postId, userId = null) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}&select=id,title,preview_image,status,scheduled_at,created_at,folders(id,name,created_at),comments(id,user_id,username,text,created_at),likes(user_id)`;
+export async function getPostById(env, postId, userId = null, isAdmin = false) {
+  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}&select=id,title,preview_image,direct_link,direct_link_title,status,scheduled_at,created_at,folders(id,name,created_at,files(id,file_id,channel_message_id,file_name,mime_type,size)),comments(id,user_id,username,text,is_hidden,created_at),likes(user_id)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -170,29 +181,29 @@ export async function getPostById(env, postId, userId = null) {
   const post = posts[0];
   const liked = userId ? (post.likes || []).some(l => String(l.user_id) === String(userId)) : false;
 
-  // Sort comments by created_at ascending
-  const comments = (post.comments || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  // Filter comments (regular users only see non-hidden comments; admin sees all)
+  const allComments = post.comments || [];
+  const comments = (isAdmin ? allComments : allComments.filter(c => !c.is_hidden))
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
   
-  // Sort folders by created_at ascending
   const folders = (post.folders || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 
   return {
     id: post.id,
     title: post.title,
     preview_image: post.preview_image,
+    direct_link: post.direct_link,
+    direct_link_title: post.direct_link_title,
     status: post.status,
     created_at: post.created_at,
     folders,
     comments,
     like_count: post.likes ? post.likes.length : 0,
-    comment_count: post.comments ? post.comments.length : 0,
+    comment_count: comments.length,
     liked
   };
 }
 
-/**
- * Fetch all folders and their files for a post (for the Telegram Bot deep-link flow)
- */
 export async function getPostFoldersWithFiles(env, postId) {
   const url = `${getSupabaseBaseUrl(env)}/folders?post_id=eq.${postId}&select=id,name,created_at,files(id,file_id,channel_message_id,file_name,mime_type,size)&order=created_at.asc`;
   
@@ -208,9 +219,6 @@ export async function getPostFoldersWithFiles(env, postId) {
   return await res.json();
 }
 
-/**
- * Fetch all files in a specific folder
- */
 export async function getFolderFiles(env, folderId) {
   const url = `${getSupabaseBaseUrl(env)}/files?folder_id=eq.${folderId}&select=id,file_id,channel_message_id,file_name,mime_type,size&order=created_at.asc`;
   
@@ -226,10 +234,7 @@ export async function getFolderFiles(env, folderId) {
   return await res.json();
 }
 
-/**
- * Create a new Post in Supabase
- */
-export async function createPost(env, { title, preview_image = null, status = 'draft', scheduled_at = null, created_by }) {
+export async function createPost(env, { title, preview_image = null, direct_link = null, direct_link_title = null, status = 'draft', scheduled_at = null, created_by }) {
   const url = `${getSupabaseBaseUrl(env)}/posts`;
   
   const res = await fetch(url, {
@@ -238,6 +243,8 @@ export async function createPost(env, { title, preview_image = null, status = 'd
     body: JSON.stringify({
       title,
       preview_image,
+      direct_link,
+      direct_link_title,
       status,
       scheduled_at,
       created_by
@@ -252,9 +259,6 @@ export async function createPost(env, { title, preview_image = null, status = 'd
   return data[0];
 }
 
-/**
- * Update an existing post in Supabase
- */
 export async function updatePost(env, postId, updateFields) {
   const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}`;
   
@@ -275,9 +279,21 @@ export async function updatePost(env, postId, updateFields) {
   return data[0];
 }
 
-/**
- * Create a new Folder linked to a Post
- */
+export async function deletePost(env, postId) {
+  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}`;
+  
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: getSupabaseHeaders(env)
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to delete post (${res.status}): ${await res.text()}`);
+  }
+
+  return true;
+}
+
 export async function createFolder(env, { post_id, name }) {
   const url = `${getSupabaseBaseUrl(env)}/folders`;
   
@@ -298,9 +314,6 @@ export async function createFolder(env, { post_id, name }) {
   return data[0];
 }
 
-/**
- * Insert batch of files linked to a folder
- */
 export async function createFiles(env, filesArray) {
   if (!filesArray || filesArray.length === 0) return [];
 
@@ -319,9 +332,6 @@ export async function createFiles(env, filesArray) {
   return await res.json();
 }
 
-/**
- * Add a comment to a post
- */
 export async function addComment(env, { post_id, user_id, username, text }) {
   const url = `${getSupabaseBaseUrl(env)}/comments`;
   
@@ -332,7 +342,8 @@ export async function addComment(env, { post_id, user_id, username, text }) {
       post_id,
       user_id,
       username: username || 'Anonymous',
-      text
+      text,
+      is_hidden: false
     })
   });
 
@@ -345,12 +356,36 @@ export async function addComment(env, { post_id, user_id, username, text }) {
 }
 
 /**
- * Toggle like for a user on a post (delete if exists, insert if not)
+ * Moderate comment (Hide, Unhide, or Delete)
  */
+export async function moderateComment(env, { comment_id, action }) {
+  const baseUrl = getSupabaseBaseUrl(env);
+
+  if (action === 'delete') {
+    const delUrl = `${baseUrl}/comments?id=eq.${comment_id}`;
+    const res = await fetch(delUrl, {
+      method: 'DELETE',
+      headers: getSupabaseHeaders(env)
+    });
+    if (!res.ok) throw new Error(`Failed to delete comment: ${await res.text()}`);
+    return { deleted: true };
+  } else {
+    const isHidden = action === 'hide';
+    const updateUrl = `${baseUrl}/comments?id=eq.${comment_id}`;
+    const res = await fetch(updateUrl, {
+      method: 'PATCH',
+      headers: getSupabaseHeaders(env),
+      body: JSON.stringify({ is_hidden: isHidden })
+    });
+    if (!res.ok) throw new Error(`Failed to update comment: ${await res.text()}`);
+    const data = await res.json();
+    return data[0];
+  }
+}
+
 export async function toggleLike(env, { post_id, user_id }) {
   const baseUrl = getSupabaseBaseUrl(env);
   
-  // Check if like exists
   const checkUrl = `${baseUrl}/likes?post_id=eq.${post_id}&user_id=eq.${user_id}&select=post_id,user_id`;
   const checkRes = await fetch(checkUrl, {
     method: 'GET',
@@ -365,7 +400,6 @@ export async function toggleLike(env, { post_id, user_id }) {
   let liked = false;
 
   if (existingLikes && existingLikes.length > 0) {
-    // Like exists -> Delete it (unlike)
     const deleteUrl = `${baseUrl}/likes?post_id=eq.${post_id}&user_id=eq.${user_id}`;
     const delRes = await fetch(deleteUrl, {
       method: 'DELETE',
@@ -376,7 +410,6 @@ export async function toggleLike(env, { post_id, user_id }) {
     }
     liked = false;
   } else {
-    // Insert new like
     const insertUrl = `${baseUrl}/likes`;
     const insRes = await fetch(insertUrl, {
       method: 'POST',
@@ -389,7 +422,6 @@ export async function toggleLike(env, { post_id, user_id }) {
     liked = true;
   }
 
-  // Fetch updated like count
   const countUrl = `${baseUrl}/likes?post_id=eq.${post_id}&select=user_id`;
   const countRes = await fetch(countUrl, {
     method: 'GET',
@@ -403,14 +435,10 @@ export async function toggleLike(env, { post_id, user_id }) {
   };
 }
 
-/**
- * Publish scheduled posts whose scheduled_at timestamp has arrived
- */
 export async function publishScheduledPosts(env) {
   const baseUrl = getSupabaseBaseUrl(env);
   const nowIso = new Date().toISOString();
 
-  // Find posts where status = 'scheduled' and scheduled_at <= now
   const queryUrl = `${baseUrl}/posts?status=eq.scheduled&scheduled_at=lte.${encodeURIComponent(nowIso)}&select=id,title,scheduled_at`;
   
   const findRes = await fetch(queryUrl, {

@@ -27,12 +27,18 @@ CREATE TABLE IF NOT EXISTS public.posts (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     title TEXT NOT NULL,
     preview_image TEXT,
+    direct_link TEXT,          -- Direct download/external link without needing folders
+    direct_link_title TEXT,    -- Optional label for direct link
     status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'scheduled', 'published')),
     scheduled_at TIMESTAMPTZ,
     created_by BIGINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Upgrade existing posts table if needed
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS direct_link TEXT;
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS direct_link_title TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_posts_status ON public.posts(status);
 CREATE INDEX IF NOT EXISTS idx_posts_scheduled_at ON public.posts(scheduled_at);
@@ -60,21 +66,21 @@ CREATE TABLE IF NOT EXISTS public.files (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- In case the table already existed with NOT NULL on channel_message_id:
 ALTER TABLE public.files ALTER COLUMN channel_message_id DROP NOT NULL;
-
 CREATE INDEX IF NOT EXISTS idx_files_folder_id ON public.files(folder_id);
 
--- 5. COMMENTS TABLE
+-- 5. COMMENTS TABLE (Includes is_hidden for Admin Moderation)
 CREATE TABLE IF NOT EXISTS public.comments (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     post_id BIGINT NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
     user_id BIGINT NOT NULL,
     username TEXT NOT NULL DEFAULT 'User',
     text TEXT NOT NULL,
+    is_hidden BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_comments_post_id ON public.comments(post_id);
 CREATE INDEX IF NOT EXISTS idx_comments_created_at ON public.comments(created_at ASC);
 

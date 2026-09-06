@@ -2,10 +2,12 @@ import { Telegraf, Markup } from 'telegraf';
 import {
   saveOrUpdateUser,
   getPostById,
+  getAllPostsForAdmin,
   getPostFoldersWithFiles,
   getFolderFiles,
   createPost,
   updatePost,
+  deletePost,
   createFolder,
   createFiles
 } from './db.js';
@@ -23,7 +25,6 @@ export function createBot(env) {
   bot.use(async (ctx, next) => {
     try {
       if (ctx.from) {
-        // Track user interaction asynchronously in Supabase
         saveOrUpdateUser(env, ctx.from).catch(err => {
           console.error('Failed to log user to Supabase:', err);
         });
@@ -38,17 +39,17 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
-  // /start Command
+  // /start Command (Deep Link & Welcome)
   // -------------------------------------------------------------
   bot.start(async (ctx) => {
     const payload = ctx.startPayload || '';
 
-    // Check if deep-link payload: post_<post_id>
+    // Deep-link payload: post_<post_id>
     if (payload.startsWith('post_')) {
       const postId = payload.replace('post_', '').trim();
       
       try {
-        const post = await getPostById(env, postId, ctx.from?.id);
+        const post = await getPostById(env, postId, ctx.from?.id, String(ctx.from?.id) === String(env.ADMIN_ID));
         
         if (!post) {
           return await ctx.reply('⚠️ Post not found or has been removed.');
@@ -59,24 +60,32 @@ export function createBot(env) {
           return await ctx.reply('🔒 This post is not yet published.');
         }
 
-        // Fetch folders and their files
         const folders = await getPostFoldersWithFiles(env, postId);
+        const hasFolders = folders && folders.length > 0;
+        const hasDirectLink = Boolean(post.direct_link);
 
         let messageText = `📌 *${escapeMarkdown(post.title)}*\n\n`;
-        messageText += `📂 *Available Content Folders:*\nTap a folder below to access all files and download links:\n`;
 
-        const keyboardButtons = (folders || []).map(folder => {
-          const fileCount = folder.files?.length || 0;
-          return [
-            Markup.button.callback(
-              `📁 ${folder.name} (${fileCount} item${fileCount === 1 ? '' : 's'})`,
-              `folder_${folder.id}`
-            )
-          ];
-        });
+        const keyboardButtons = [];
 
-        if (keyboardButtons.length === 0) {
-          messageText += `\n_(No folders uploaded for this post yet)_`;
+        // 1. If direct link is present, add primary direct download/open button
+        if (hasDirectLink) {
+          const linkLabel = post.direct_link_title || '📥 Open / Download Link';
+          keyboardButtons.push([Markup.button.url(`🔗 ${linkLabel}`, post.direct_link)]);
+        }
+
+        // 2. If folders are present, add folder buttons
+        if (hasFolders) {
+          messageText += `📂 *Content Folders:*\nTap a folder below to access files:\n`;
+          folders.forEach(folder => {
+            const fileCount = folder.files?.length || 0;
+            keyboardButtons.push([
+              Markup.button.callback(
+                `📁 ${folder.name} (${fileCount} item${fileCount === 1 ? '' : 's'})`,
+                `folder_${folder.id}`
+              )
+            ]);
+          });
         }
 
         const keyboard = Markup.inlineKeyboard(keyboardButtons);
@@ -113,8 +122,9 @@ export function createBot(env) {
     
     if (isAdmin) {
       welcomeText += `👑 *Admin Commands:*\n`;
-      welcomeText += `• /addpost - Create and publish a new post\n`;
-      welcomeText += `• /cancel - Cancel current post creation\n\n`;
+      welcomeText += `• /addpost - Create a new post\n`;
+      welcomeText += `• /admin - Manage & moderate all posts\n`;
+      welcomeText += `• /cancel - Abort current action\n\n`;
     }
 
     welcomeText += `Tap the button below to launch the Bot App:`;
@@ -123,7 +133,6 @@ export function createBot(env) {
       [Markup.button.webApp('🚀 Open Bot App', appUrl)]
     ]);
 
-    // Automatically set the bottom-left Menu Button for the user's chat
     try {
       if (appUrl.startsWith('https://')) {
         await ctx.setChatMenuButton({
@@ -143,7 +152,7 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
-  // Folder Click Callback: Send Files & Links to User
+  // Folder Click Callback: Send Files & Links
   // -------------------------------------------------------------
   bot.action(/^folder_(\d+)$/, async (ctx) => {
     const folderId = ctx.match[1];
@@ -163,8 +172,7 @@ export function createBot(env) {
           const isLink = file.mime_type === 'link' || file.file_id?.startsWith('http://') || file.file_id?.startsWith('https://');
 
           if (isLink) {
-            // Send external file link with interactive button
-            const linkTitle = file.file_name || 'Download / External Link';
+            const linkTitle = file.file_name || 'Download Link';
             const linkUrl = file.file_id;
             
             await ctx.reply(
@@ -177,14 +185,12 @@ export function createBot(env) {
               }
             );
           } else if (file.channel_message_id && env.CHANNEL_ID) {
-            // Forward/copy stored message from private channel directly to user
             await ctx.telegram.copyMessage(
               ctx.chat.id,
               env.CHANNEL_ID,
               Number(file.channel_message_id)
             );
           } else if (file.file_id) {
-            // Fallback to sending by Telegram file_id
             await ctx.telegram.sendDocument(ctx.chat.id, file.file_id);
           }
         } catch (copyErr) {
@@ -199,16 +205,132 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
-  // /cancel Command & Button Callback: Reset Session
+  // Admin Management (/admin or /posts)
+  // -------------------------------------------------------------
+  const handleAdminPosts = async (ctx) => {
+    const userId = ctx.from.id;
+    if (String(userId) !== String(env.ADMIN_ID)) {
+      return await ctx.reply('⛔ Unauthorized. Admin access only.');
+    }
+
+    try {
+      const posts = await getAllPostsForAdmin(env);
+      if (!posts || posts.length === 0) {
+        return await ctx.reply('📭 No posts found in database.');
+      }
+
+      const buttons = posts.slice(0, 10).map(p => {
+        const statusIcon = p.status === 'published' ? '🟢' : p.status === 'scheduled' ? '🟣' : '🟡';
+        return [
+          Markup.button.callback(
+            `${statusIcon} #${p.id} ${p.title.slice(0, 24)}...`,
+            `admin_post_view_${p.id}`
+          )
+        ];
+      });
+
+      const keyboard = Markup.inlineKeyboard(buttons);
+      return await ctx.reply('👑 *Admin Panel: All Posts*\nSelect a post to manage:', {
+        parse_mode: 'Markdown',
+        ...keyboard
+      });
+    } catch (err) {
+      console.error('Admin posts error:', err);
+      return await ctx.reply(`⚠️ Failed to load posts: ${err.message}`);
+    }
+  };
+
+  bot.command('admin', handleAdminPosts);
+  bot.command('posts', handleAdminPosts);
+
+  bot.action(/^admin_post_view_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (String(userId) !== String(env.ADMIN_ID)) return;
+
+    const postId = ctx.match[1];
+    try {
+      const post = await getPostById(env, postId, userId, true);
+      if (!post) {
+        await ctx.answerCbQuery('Post not found');
+        return await ctx.reply('⚠️ Post not found.');
+      }
+
+      await ctx.answerCbQuery();
+      const statusIcon = post.status === 'published' ? '🟢 Published' : post.status === 'scheduled' ? '🟣 Scheduled' : '🟡 Draft';
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback(
+            post.status === 'published' ? '📝 Unpublish to Draft' : '🚀 Publish Now',
+            `admin_post_toggle_${post.id}`
+          )
+        ],
+        [Markup.button.callback('🗑️ Delete Post', `admin_post_del_${post.id}`)],
+        [Markup.button.callback('🔙 Back to Posts List', 'admin_post_list')]
+      ]);
+
+      return await ctx.reply(
+        `📌 *Post #${post.id}*\n\n` +
+        `• *Title:* ${escapeMarkdown(post.title)}\n` +
+        `• *Status:* ${statusIcon}\n` +
+        `• *Folders:* ${post.folders?.length || 0}\n` +
+        `• *Likes:* ${post.like_count}\n` +
+        `• *Comments:* ${post.comment_count}\n` +
+        (post.direct_link ? `• *Direct Link:* ${escapeMarkdown(post.direct_link)}\n` : ''),
+        {
+          parse_mode: 'Markdown',
+          ...keyboard
+        }
+      );
+    } catch (err) {
+      console.error('Error viewing admin post:', err);
+      await ctx.answerCbQuery('Error loading post');
+    }
+  });
+
+  bot.action(/^admin_post_toggle_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (String(userId) !== String(env.ADMIN_ID)) return;
+
+    const postId = ctx.match[1];
+    try {
+      const post = await getPostById(env, postId, userId, true);
+      const newStatus = post.status === 'published' ? 'draft' : 'published';
+      await updatePost(env, postId, { status: newStatus });
+      await ctx.answerCbQuery(`Status updated to ${newStatus}`);
+      return await handleAdminPosts(ctx);
+    } catch (err) {
+      await ctx.answerCbQuery('Failed to update status');
+    }
+  });
+
+  bot.action(/^admin_post_del_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (String(userId) !== String(env.ADMIN_ID)) return;
+
+    const postId = ctx.match[1];
+    try {
+      await deletePost(env, postId);
+      await ctx.answerCbQuery('Post deleted');
+      return await handleAdminPosts(ctx);
+    } catch (err) {
+      await ctx.answerCbQuery('Failed to delete');
+    }
+  });
+
+  bot.action('admin_post_list', handleAdminPosts);
+
+  // -------------------------------------------------------------
+  // /cancel Command & Button Callback
   // -------------------------------------------------------------
   const handleCancel = async (ctx) => {
     const session = await getSession(env, ctx.from.id);
     if (session) {
       await clearSession(env, ctx.from.id);
-      if (ctx.callbackQuery) await ctx.answerCbQuery('Post cancelled');
-      return await ctx.reply('❌ Post creation was cancelled.');
+      if (ctx.callbackQuery) await ctx.answerCbQuery('Action cancelled');
+      return await ctx.reply('❌ Action was cancelled.');
     }
-    if (ctx.callbackQuery) await ctx.answerCbQuery('No active session');
+    if (ctx.callbackQuery) await ctx.answerCbQuery('No active action');
     return await ctx.reply('ℹ️ No active action to cancel.');
   };
 
@@ -224,12 +346,13 @@ export function createBot(env) {
       return await ctx.reply('⛔ Unauthorized. This command is restricted to the administrator.');
     }
 
-    // Initialize multi-step session
     const sessionData = {
       step: 'AWAITING_TITLE',
       postId: null,
       title: '',
       preview_image: null,
+      direct_link: null,
+      direct_link_title: null,
       currentFiles: [],
       foldersCount: 0
     };
@@ -251,7 +374,7 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
-  // Skip Image Button Callback
+  // Step 2 & Mode Callbacks
   // -------------------------------------------------------------
   bot.action('step_skip_image', async (ctx) => {
     const userId = ctx.from.id;
@@ -263,26 +386,87 @@ export function createBot(env) {
     }
 
     session.preview_image = null;
+    await setSession(env, userId, session);
+    await ctx.answerCbQuery('Skipped image');
+
+    return await sendContentChoicePrompt(ctx, session);
+  });
+
+  async function sendContentChoicePrompt(ctx, session) {
+    session.step = 'CHOOSING_CONTENT_MODE';
+    await setSession(env, ctx.from.id, session);
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('🔗 Add Direct Link (No Folder)', 'mode_direct_link')],
+      [Markup.button.callback('📂 Upload Media & Organize Folders', 'mode_folders')],
+      [Markup.button.callback('🚀 Publish Now (Title & Image only)', 'action_publish')],
+      [Markup.button.callback('❌ Cancel', 'step_cancel')]
+    ]);
+
+    return await ctx.reply(
+      `🎯 *Step 3/3: Choose Content Type*\n\n` +
+      `How would you like to attach content to *"${escapeMarkdown(session.title)}"*?\n\n` +
+      `• **Direct Link:** Single download link without folders\n` +
+      `• **Folders & Files:** Group multiple files & links into named folders\n` +
+      `• **Publish Now:** Publish text & preview image only`,
+      {
+        parse_mode: 'Markdown',
+        ...keyboard
+      }
+    );
+  }
+
+  bot.action('mode_direct_link', async (ctx) => {
+    const userId = ctx.from.id;
+    if (String(userId) !== String(env.ADMIN_ID)) return;
+
+    const session = await getSession(env, userId);
+    if (!session) return await ctx.answerCbQuery('Session expired');
+
+    session.step = 'AWAITING_DIRECT_LINK';
+    await setSession(env, userId, session);
+    await ctx.answerCbQuery();
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('❌ Cancel', 'step_cancel')]
+    ]);
+
+    return await ctx.reply(
+      '🔗 *Send Direct Link:*\n\n' +
+      'Paste your URL and optional label:\n' +
+      '• `https://drive.google.com/file/d/xxx Course PDF Notes`\n' +
+      '• `https://mega.nz/folder/xxx HD Pack`\n\n' +
+      '*(No folder needed)*',
+      {
+        parse_mode: 'Markdown',
+        ...keyboard
+      }
+    );
+  });
+
+  bot.action('mode_folders', async (ctx) => {
+    const userId = ctx.from.id;
+    if (String(userId) !== String(env.ADMIN_ID)) return;
+
+    const session = await getSession(env, userId);
+    if (!session) return await ctx.answerCbQuery('Session expired');
+
     session.step = 'AWAITING_FOLDERS';
     session.currentFiles = [];
     session.foldersCount = 0;
     await setSession(env, userId, session);
-    await ctx.answerCbQuery('Skipped image');
+    await ctx.answerCbQuery();
 
     return await sendStep3Prompt(ctx, session);
   });
 
-  // -------------------------------------------------------------
-  // Step 3 Helper: Prompt & Buttons
-  // -------------------------------------------------------------
   async function sendStep3Prompt(ctx, session) {
     const bufferCount = session.currentFiles?.length || 0;
 
-    let text = `📂 *Step 3/3: Upload Files & Add Links*\n\n`;
-    text += `1️⃣ **Send Files:** (PDFs, Videos, Photos, Audio, Archives)\n`;
-    text += `2️⃣ **Or Send Links:** Paste any link (e.g. \`https://drive.google.com/... Notes PDF\`)\n`;
-    text += `3️⃣ **Organize:** Type a Folder Name to group buffered items\n`;
-    text += `4️⃣ **Finish:** Tap Done when finished.\n\n`;
+    let text = `📂 *Folder Upload Mode*\n\n`;
+    text += `1️⃣ **Send Files / Links:** (Documents, Videos, Photos, Audio, URLs)\n`;
+    text += `2️⃣ **Organize:** Type a Folder Name to group buffered items\n`;
+    text += `3️⃣ **Finish:** Tap Done when finished.\n\n`;
 
     if (bufferCount > 0) {
       text += `📥 *Current Buffer:* ${bufferCount} item(s) waiting for folder name.\n`;
@@ -293,40 +477,37 @@ export function createBot(env) {
       buttons.push([Markup.button.callback('📁 Save Buffer into Folder', 'step_prompt_folder_name')]);
     }
     buttons.push([
-      Markup.button.callback('✅ Done & Publish', 'step_finish_folders'),
+      Markup.button.callback('✅ Done & Review Post', 'step_finish_folders'),
       Markup.button.callback('❌ Cancel', 'step_cancel')
     ]);
 
-    const keyboard = Markup.inlineKeyboard(buttons);
-
     return await ctx.reply(text, {
       parse_mode: 'Markdown',
-      ...keyboard
+      ...Markup.inlineKeyboard(buttons)
     });
   }
 
   bot.action('step_prompt_folder_name', async (ctx) => {
     await ctx.answerCbQuery();
     return await ctx.reply(
-      '📁 *Please type the Folder Name* (e.g. `PDF Guides`, `HD Wallpapers`) to save the buffered items into that folder:',
+      '📁 *Please type the Folder Name* (e.g. `Cheat Sheets`, `Lecture Materials`) to group the buffered files:',
       { parse_mode: 'Markdown' }
     );
   });
 
   // -------------------------------------------------------------
-  // /done Command & Done Button Callback
+  // /done Command & Finish Callbacks
   // -------------------------------------------------------------
   const handleFinishFolders = async (ctx) => {
     const userId = ctx.from.id;
     if (String(userId) !== String(env.ADMIN_ID)) return;
 
     const session = await getSession(env, userId);
-    if (!session || (session.step !== 'AWAITING_FOLDERS' && session.step !== 'AWAITING_TITLE')) {
+    if (!session || !session.postId) {
       if (ctx.callbackQuery) await ctx.answerCbQuery('No active post creation');
       return await ctx.reply('ℹ️ You are not currently creating a post. Use /addpost to start.');
     }
 
-    // Auto-save any leftover buffered items into a default folder
     if (session.currentFiles && session.currentFiles.length > 0) {
       try {
         const folder = await createFolder(env, {
@@ -360,6 +541,7 @@ export function createBot(env) {
     return await ctx.reply(
       `🎉 *Post Ready for Publishing!*\n\n` +
       `• *Title:* ${escapeMarkdown(session.title)}\n` +
+      (session.direct_link ? `• *Direct Link:* ${escapeMarkdown(session.direct_link)}\n` : '') +
       `• *Folders Created:* ${session.foldersCount || 0}\n\n` +
       `Choose how you would like to publish this post:`,
       {
@@ -454,7 +636,7 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
-  // Multi-step Message Handler (Files, Links, Folders, Title, Images)
+  // Multi-step Message Handler
   // -------------------------------------------------------------
   bot.on('message', async (ctx) => {
     const userId = ctx.from.id;
@@ -473,7 +655,6 @@ export function createBot(env) {
 
       session.title = text;
 
-      // Create draft post in Supabase
       try {
         const post = await createPost(env, {
           title: text,
@@ -516,7 +697,6 @@ export function createBot(env) {
           return await ctx.reply('⚠️ Please send a valid HTTP(S) image URL or tap Skip.');
         }
       } else if (ctx.message.photo) {
-        // Photo directly uploaded: get link
         const photoArr = ctx.message.photo;
         const highestRes = photoArr[photoArr.length - 1];
         try {
@@ -536,20 +716,59 @@ export function createBot(env) {
         }
       }
 
-      session.step = 'AWAITING_FOLDERS';
-      session.currentFiles = [];
-      session.foldersCount = 0;
-      await setSession(env, userId, session);
-
-      return await sendStep3Prompt(ctx, session);
+      return await sendContentChoicePrompt(ctx, session);
     }
 
-    // STEP 3: Awaiting Folders, Files, and Links
+    // Direct Link Mode
+    if (session.step === 'AWAITING_DIRECT_LINK') {
+      if (!text || (!text.startsWith('http://') && !text.startsWith('https://') && !text.includes('://'))) {
+        return await ctx.reply('⚠️ Please send a valid link starting with http:// or https://');
+      }
+
+      const parts = text.split(/\s+/);
+      const urlPart = parts.find(p => p.startsWith('http://') || p.startsWith('https://'));
+      const labelParts = parts.filter(p => p !== urlPart).join(' ');
+
+      session.direct_link = urlPart;
+      session.direct_link_title = labelParts || 'Open / Download Link';
+
+      try {
+        await updatePost(env, session.postId, {
+          direct_link: urlPart,
+          direct_link_title: session.direct_link_title
+        });
+
+        session.step = 'AWAITING_PUBLISH_CHOICE';
+        await setSession(env, userId, session);
+
+        const keyboard = Markup.inlineKeyboard([
+          [Markup.button.callback('🚀 Publish Now', 'action_publish')],
+          [Markup.button.callback('📅 Schedule', 'action_schedule')],
+          [Markup.button.callback('📝 Save as Draft', 'action_draft')]
+        ]);
+
+        return await ctx.reply(
+          `✅ *Direct Link Saved!*\n\n` +
+          `• *Title:* ${escapeMarkdown(session.title)}\n` +
+          `• *Link:* ${escapeMarkdown(urlPart)}\n` +
+          `• *Label:* ${escapeMarkdown(session.direct_link_title)}\n\n` +
+          `Choose how you would like to publish this post:`,
+          {
+            parse_mode: 'Markdown',
+            ...keyboard
+          }
+        );
+      } catch (err) {
+        console.error('Failed to update direct link:', err);
+        return await ctx.reply(`⚠️ Failed to save link: ${err.message}`);
+      }
+    }
+
+    // Folders and Files Mode
     if (session.step === 'AWAITING_FOLDERS') {
       const msg = ctx.message;
       let itemMeta = null;
 
-      // 1. Check if user sent an External File Link (URL)
       if (text && (text.startsWith('http://') || text.startsWith('https://') || text.includes('://'))) {
         const parts = text.split(/\s+/);
         const urlPart = parts.find(p => p.startsWith('http://') || p.startsWith('https://'));
@@ -566,7 +785,6 @@ export function createBot(env) {
         }
       }
 
-      // 2. Check if media file message
       if (!itemMeta) {
         if (msg.photo) {
           const photo = msg.photo[msg.photo.length - 1];
@@ -600,9 +818,7 @@ export function createBot(env) {
         }
       }
 
-      // If item was detected (file or link)
       if (itemMeta) {
-        // If actual Telegram media, copy to CHANNEL_ID
         if (itemMeta.mime_type !== 'link') {
           try {
             if (!env.CHANNEL_ID) {
@@ -623,7 +839,7 @@ export function createBot(env) {
         const keyboard = Markup.inlineKeyboard([
           [Markup.button.callback('📁 Name & Save Folder', 'step_prompt_folder_name')],
           [
-            Markup.button.callback('✅ Done & Publish', 'step_finish_folders'),
+            Markup.button.callback('✅ Done & Review', 'step_finish_folders'),
             Markup.button.callback('❌ Cancel', 'step_cancel')
           ]
         ]);
@@ -640,11 +856,10 @@ export function createBot(env) {
         );
       }
 
-      // If regular text sent (and not a command), treat it as the Folder Name
       if (text && !text.startsWith('/')) {
         if (!session.currentFiles || session.currentFiles.length === 0) {
           const keyboard = Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Done & Publish', 'step_finish_folders')],
+            [Markup.button.callback('✅ Done & Review', 'step_finish_folders')],
             [Markup.button.callback('❌ Cancel', 'step_cancel')]
           ]);
           return await ctx.reply(
@@ -677,13 +892,13 @@ export function createBot(env) {
 
           const keyboard = Markup.inlineKeyboard([
             [Markup.button.callback('➕ Add Next Folder', 'step_prompt_folder_name')],
-            [Markup.button.callback('🚀 Finish & Publish Now', 'step_finish_folders')]
+            [Markup.button.callback('🚀 Finish & Review Post', 'step_finish_folders')]
           ]);
 
           return await ctx.reply(
             `✅ Saved folder *"${escapeMarkdown(text)}"* with ${savedCount} item(s)!\n\n` +
             `• Send more files/links for another folder, or\n` +
-            `• Tap **Finish & Publish Now** below:`,
+            `• Tap **Finish & Review Post** below:`,
             {
               parse_mode: 'Markdown',
               ...keyboard
@@ -696,7 +911,7 @@ export function createBot(env) {
       }
     }
 
-    // STEP 4: Awaiting Schedule Time
+    // Schedule Time
     if (session.step === 'AWAITING_SCHEDULE_TIME') {
       if (!text) {
         return await ctx.reply('⚠️ Please send a valid date string (e.g. `2026-10-15 14:30`) in UTC.');
@@ -736,9 +951,6 @@ export function createBot(env) {
   return bot;
 }
 
-/**
- * Escapes characters for Telegram Markdown v1
- */
 function escapeMarkdown(text) {
   if (!text) return '';
   return String(text).replace(/([_*`\[\]])/g, '\\$1');
