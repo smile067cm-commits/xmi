@@ -1660,7 +1660,7 @@ const rawHtml = `<!DOCTYPE html>
             const card = document.createElement('div');
             card.className = 'post-card';
             card.innerHTML = '<div class="post-image-container" style="height: 140px;">' +
-              (post.preview_image ? '<img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" />' : '<div class="post-image-placeholder">📄</div>') +
+              (post.preview_image ? '<div class="post-image-backdrop" style="background-image: url(\\'' + escapeHtml(post.preview_image) + '\\');"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />' : '<div class="post-image-placeholder">📄</div>') +
               '<div class="post-badges-top"><span class="post-status-badge status-' + post.status + '">' + post.status + '</span>' +
               (post.is_promoted ? '<span class="post-status-badge status-promoted">⭐ Pin</span>' : '') + '</div></div>' +
               '<div class="post-body">' +
@@ -2443,6 +2443,6 @@ export function getAppHtml(env) {
 `;
 
 fs.writeFileSync(path.join(projectDir, 'src', 'frontend.js'), frontendJs, 'utf8');
-fs.writeFileSync(path.join(projectDir, 'scripts', 'make-frontend.js'), `// Frontend generator script\n` + fs.readFileSync('/data/data/com.termux/files/home/.gemini/antigravity-cli/brain/ffe2fe34-2450-47ff-8c4e-611646556d65/scratch/generate.js', 'utf8'), 'utf8');
+// Self write removed
 
 console.log('✅ Generated clean and syntax-valid src/frontend.js and scripts/make-frontend.js!');

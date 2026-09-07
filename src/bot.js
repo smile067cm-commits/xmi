@@ -725,17 +725,27 @@ export function createBot(env) {
   // -------------------------------------------------------------
   // User Actions: Browse Posts & Saved Posts & Invite Friends
   // -------------------------------------------------------------
-  const handleBrowsePosts = async (ctx) => {
+  const handleBrowsePosts = async (ctx, page = 1) => {
     try {
       if (ctx.callbackQuery) await ctx.answerCbQuery();
       const posts = await getPublishedPosts(env, ctx.from?.id);
       if (!posts || posts.length === 0) {
-        return await ctx.reply('📭 No published posts available right now.', {
-          ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
-        });
+        const text = '📭 No published posts available right now.';
+        const keyboard = Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]]);
+        if (ctx.callbackQuery?.message) {
+          try {
+            return await ctx.editMessageText(text, keyboard);
+          } catch (e) {}
+        }
+        return await ctx.reply(text, keyboard);
       }
 
-      const buttons = posts.slice(0, 15).map(p => {
+      const PAGE_SIZE = 10;
+      const totalPages = Math.max(1, Math.ceil(posts.length / PAGE_SIZE));
+      const curPage = Math.max(1, Math.min(page, totalPages));
+      const pagePosts = posts.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
+
+      const buttons = pagePosts.map(p => {
         const star = p.is_promoted ? '⭐ ' : '';
         return [
           Markup.button.callback(
@@ -745,14 +755,41 @@ export function createBot(env) {
         ];
       });
 
+      // Pagination controls row
+      if (totalPages > 1) {
+        const navRow = [];
+        if (curPage > 1) {
+          navRow.push(Markup.button.callback('⬅️ Prev', `user_browse_page_${curPage - 1}`));
+        }
+        navRow.push(Markup.button.callback(`📄 ${curPage}/${totalPages} (${posts.length})`, 'noop'));
+        if (curPage < totalPages) {
+          navRow.push(Markup.button.callback('Next ➡️', `user_browse_page_${curPage + 1}`));
+        }
+        buttons.push(navRow);
+      }
+
       buttons.push([
         Markup.button.webApp('🚀 Open in Mini App', appUrl),
         Markup.button.callback('🔙 Main Menu', 'main_menu')
       ]);
 
-      return await ctx.reply('🔍 *Explore Published Content:*\nTap a post below to view files & links:', {
+      const text = `🔍 *Explore Published Content* (Page ${curPage}/${totalPages}):\nTap a post below to view files & links:`;
+      const keyboard = Markup.inlineKeyboard(buttons);
+
+      if (ctx.callbackQuery?.message) {
+        try {
+          return await ctx.editMessageText(text, {
+            parse_mode: 'Markdown',
+            ...keyboard
+          });
+        } catch (e) {
+          // If message cannot be edited (e.g. content identical), ignore or fallback
+        }
+      }
+
+      return await ctx.reply(text, {
         parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard(buttons)
+        ...keyboard
       });
     } catch (err) {
       console.error('Error browsing posts:', err);
@@ -760,7 +797,11 @@ export function createBot(env) {
     }
   };
 
-  bot.action('user_browse_posts', handleBrowsePosts);
+  bot.action('user_browse_posts', async (ctx) => handleBrowsePosts(ctx, 1));
+  bot.action(/^user_browse_page_(\d+)$/, async (ctx) => {
+    const page = parseInt(ctx.match[1], 10) || 1;
+    return await handleBrowsePosts(ctx, page);
+  });
 
   bot.action(/^user_view_post_(\d+)$/, async (ctx) => {
     const postId = ctx.match[1];
@@ -771,27 +812,62 @@ export function createBot(env) {
     return await sendPostToUser(ctx, env, post, postId);
   });
 
-  const handleSavedPosts = async (ctx) => {
+  const handleSavedPosts = async (ctx, page = 1) => {
     try {
       if (ctx.callbackQuery) await ctx.answerCbQuery();
       const saved = await getSavedPosts(env, ctx.from?.id);
       if (!saved || saved.length === 0) {
-        return await ctx.reply('🔖 You have no saved bookmarks yet.\nBrowse posts and tap Save to bookmark them!', {
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('🔍 Browse Posts', 'user_browse_posts')],
-            [Markup.button.callback('🔙 Main Menu', 'main_menu')]
-          ])
-        });
+        const text = '🔖 You have no saved bookmarks yet.\nBrowse posts and tap Save to bookmark them!';
+        const keyboard = Markup.inlineKeyboard([
+          [Markup.button.callback('🔍 Browse Posts', 'user_browse_posts')],
+          [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+        ]);
+        if (ctx.callbackQuery?.message) {
+          try {
+            return await ctx.editMessageText(text, keyboard);
+          } catch (e) {}
+        }
+        return await ctx.reply(text, keyboard);
       }
 
-      const buttons = saved.slice(0, 15).map(p => [
+      const PAGE_SIZE = 10;
+      const totalPages = Math.max(1, Math.ceil(saved.length / PAGE_SIZE));
+      const curPage = Math.max(1, Math.min(page, totalPages));
+      const pagePosts = saved.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
+
+      const buttons = pagePosts.map(p => [
         Markup.button.callback(`🔖 ${p.title.slice(0, 28)}`, `user_view_post_${p.id}`)
       ]);
+
+      if (totalPages > 1) {
+        const navRow = [];
+        if (curPage > 1) {
+          navRow.push(Markup.button.callback('⬅️ Prev', `user_saved_page_${curPage - 1}`));
+        }
+        navRow.push(Markup.button.callback(`📄 ${curPage}/${totalPages} (${saved.length})`, 'noop'));
+        if (curPage < totalPages) {
+          navRow.push(Markup.button.callback('Next ➡️', `user_saved_page_${curPage + 1}`));
+        }
+        buttons.push(navRow);
+      }
+
       buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
 
-      return await ctx.reply('🔖 *Your Bookmarked Posts:*\nTap a post to access:', {
+      const text = `🔖 *Your Bookmarked Posts* (Page ${curPage}/${totalPages}):\nTap a post to access:`;
+      const keyboard = Markup.inlineKeyboard(buttons);
+
+      if (ctx.callbackQuery?.message) {
+        try {
+          return await ctx.editMessageText(text, {
+            parse_mode: 'Markdown',
+            ...keyboard
+          });
+        } catch (e) {}
+      }
+
+      return await ctx.reply(text, {
         parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard(buttons)
+        ...keyboard
       });
     } catch (err) {
       console.error('Error loading saved posts:', err);
@@ -799,7 +875,11 @@ export function createBot(env) {
     }
   };
 
-  bot.action('user_menu_saved', handleSavedPosts);
+  bot.action('user_menu_saved', async (ctx) => handleSavedPosts(ctx, 1));
+  bot.action(/^user_saved_page_(\d+)$/, async (ctx) => {
+    const page = parseInt(ctx.match[1], 10) || 1;
+    return await handleSavedPosts(ctx, page);
+  });
 
   const handleUserPoints = async (ctx) => {
     const userId = ctx.from?.id;
@@ -917,7 +997,7 @@ export function createBot(env) {
   bot.action('admin_stats', handleStats);
   bot.action('admin_refresh_stats', handleStats);
 
-  const handleAdminPosts = async (ctx) => {
+  const handleAdminPosts = async (ctx, page = 1) => {
     const userId = ctx.from.id;
     if (!(await isAdminUser(env, userId))) {
       return await ctx.reply('⛔ Unauthorized. Admin access only.');
@@ -927,15 +1007,25 @@ export function createBot(env) {
       if (ctx.callbackQuery) await ctx.answerCbQuery();
       const posts = await getAllPostsForAdmin(env);
       if (!posts || posts.length === 0) {
-        return await ctx.reply('📭 No posts found in database.', {
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('➕ Create New Post', 'admin_menu_addpost')],
-            [Markup.button.callback('🔙 Main Menu', 'admin_main_menu')]
-          ])
-        });
+        const text = '📭 No posts found in database.';
+        const keyboard = Markup.inlineKeyboard([
+          [Markup.button.callback('➕ Create New Post', 'admin_menu_addpost')],
+          [Markup.button.callback('🔙 Main Menu', 'admin_main_menu')]
+        ]);
+        if (ctx.callbackQuery?.message) {
+          try {
+            return await ctx.editMessageText(text, keyboard);
+          } catch (e) {}
+        }
+        return await ctx.reply(text, keyboard);
       }
 
-      const buttons = posts.slice(0, 15).map(p => {
+      const PAGE_SIZE = 10;
+      const totalPages = Math.max(1, Math.ceil(posts.length / PAGE_SIZE));
+      const curPage = Math.max(1, Math.min(page, totalPages));
+      const pagePosts = posts.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
+
+      const buttons = pagePosts.map(p => {
         const statusIcon = p.status === 'published' ? '🟢' : p.status === 'scheduled' ? '🟣' : '🟡';
         const star = p.is_promoted ? '⭐ ' : '';
         const displayTitle = p.title.length > 26 ? p.title.slice(0, 26) + '…' : p.title;
@@ -947,14 +1037,37 @@ export function createBot(env) {
         ];
       });
 
+      if (totalPages > 1) {
+        const navRow = [];
+        if (curPage > 1) {
+          navRow.push(Markup.button.callback('⬅️ Prev', `admin_posts_page_${curPage - 1}`));
+        }
+        navRow.push(Markup.button.callback(`📄 ${curPage}/${totalPages} (${posts.length})`, 'noop'));
+        if (curPage < totalPages) {
+          navRow.push(Markup.button.callback('Next ➡️', `admin_posts_page_${curPage + 1}`));
+        }
+        buttons.push(navRow);
+      }
+
       buttons.push([
         Markup.button.callback('➕ Create New Post', 'admin_menu_addpost'),
         Markup.button.callback('📊 Stats', 'admin_stats')
       ]);
       buttons.push([Markup.button.callback('🔙 Main Menu', 'admin_main_menu')]);
 
+      const text = `👑 *Admin Panel: Posts Management* (Page ${curPage}/${totalPages})\nSelect any post to edit or manage:`;
       const keyboard = Markup.inlineKeyboard(buttons);
-      return await ctx.reply('👑 *Admin Panel: Posts Management*\nSelect any post to edit or manage:', {
+
+      if (ctx.callbackQuery?.message) {
+        try {
+          return await ctx.editMessageText(text, {
+            parse_mode: 'Markdown',
+            ...keyboard
+          });
+        } catch (e) {}
+      }
+
+      return await ctx.reply(text, {
         parse_mode: 'Markdown',
         ...keyboard
       });
@@ -964,9 +1077,13 @@ export function createBot(env) {
     }
   };
 
-  bot.command('admin', handleAdminPosts);
-  bot.command('posts', handleAdminPosts);
-  bot.action('admin_post_list', handleAdminPosts);
+  bot.command('admin', async (ctx) => handleAdminPosts(ctx, 1));
+  bot.command('posts', async (ctx) => handleAdminPosts(ctx, 1));
+  bot.action('admin_post_list', async (ctx) => handleAdminPosts(ctx, 1));
+  bot.action(/^admin_posts_page_(\d+)$/, async (ctx) => {
+    const page = parseInt(ctx.match[1], 10) || 1;
+    return await handleAdminPosts(ctx, page);
+  });
 
   // -------------------------------------------------------------
   // Admin Single Post View & Detailed Controls
