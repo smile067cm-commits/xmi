@@ -103,7 +103,7 @@ export async function getUser(env, userId) {
  * Fetch published posts for public feed (Promoted posts pinned to top)
  */
 export async function getPublishedPosts(env, userId = null) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?status=eq.published&order=is_promoted.desc,created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,is_promoted,category,tags,status,created_at,likes(user_id),comments(id,is_hidden),post_views(id),saved_posts(user_id)`;
+  const url = `${getSupabaseBaseUrl(env)}/posts?status=eq.published&order=is_promoted.desc,created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,is_promoted,category,tags,status,created_at,likes(user_id),comments(id,is_hidden),post_views(id),saved_posts(user_id),file_access_logs(id)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -130,6 +130,7 @@ export async function getPublishedPosts(env, userId = null) {
     like_count: post.likes ? post.likes.length : 0,
     comment_count: post.comments ? post.comments.filter(c => !c.is_hidden).length : 0,
     view_count: post.post_views ? post.post_views.length : 0,
+    access_count: post.file_access_logs ? post.file_access_logs.length : 0,
     is_saved: userId ? (post.saved_posts || []).some(s => String(s.user_id) === String(userId)) : false
   }));
 }
@@ -176,7 +177,7 @@ export async function getAllPostsForAdmin(env) {
  * Fetch single post with folders, direct links, comments, and like status
  */
 export async function getPostById(env, postId, userId = null, isAdmin = false) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}&select=*,folders(id,name,created_at,files(id,file_id,channel_message_id,file_name,mime_type,size)),comments(id,user_id,username,text,is_hidden,created_at),likes(user_id),post_views(id),saved_posts(user_id)`;
+  const url = `${getSupabaseBaseUrl(env)}/posts?id=eq.${postId}&select=*,folders(id,name,created_at,files(id,file_id,channel_message_id,file_name,mime_type,size)),comments(id,user_id,username,text,is_hidden,created_at),likes(user_id),post_views(id),saved_posts(user_id),file_access_logs(id)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -218,6 +219,7 @@ export async function getPostById(env, postId, userId = null, isAdmin = false) {
     like_count: post.likes ? post.likes.length : 0,
     comment_count: comments.length,
     view_count: post.post_views ? post.post_views.length : 0,
+    access_count: post.file_access_logs ? post.file_access_logs.length : 0,
     liked,
     is_saved
   };
@@ -863,11 +865,11 @@ export async function getSettings(env) {
 
   return {
     referral_enabled: Boolean(map.referral_enabled),
-    referral_points: Number(map.referral_points) || 10,
+    referral_points: (map.referral_points !== undefined && map.referral_points !== null) ? Number(map.referral_points) : 10,
     shortener_enabled: Boolean(map.shortener_enabled),
-    points_per_verify: Number(map.points_per_verify) || 5,
-    points_per_post: Number(map.points_per_post || map.points_per_post_download) || 1,
-    points_per_post_download: Number(map.points_per_post_download || map.points_per_post) || 1,
+    points_per_verify: (map.points_per_verify !== undefined && map.points_per_verify !== null) ? Number(map.points_per_verify) : 5,
+    points_per_post: (map.points_per_post !== undefined && map.points_per_post !== null) ? Number(map.points_per_post) : ((map.points_per_post_download !== undefined && map.points_per_post_download !== null) ? Number(map.points_per_post_download) : 1),
+    points_per_post_download: (map.points_per_post_download !== undefined && map.points_per_post_download !== null) ? Number(map.points_per_post_download) : ((map.points_per_post !== undefined && map.points_per_post !== null) ? Number(map.points_per_post) : 1),
     auto_delete_minutes: (map.auto_delete_minutes !== undefined && map.auto_delete_minutes !== null) ? Number(map.auto_delete_minutes) : 30,
     protect_all_posts: Boolean(map.protect_all_posts || map.restrict_forwarding_all),
     banner_enabled: Boolean(map.banner_enabled),
@@ -1291,13 +1293,34 @@ export async function processEphemeralDeletions(env) {
   }
 }
 
-export async function getAllUserIds(env) {
-  const baseUrl = getSupabaseBaseUrl(env);
-  const headers = getSupabaseHeaders(env);
-  const res = await fetch(`${baseUrl}/users?select=id`, { headers });
-  const rows = res.ok ? await res.json() : [];
-  return rows.map(r => r.id);
+export async function getAllUsers(env) {
+  if (!env.SUPABASE_URL) return [];
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const res = await fetch(`${baseUrl}/users?order=last_activity.desc&select=*`, { headers });
+    return res.ok ? await res.json() : [];
+  } catch (e) {
+    console.warn('Error fetching all users:', e);
+    return [];
+  }
 }
+
+export async function getAllUserIds(env) {
+  if (!env.SUPABASE_URL) return [];
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const res = await fetch(`${baseUrl}/users?select=id`, { headers });
+    const rows = res.ok ? await res.json() : [];
+    return rows.map(r => r.id);
+  } catch (e) {
+    console.warn('Error fetching user IDs:', e);
+    return [];
+  }
+}
+
+export const getAllRegisteredUserIds = getAllUserIds;
 
 // ------------------------------------------
 // 14. MULTI-ADMIN MANAGEMENT

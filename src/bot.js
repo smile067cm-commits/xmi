@@ -29,6 +29,7 @@ import {
   addEphemeralMessages,
   processEphemeralDeletions,
   getAllUserIds,
+  getAllUsers,
   getUser,
   isAdminUser,
   getAdmins,
@@ -36,7 +37,8 @@ import {
   deleteAdmin,
   getDatabaseStorageStats,
   optimizeDatabase,
-  recordPostView
+  recordPostView,
+  recordFileAccess
 } from './db.js';
 import { getSession, setSession, clearSession } from './session.js';
 
@@ -121,7 +123,7 @@ async function checkLockerPass(ctx, env, userId, postId) {
  * Delivers post details, files, and links (as buttons) to user with auto-deletion timer & content protection
  */
 async function sendPostToUser(ctx, env, post, postId) {
-  // Record view count
+  // Record view count & file access / download
   if (postId && ctx.from?.id) {
     recordPostView(env, {
       post_id: Number(postId),
@@ -129,6 +131,14 @@ async function sendPostToUser(ctx, env, post, postId) {
       username: ctx.from.username || null,
       first_name: ctx.from.first_name || ''
     }).catch(e => console.warn('Record view warning in bot:', e.message));
+
+    recordFileAccess(env, {
+      post_id: Number(postId),
+      item_name: post.title || `Post #${postId}`,
+      user_id: Number(ctx.from.id),
+      username: ctx.from.username || null,
+      first_name: ctx.from.first_name || ''
+    }).catch(e => console.warn('Record file access warning in bot:', e.message));
   }
 
   const folders = await getPostFoldersWithFiles(env, postId);
@@ -1406,6 +1416,7 @@ export function createBot(env) {
 
       let sentCount = 0;
       let failedCount = 0;
+      const failedDetails = [];
       const ephemeralRecords = [];
 
       for (const targetId of userIds) {
@@ -1440,41 +1451,47 @@ export function createBot(env) {
             sentCount++;
           }
 
-          if (sentMid && autoDeleteMinutes > 0) {
-            const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
-            const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
-              `This post message will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
-              (protectContent
-                ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
-                : `👉 *Please forward or save to your Saved Messages now before it disappears.*`);
+          if (sentMid) {
+            if (autoDeleteMinutes > 0) {
+              const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
+              const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
+                `This post message will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
+                (protectContent
+                  ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
+                  : `👉 *Please forward or save to your Saved Messages now before it disappears.*`);
 
-            let noticeMid = null;
-            try {
-              const nRes = await ctx.telegram.sendMessage(targetId, noticeText, {
-                parse_mode: 'Markdown',
-                protect_content: protectContent
-              });
-              noticeMid = nRes.message_id;
-            } catch {}
+              let noticeMid = null;
+              try {
+                const nRes = await ctx.telegram.sendMessage(targetId, noticeText, {
+                  parse_mode: 'Markdown',
+                  protect_content: protectContent
+                });
+                noticeMid = nRes.message_id;
+              } catch {}
 
-            const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
-            ephemeralRecords.push({
-              chat_id: targetId,
-              message_id: sentMid,
-              delete_at: deleteAt,
-              is_deleted: false
-            });
-            if (noticeMid) {
+              const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
               ephemeralRecords.push({
                 chat_id: targetId,
-                message_id: noticeMid,
+                message_id: sentMid,
                 delete_at: deleteAt,
                 is_deleted: false
               });
+              if (noticeMid) {
+                ephemeralRecords.push({
+                  chat_id: targetId,
+                  message_id: noticeMid,
+                  delete_at: deleteAt,
+                  is_deleted: false
+                });
+              }
             }
+          } else {
+            failedCount++;
+            failedDetails.push({ user_id: targetId, reason: 'Telegram message delivery failed' });
           }
-        } catch {
+        } catch (targetErr) {
           failedCount++;
+          failedDetails.push({ user_id: targetId, reason: targetErr.message || 'Error' });
         }
       }
 
@@ -1482,16 +1499,21 @@ export function createBot(env) {
         await addEphemeralMessages(env, ephemeralRecords);
       }
 
-      return await ctx.reply(
-        `✅ *Post Broadcast Complete!*\n\n` +
-        `• Sent successfully to: *${sentCount}* users\n` +
-        `• Failed: *${failedCount}* users\n` +
-        `• Total: *${userIds.length}* users`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Return to Post', `admin_post_view_${postId}`)]])
-        }
-      );
+      let summaryText = `✅ *Post Broadcast Complete!*\n\n` +
+        `• 🚀 *Successfully Sent:* \`${sentCount}\`\n` +
+        `• ❌ *Failed:* \`${failedCount}\`\n` +
+        `• 👥 *Total Users:* \`${userIds.length}\``;
+
+      if (failedDetails.length > 0) {
+        summaryText += `\n\n⚠️ *Failure Breakdown:*\n` +
+          failedDetails.slice(0, 10).map(f => `• User \`#${f.user_id}\`: _${escapeMarkdown(f.reason)}_`).join('\n') +
+          (failedDetails.length > 10 ? `\n_...and ${failedDetails.length - 10} more_` : '');
+      }
+
+      return await ctx.reply(summaryText, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Return to Post', `admin_post_view_${postId}`)]])
+      });
     } catch (err) {
       console.error('Error broadcasting post:', err);
       await ctx.reply('⚠️ Failed to broadcast post: ' + err.message);
@@ -1671,6 +1693,9 @@ export function createBot(env) {
 
     buttons.push([
       Markup.button.callback('➕ Add New Admin', 'admin_add_admin_ask'),
+      Markup.button.callback('👥 View Registered Users', 'admin_view_users')
+    ]);
+    buttons.push([
       Markup.button.callback('🔙 Main Menu', 'admin_main_menu')
     ]);
 
@@ -1681,6 +1706,42 @@ export function createBot(env) {
   };
 
   bot.action('admin_menu_admins', handleAdminsMenu);
+
+  bot.action('admin_view_users', async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!(await isAdminUser(env, userId))) return;
+    await ctx.answerCbQuery();
+
+    try {
+      const users = await getAllUsers(env);
+      let text = `👥 *Registered Bot Users Directory*\n\n` +
+        `• *Total Users:* \`${users.length}\`\n\n`;
+
+      if (users.length === 0) {
+        text += `_No registered users found yet._`;
+      } else {
+        const topUsers = users.slice(0, 20);
+        topUsers.forEach((u, i) => {
+          const uName = u.username ? `[@${escapeMarkdown(u.username)}](https://t.me/${u.username})` : `[${escapeMarkdown(u.first_name || 'User')}](tg://user?id=${u.id})`;
+          text += `${i + 1}. ${uName} (\`#${u.id}\`) — 🪙 ${u.points || 0} pts • 🔄 ${u.interactions || 1} acts\n`;
+        });
+        if (users.length > 20) {
+          text += `\n_...and ${users.length - 20} more users (view and search all in Mini App Admin Hub)._`;
+        }
+      }
+
+      return await ctx.reply(text, {
+        parse_mode: 'Markdown',
+        disable_web_page_preview: true,
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Refresh', 'admin_view_users')],
+          [Markup.button.callback('🔙 Back to Admins', 'admin_menu_admins')]
+        ])
+      });
+    } catch (e) {
+      return await ctx.reply('⚠️ Error fetching users: ' + e.message);
+    }
+  });
 
   bot.action('admin_add_admin_ask', async (ctx) => {
     const userId = ctx.from?.id;
@@ -2015,6 +2076,7 @@ export function createBot(env) {
 
     let sent = 0;
     let failed = 0;
+    const failedDetails = [];
 
     const keyboard = (session.broadcastBtnText && session.broadcastBtnUrl)
       ? Markup.inlineKeyboard([[Markup.button.url(session.broadcastBtnText, session.broadcastBtnUrl)]])
@@ -2037,19 +2099,25 @@ export function createBot(env) {
         sent++;
       } catch (e) {
         failed++;
+        failedDetails.push({ user_id: targetId, reason: e.message || 'Error' });
       }
     }
 
-    return await ctx.reply(
-      `✅ *Broadcast Complete!*\n\n` +
-      `• *Total Users:* \`${userIds.length}\`\n` +
-      `• *Sent Successfully:* \`${sent}\`\n` +
-      `• *Failed / Blocked:* \`${failed}\``,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'admin_main_menu')]])
-      }
-    );
+    let summaryText = `✅ *Broadcast Complete!*\n\n` +
+      `• 🚀 *Sent Successfully:* \`${sent}\`\n` +
+      `• ❌ *Failed / Blocked:* \`${failed}\`\n` +
+      `• 👥 *Total Targeted:* \`${userIds.length}\``;
+
+    if (failedDetails.length > 0) {
+      summaryText += `\n\n⚠️ *Failure Reasons Breakdown:*\n` +
+        failedDetails.slice(0, 10).map(f => `• User \`#${f.user_id}\`: _${escapeMarkdown(f.reason)}_`).join('\n') +
+        (failedDetails.length > 10 ? `\n_...and ${failedDetails.length - 10} more_` : '');
+    }
+
+    return await ctx.reply(summaryText, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'admin_main_menu')]])
+    });
   });
 
   // -------------------------------------------------------------

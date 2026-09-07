@@ -30,6 +30,8 @@ import {
   verifyTokenAndGrantPass,
   checkAndDeductPostAccess,
   getAllUserIds,
+  getAllUsers,
+  saveOrUpdateUser,
   getUser,
   isAdminUser,
   getAdmins,
@@ -162,13 +164,18 @@ export function createRouter() {
       const isAdmin = await isAdminUser(env, userId);
 
       let userData = null;
-      if (userId) {
+      let hasStartedBot = false;
+      if (userId && Number(userId) > 0) {
         const u = await getUser(env, userId);
         if (u) {
+          hasStartedBot = (Number(u.interactions) || 0) > 0;
           userData = {
             id: u.id,
+            username: u.username || null,
+            first_name: u.first_name || '',
             points: Number(u.points) || 0,
-            referral_count: Number(u.referral_count) || 0
+            referral_count: Number(u.referral_count) || 0,
+            has_started_bot: hasStartedBot
           };
         }
       }
@@ -177,6 +184,7 @@ export function createRouter() {
         success: true,
         settings,
         user: userData,
+        has_started_bot: hasStartedBot,
         is_admin: isAdmin
       });
     } catch (err) {
@@ -253,6 +261,30 @@ export function createRouter() {
       return jsonResponse({ success: true, admins });
     } catch (err) {
       console.error('API /api/admin/admins error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // GET /api/admin/users - List all registered users (Admin Only)
+  // -------------------------------------------------------------
+  router.get('/api/admin/users', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+
+      if (!queryUserId || !(await isAdminUser(env, queryUserId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const users = await getAllUsers(env);
+      return jsonResponse({
+        success: true,
+        total_users: users.length,
+        users
+      });
+    } catch (err) {
+      console.error('API /api/admin/users error:', err);
       return errorResponse(err.message, 500);
     }
   });
@@ -421,15 +453,33 @@ export function createRouter() {
         return errorResponse('Unauthorized admin access', 403);
       }
 
-      const { message, photo_url, button_text, button_url } = body;
+      const { message, photo_url, button_text, button_url, target_user_ids } = body;
 
       if (!message || !message.trim()) {
         return errorResponse('Broadcast message is required', 400);
       }
 
-      const userIds = await getAllUserIds(env);
+      let userIds = [];
+      if (Array.isArray(target_user_ids) && target_user_ids.length > 0) {
+        userIds = target_user_ids.map(Number).filter(id => !isNaN(id) && id > 0);
+      } else {
+        userIds = await getAllUserIds(env);
+      }
+
+      if (userIds.length === 0) {
+        return jsonResponse({
+          success: true,
+          total_targeted: 0,
+          total_users: 0,
+          sent_count: 0,
+          failed_count: 0,
+          failed_details: []
+        });
+      }
+
       let sentCount = 0;
       let failedCount = 0;
+      const failedDetails = [];
 
       const inlineKeyboard = (button_text && button_url) ? {
         inline_keyboard: [[{ text: button_text, url: button_url }]]
@@ -437,9 +487,10 @@ export function createRouter() {
 
       for (const targetId of userIds) {
         try {
+          let resData = null;
           if (photo_url && photo_url.startsWith('http')) {
             const sendPhotoUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendPhoto`;
-            await fetch(sendPhotoUrl, {
+            const res = await fetch(sendPhotoUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -450,9 +501,10 @@ export function createRouter() {
                 reply_markup: inlineKeyboard
               })
             });
+            resData = await res.json();
           } else {
             const sendMsgUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`;
-            await fetch(sendMsgUrl, {
+            const res = await fetch(sendMsgUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -462,18 +514,35 @@ export function createRouter() {
                 reply_markup: inlineKeyboard
               })
             });
+            resData = await res.json();
           }
-          sentCount++;
+
+          if (resData && resData.ok) {
+            sentCount++;
+          } else {
+            failedCount++;
+            const desc = resData?.description || 'Telegram delivery failed';
+            failedDetails.push({
+              user_id: targetId,
+              reason: desc
+            });
+          }
         } catch (e) {
           failedCount++;
+          failedDetails.push({
+            user_id: targetId,
+            reason: e.message || 'Network exception'
+          });
         }
       }
 
       return jsonResponse({
         success: true,
+        total_targeted: userIds.length,
         total_users: userIds.length,
         sent_count: sentCount,
         failed_count: failedCount,
+        failed_details: failedDetails,
         sent: sentCount,
         failed: failedCount
       });
@@ -1109,9 +1178,22 @@ export function createRouter() {
         return errorResponse('Post not found', 404);
       }
 
-      const userIds = await getAllUserIds(env);
+      let userIds = [];
+      if (Array.isArray(body.target_user_ids) && body.target_user_ids.length > 0) {
+        userIds = body.target_user_ids.map(Number).filter(id => !isNaN(id) && id > 0);
+      } else {
+        userIds = await getAllUserIds(env);
+      }
+
       if (!userIds || userIds.length === 0) {
-        return jsonResponse({ success: true, sent_count: 0, failed_count: 0, total_users: 0 });
+        return jsonResponse({
+          success: true,
+          sent_count: 0,
+          failed_count: 0,
+          total_targeted: 0,
+          total_users: 0,
+          failed_details: []
+        });
       }
 
       const folders = await getPostFoldersWithFiles(env, id);
@@ -1155,11 +1237,14 @@ export function createRouter() {
 
       let sentCount = 0;
       let failedCount = 0;
+      const failedDetails = [];
       const ephemeralRecords = [];
 
       for (const targetId of userIds) {
         try {
           let sentMid = null;
+          let sendError = null;
+
           if (post.preview_image && post.preview_image.startsWith('http')) {
             const sendPhotoUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendPhoto`;
             const pRes = await fetch(sendPhotoUrl, {
@@ -1179,6 +1264,7 @@ export function createRouter() {
               sentMid = pData.result.message_id;
               sentCount++;
             } else {
+              sendError = pData.description || 'Photo delivery failed';
               const sendMsgUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`;
               const tRes = await fetch(sendMsgUrl, {
                 method: 'POST',
@@ -1195,8 +1281,9 @@ export function createRouter() {
               if (tData.ok && tData.result) {
                 sentMid = tData.result.message_id;
                 sentCount++;
+                sendError = null;
               } else {
-                failedCount++;
+                sendError = tData.description || sendError;
               }
             }
           } else {
@@ -1217,49 +1304,61 @@ export function createRouter() {
               sentMid = tData.result.message_id;
               sentCount++;
             } else {
-              failedCount++;
+              sendError = tData.description || 'Message delivery failed';
             }
           }
 
-          if (sentMid && autoDeleteMinutes > 0) {
-            const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
-            const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
-              `This message and all files/links above will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
-              (protectContent
-                ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
-                : `👉 *Please forward or save to your Saved Messages now before they disappear.*`);
+          if (sentMid) {
+            if (autoDeleteMinutes > 0) {
+              const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
+              const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
+                `This message and all files/links above will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
+                (protectContent
+                  ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
+                  : `👉 *Please forward or save to your Saved Messages now before they disappear.*`);
 
-            const nRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: targetId,
-                text: noticeText,
-                parse_mode: 'Markdown',
-                protect_content: protectContent
-              })
-            });
-            const nData = await nRes.json();
-            const noticeMid = (nData.ok && nData.result) ? nData.result.message_id : null;
+              const nRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: targetId,
+                  text: noticeText,
+                  parse_mode: 'Markdown',
+                  protect_content: protectContent
+                })
+              });
+              const nData = await nRes.json();
+              const noticeMid = (nData.ok && nData.result) ? nData.result.message_id : null;
 
-            const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
-            ephemeralRecords.push({
-              chat_id: targetId,
-              message_id: sentMid,
-              delete_at: deleteAt,
-              is_deleted: false
-            });
-            if (noticeMid) {
+              const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
               ephemeralRecords.push({
                 chat_id: targetId,
-                message_id: noticeMid,
+                message_id: sentMid,
                 delete_at: deleteAt,
                 is_deleted: false
               });
+              if (noticeMid) {
+                ephemeralRecords.push({
+                  chat_id: targetId,
+                  message_id: noticeMid,
+                  delete_at: deleteAt,
+                  is_deleted: false
+                });
+              }
             }
+          } else {
+            failedCount++;
+            failedDetails.push({
+              user_id: targetId,
+              reason: sendError || 'Delivery failed'
+            });
           }
         } catch (uErr) {
           failedCount++;
+          failedDetails.push({
+            user_id: targetId,
+            reason: uErr.message || 'Network exception'
+          });
         }
       }
 
@@ -1271,7 +1370,9 @@ export function createRouter() {
         success: true,
         sent_count: sentCount,
         failed_count: failedCount,
-        total_users: userIds.length
+        total_targeted: userIds.length,
+        total_users: userIds.length,
+        failed_details: failedDetails
       });
     } catch (err) {
       console.error('API broadcast post error:', err);
