@@ -3,6 +3,9 @@ import {
   getPublishedPosts,
   getAllPostsForAdmin,
   getPostById,
+  createPost,
+  getPostFoldersWithFiles,
+  addEphemeralMessages,
   addComment,
   moderateComment,
   toggleLike,
@@ -1032,6 +1035,251 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
+  // POST /api/admin/posts - Create Post (Admin Only)
+  // -------------------------------------------------------------
+  router.post('/api/admin/posts', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const body = await request.json().catch(() => ({}));
+      const actualUserId = queryUserId || body.user_id || body.admin_id;
+
+      if (!actualUserId || !(await isAdminUser(env, actualUserId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const {
+        title,
+        preview_image,
+        direct_link,
+        direct_link_title,
+        category,
+        tags,
+        status = 'published',
+        scheduled_at,
+        is_promoted = false,
+        auto_delete_minutes,
+        protect_content = false
+      } = body;
+
+      if (!title || !title.trim()) {
+        return errorResponse('Post title is required', 400);
+      }
+
+      const postPayload = {
+        title: title.trim(),
+        preview_image: preview_image ? preview_image.trim() : null,
+        direct_link: direct_link ? direct_link.trim() : null,
+        direct_link_title: direct_link_title ? direct_link_title.trim() : null,
+        category: category || 'All',
+        tags: tags || '',
+        status: status || 'published',
+        scheduled_at: scheduled_at ? scheduled_at : null,
+        is_promoted: Boolean(is_promoted),
+        protect_content: Boolean(protect_content),
+        auto_delete_minutes: (auto_delete_minutes !== undefined && auto_delete_minutes !== null && auto_delete_minutes !== '' && !isNaN(auto_delete_minutes)) ? Number(auto_delete_minutes) : null,
+        created_by: Number(actualUserId)
+      };
+
+      const created = await createPost(env, postPayload);
+      return jsonResponse({ success: true, post: created }, 201);
+    } catch (err) {
+      console.error('API create post error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/admin/posts/:id/broadcast - Broadcast Specific Post to All Users
+  // -------------------------------------------------------------
+  router.post('/api/admin/posts/:id/broadcast', async (request, env) => {
+    try {
+      const { id } = request.params;
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const body = await request.json().catch(() => ({}));
+      const actualUserId = queryUserId || body.user_id || body.admin_id;
+
+      if (!actualUserId || !(await isAdminUser(env, actualUserId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const post = await getPostById(env, id, actualUserId, true);
+      if (!post) {
+        return errorResponse('Post not found', 404);
+      }
+
+      const userIds = await getAllUserIds(env);
+      if (!userIds || userIds.length === 0) {
+        return jsonResponse({ success: true, sent_count: 0, failed_count: 0, total_users: 0 });
+      }
+
+      const folders = await getPostFoldersWithFiles(env, id);
+      const settings = await getSettings(env);
+      const globalTimer = (settings.auto_delete_minutes !== undefined && settings.auto_delete_minutes !== null && !isNaN(settings.auto_delete_minutes)) ? Number(settings.auto_delete_minutes) : 30;
+      let autoDeleteMinutes = globalTimer;
+      if (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined && post.auto_delete_minutes !== '') {
+        const parsed = Number(post.auto_delete_minutes);
+        if (!isNaN(parsed)) autoDeleteMinutes = parsed;
+      }
+      const protectContent = Boolean(settings.protect_all_posts || post.protect_content);
+
+      // Construct Buttons
+      const inlineButtons = [];
+      if (post.direct_link) {
+        const linkLabel = post.direct_link_title || 'Open / Download Link';
+        inlineButtons.push([{ text: `📥 ${linkLabel}`, url: post.direct_link }]);
+      }
+      if (folders && folders.length > 0) {
+        for (const folder of folders) {
+          for (const file of folder.files || []) {
+            const isLink = file.mime_type === 'link' || file.file_id?.startsWith('http://') || file.file_id?.startsWith('https://');
+            if (isLink) {
+              const linkBtnTitle = file.file_name || `${folder.name} Link`;
+              inlineButtons.push([{ text: `🔗 ${linkBtnTitle}`, url: file.file_id }]);
+            }
+          }
+        }
+      }
+      const replyMarkup = inlineButtons.length > 0 ? { inline_keyboard: inlineButtons } : undefined;
+
+      // Caption
+      const escapeMd = (t) => t ? String(t).replace(/([_*\[\]()~`>#+\-=|{}.!\\])/g, '\\$1') : '';
+      let captionText = `📌 *${escapeMd(post.title)}*\n`;
+      if (post.category && post.category !== 'All') {
+        captionText += `📁 *Category:* \`${escapeMd(post.category)}\`\n`;
+      }
+      if (post.tags) {
+        captionText += `🏷️ *Tags:* \`${escapeMd(post.tags)}\`\n`;
+      }
+
+      let sentCount = 0;
+      let failedCount = 0;
+      const ephemeralRecords = [];
+
+      for (const targetId of userIds) {
+        try {
+          let sentMid = null;
+          if (post.preview_image && post.preview_image.startsWith('http')) {
+            const sendPhotoUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendPhoto`;
+            const pRes = await fetch(sendPhotoUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: targetId,
+                photo: post.preview_image,
+                caption: captionText,
+                parse_mode: 'Markdown',
+                protect_content: protectContent,
+                reply_markup: replyMarkup
+              })
+            });
+            const pData = await pRes.json();
+            if (pData.ok && pData.result) {
+              sentMid = pData.result.message_id;
+              sentCount++;
+            } else {
+              const sendMsgUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`;
+              const tRes = await fetch(sendMsgUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: targetId,
+                  text: captionText,
+                  parse_mode: 'Markdown',
+                  protect_content: protectContent,
+                  reply_markup: replyMarkup
+                })
+              });
+              const tData = await tRes.json();
+              if (tData.ok && tData.result) {
+                sentMid = tData.result.message_id;
+                sentCount++;
+              } else {
+                failedCount++;
+              }
+            }
+          } else {
+            const sendMsgUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`;
+            const tRes = await fetch(sendMsgUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: targetId,
+                text: captionText,
+                parse_mode: 'Markdown',
+                protect_content: protectContent,
+                reply_markup: replyMarkup
+              })
+            });
+            const tData = await tRes.json();
+            if (tData.ok && tData.result) {
+              sentMid = tData.result.message_id;
+              sentCount++;
+            } else {
+              failedCount++;
+            }
+          }
+
+          if (sentMid && autoDeleteMinutes > 0) {
+            const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
+            const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
+              `This message and all files/links above will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
+              (protectContent
+                ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
+                : `👉 *Please forward or save to your Saved Messages now before they disappear.*`);
+
+            const nRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: targetId,
+                text: noticeText,
+                parse_mode: 'Markdown',
+                protect_content: protectContent
+              })
+            });
+            const nData = await nRes.json();
+            const noticeMid = (nData.ok && nData.result) ? nData.result.message_id : null;
+
+            const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
+            ephemeralRecords.push({
+              chat_id: targetId,
+              message_id: sentMid,
+              delete_at: deleteAt,
+              is_deleted: false
+            });
+            if (noticeMid) {
+              ephemeralRecords.push({
+                chat_id: targetId,
+                message_id: noticeMid,
+                delete_at: deleteAt,
+                is_deleted: false
+              });
+            }
+          }
+        } catch (uErr) {
+          failedCount++;
+        }
+      }
+
+      if (ephemeralRecords.length > 0) {
+        await addEphemeralMessages(env, ephemeralRecords);
+      }
+
+      return jsonResponse({
+        success: true,
+        sent_count: sentCount,
+        failed_count: failedCount,
+        total_users: userIds.length
+      });
+    } catch (err) {
+      console.error('API broadcast post error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
   // Post Edit (Admin Only) - Supports POST /edit, PATCH, PUT, POST
   // -------------------------------------------------------------
   const handleEditPost = async (request, env) => {
@@ -1137,42 +1385,53 @@ export function createRouter() {
   // -------------------------------------------------------------
   // POST /api/comments/moderate - Hide/Unhide or Delete Comment (Admin Only)
   // -------------------------------------------------------------
-  router.post('/api/comments/moderate', async (request, env) => {
+  const handleModerateComment = async (request, env) => {
     try {
-      const body = await request.json();
-      const { comment_id, user_id, action } = body || {};
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const body = await request.json().catch(() => ({}));
+      const commentId = request.params?.id || body.comment_id;
+      const actualUserId = queryUserId || body.user_id || body.admin_id;
+      const action = request.method === 'DELETE' ? 'delete' : (body.action || 'hide');
 
-      if (!user_id || !(await isAdminUser(env, user_id))) {
+      if (!actualUserId || !(await isAdminUser(env, actualUserId))) {
         return errorResponse('Unauthorized admin action', 403);
       }
 
-      if (!comment_id || !action) {
-        return errorResponse('Missing comment_id or action');
+      if (!commentId) {
+        return errorResponse('Missing comment_id', 400);
       }
 
-      const result = await moderateComment(env, { comment_id, action });
+      const result = await moderateComment(env, { comment_id: commentId, action });
       return jsonResponse({ success: true, result });
     } catch (err) {
-      console.error('API /api/comments/moderate error:', err);
+      console.error('API comment moderate error:', err);
       return errorResponse(err.message, 500);
     }
-  });
+  };
+
+  router.post('/api/comments/moderate', handleModerateComment);
+  router.post('/api/admin/comments/:id/moderate', handleModerateComment);
+  router.delete('/api/admin/comments/:id', handleModerateComment);
 
   // -------------------------------------------------------------
-  // POST /api/likes - Toggle Like
+  // POST /api/likes & POST /api/posts/:id/like - Toggle Like
   // -------------------------------------------------------------
-  router.post('/api/likes', async (request, env) => {
+  const handleToggleLike = async (request, env) => {
     try {
-      const body = await request.json();
-      const { post_id, user_id } = body || {};
+      const body = await request.json().catch(() => ({}));
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const postId = request.params?.id || body.post_id;
+      const userId = queryUserId || body.user_id;
 
-      if (!post_id || !user_id) {
-        return errorResponse('Missing required fields: post_id and user_id are required.');
+      if (!postId || !userId) {
+        return errorResponse('Missing required fields: post_id and user_id are required.', 400);
       }
 
       const result = await toggleLike(env, {
-        post_id: Number(post_id),
-        user_id: Number(user_id)
+        post_id: Number(postId),
+        user_id: Number(userId)
       });
 
       return jsonResponse({
@@ -1181,10 +1440,13 @@ export function createRouter() {
         like_count: result.like_count
       });
     } catch (err) {
-      console.error('API /api/likes error:', err);
+      console.error('API like toggle error:', err);
       return errorResponse(err.message, 500);
     }
-  });
+  };
+
+  router.post('/api/posts/:id/like', handleToggleLike);
+  router.post('/api/likes', handleToggleLike);
 
   // -------------------------------------------------------------
   // Telegram Bot Webhook

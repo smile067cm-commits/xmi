@@ -1004,6 +1004,9 @@ export function createBot(env) {
           )
         ],
         [
+          Markup.button.callback('📢 Broadcast Post to Users', `admin_bc_post_ask_${post.id}`)
+        ],
+        [
           Markup.button.callback('🗑️ Delete Post', `admin_post_del_ask_${post.id}`)
         ],
         [
@@ -1077,6 +1080,9 @@ export function createBot(env) {
             updated.is_promoted ? '⭐ Unfeature' : '⭐ Promote/Pin',
             `admin_post_promote_${updated.id}`
           )
+        ],
+        [
+          Markup.button.callback('📢 Broadcast Post to Users', `admin_bc_post_ask_${updated.id}`)
         ],
         [
           Markup.button.callback('🗑️ Delete Post', `admin_post_del_ask_${updated.id}`)
@@ -1328,6 +1334,167 @@ export function createBot(env) {
       return await handleAdminPosts(ctx);
     } catch (err) {
       await ctx.answerCbQuery('Failed to delete');
+    }
+  });
+
+  // Broadcast Post to all users Ask
+  bot.action(/^admin_bc_post_ask_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const postId = ctx.match[1];
+    try {
+      const post = await getPostById(env, postId, userId, true);
+      await ctx.answerCbQuery();
+
+      const userIds = await getAllRegisteredUserIds(env);
+      const keyboard = Markup.inlineKeyboard([
+        [Markup.button.callback('📢 Yes, Broadcast to All Users', `admin_bc_post_confirm_${postId}`)],
+        [Markup.button.callback('❌ Cancel', `admin_post_view_${postId}`)]
+      ]);
+
+      return await ctx.reply(
+        `📢 *Broadcast Post Confirmation*\n\n` +
+        `• *Post:* *"${escapeMarkdown(post?.title || 'Post #' + postId)}"*\n` +
+        `• *Target Audience:* ${userIds.length} registered users\n` +
+        `• *Protection:* ${post?.protect_content ? '🔒 Enabled' : '🔓 Disabled'}\n\n` +
+        `Are you sure you want to broadcast this post to all users now?`,
+        {
+          parse_mode: 'Markdown',
+          ...keyboard
+        }
+      );
+    } catch (e) {
+      await ctx.answerCbQuery('Error');
+    }
+  });
+
+  // Broadcast Post Confirmed
+  bot.action(/^admin_bc_post_confirm_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const postId = ctx.match[1];
+    try {
+      const post = await getPostById(env, postId, userId, true);
+      if (!post) {
+        return await ctx.reply('⚠️ Post not found.');
+      }
+      await ctx.answerCbQuery('Starting broadcast...');
+      const userIds = await getAllRegisteredUserIds(env);
+      await ctx.reply(`📡 Broadcasting post *"${escapeMarkdown(post.title)}"* to ${userIds.length} users in background...`, { parse_mode: 'Markdown' });
+
+      const settings = await getSettings(env);
+      const hubTimer = parseInt(settings.auto_delete_minutes || 0, 10);
+      const autoDeleteMinutes = (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined)
+        ? parseInt(post.auto_delete_minutes, 10)
+        : hubTimer;
+      const protectContent = !!(post.protect_content ?? (settings.protect_content === 'true' || settings.protect_content === true));
+
+      const miniAppUrl = env.APP_URL || 'https://telegram.org';
+      const webAppUrl = `${miniAppUrl.replace(/\/$/, '')}?post_id=${post.id}`;
+      const inlineButtons = [];
+      if (post.direct_link) {
+        inlineButtons.push([Markup.button.url(post.link_name || '🔗 Access Link', post.direct_link)]);
+      }
+      inlineButtons.push([Markup.button.webApp('🚀 Open in App', webAppUrl)]);
+
+      const captionText = `📌 *${escapeMarkdown(post.title)}*\n\n` +
+        (post.category ? `🏷️ *Category:* ${escapeMarkdown(post.category)}\n` : '') +
+        (post.tags ? `🔖 *Tags:* ${escapeMarkdown(post.tags)}\n\n` : '\n') +
+        `👇 Tap below to view details and access files!`;
+
+      let sentCount = 0;
+      let failedCount = 0;
+      const ephemeralRecords = [];
+
+      for (const targetId of userIds) {
+        try {
+          let sentMid = null;
+          if (post.preview_image_url) {
+            try {
+              const res = await ctx.telegram.sendPhoto(targetId, post.preview_image_url, {
+                caption: captionText,
+                parse_mode: 'Markdown',
+                protect_content: protectContent,
+                ...Markup.inlineKeyboard(inlineButtons)
+              });
+              sentMid = res.message_id;
+              sentCount++;
+            } catch {
+              const res = await ctx.telegram.sendMessage(targetId, captionText, {
+                parse_mode: 'Markdown',
+                protect_content: protectContent,
+                ...Markup.inlineKeyboard(inlineButtons)
+              });
+              sentMid = res.message_id;
+              sentCount++;
+            }
+          } else {
+            const res = await ctx.telegram.sendMessage(targetId, captionText, {
+              parse_mode: 'Markdown',
+              protect_content: protectContent,
+              ...Markup.inlineKeyboard(inlineButtons)
+            });
+            sentMid = res.message_id;
+            sentCount++;
+          }
+
+          if (sentMid && autoDeleteMinutes > 0) {
+            const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
+            const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
+              `This post message will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
+              (protectContent
+                ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
+                : `👉 *Please forward or save to your Saved Messages now before it disappears.*`);
+
+            let noticeMid = null;
+            try {
+              const nRes = await ctx.telegram.sendMessage(targetId, noticeText, {
+                parse_mode: 'Markdown',
+                protect_content: protectContent
+              });
+              noticeMid = nRes.message_id;
+            } catch {}
+
+            const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
+            ephemeralRecords.push({
+              chat_id: targetId,
+              message_id: sentMid,
+              delete_at: deleteAt,
+              is_deleted: false
+            });
+            if (noticeMid) {
+              ephemeralRecords.push({
+                chat_id: targetId,
+                message_id: noticeMid,
+                delete_at: deleteAt,
+                is_deleted: false
+              });
+            }
+          }
+        } catch {
+          failedCount++;
+        }
+      }
+
+      if (ephemeralRecords.length > 0) {
+        await addEphemeralMessages(env, ephemeralRecords);
+      }
+
+      return await ctx.reply(
+        `✅ *Post Broadcast Complete!*\n\n` +
+        `• Sent successfully to: *${sentCount}* users\n` +
+        `• Failed: *${failedCount}* users\n` +
+        `• Total: *${userIds.length}* users`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Return to Post', `admin_post_view_${postId}`)]])
+        }
+      );
+    } catch (err) {
+      console.error('Error broadcasting post:', err);
+      await ctx.reply('⚠️ Failed to broadcast post: ' + err.message);
     }
   });
 
