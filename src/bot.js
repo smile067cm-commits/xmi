@@ -231,7 +231,7 @@ async function sendPostToUser(ctx, env, post, postId) {
             ctx.chat.id,
             env.CHANNEL_ID,
             Number(file.channel_message_id),
-            { protect_content: protectContent }
+            { protect_content: protectContent, caption: '' }
           );
           if (copied?.message_id) sentMessageIds.push(copied.message_id);
         } else if (file.file_id) {
@@ -2034,12 +2034,25 @@ export function createBot(env) {
     if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
+    const post = await getPostById(env, postId, userId, true);
+
     await setSession(env, userId, {
       step: 'EDIT_LINK',
       editPostId: postId
     });
 
     await ctx.answerCbQuery();
+
+    // Send current link info to admin
+    if (post?.direct_link) {
+      await ctx.reply(
+        `🔗 *Current Link:*\n${post.direct_link}\n• *Label:* ${post.direct_link_title || 'Open / Download Link'}`,
+        { disable_web_page_preview: true }
+      );
+    } else {
+      await ctx.reply('ℹ️ This post does not currently have a direct link set.');
+    }
+
     return await ctx.reply(
       '🔗 *Edit Direct Link:*\nPlease send the new link URL and optional button label:\n• `https://mega.nz/... HD Pack`',
       {
@@ -2083,6 +2096,44 @@ export function createBot(env) {
     });
 
     await ctx.answerCbQuery();
+
+    // Deliver all current files & links of this post to the admin
+    let sentCount = 0;
+    if (post?.folders && post.folders.length > 0) {
+      await ctx.reply(`📁 *Sending current files for Post #${postId}...*`, { parse_mode: 'Markdown' });
+      for (const fld of post.folders) {
+        if (fld.files && fld.files.length > 0) {
+          for (const file of fld.files) {
+            try {
+              if (file.mime_type === 'link') {
+                await ctx.reply(`🔗 *[${escapeMarkdown(fld.name)}]* [${escapeMarkdown(file.file_name)}](${file.file_id})`, {
+                  parse_mode: 'Markdown',
+                  disable_web_page_preview: true
+                });
+                sentCount++;
+              } else if (file.channel_message_id && env.CHANNEL_ID) {
+                await ctx.telegram.copyMessage(ctx.chat.id, env.CHANNEL_ID, Number(file.channel_message_id), {
+                  caption: `📁 Folder: ${fld.name} | File: ${file.file_name}`
+                });
+                sentCount++;
+              } else if (file.file_id) {
+                await ctx.telegram.sendDocument(ctx.chat.id, file.file_id, {
+                  caption: `📁 Folder: ${fld.name} | File: ${file.file_name}`
+                });
+                sentCount++;
+              }
+            } catch (deliverErr) {
+              console.warn(`Failed to send current file ${file.id} to admin:`, deliverErr.message);
+            }
+          }
+        }
+      }
+    }
+
+    if (sentCount === 0 && (!post?.folders || post.folders.length === 0)) {
+      await ctx.reply('ℹ️ This post currently has no files or folders attached.');
+    }
+
     return await sendStep3Prompt(ctx, { currentFiles: [], foldersCount: post?.folders?.length || 0, title: post?.title });
   });
 
@@ -2405,6 +2456,7 @@ export function createBot(env) {
     if (bufferCount > 0) {
       buttons.push([Markup.button.callback('📁 Save Buffer into Folder', 'step_prompt_folder_name')]);
     }
+    buttons.push([Markup.button.callback(session.direct_link ? '🔗 Change Direct Link' : '🔗 Add Direct Link', 'mode_direct_link')]);
     buttons.push([
       Markup.button.callback('✅ Done & Review Post', 'step_finish_folders'),
       Markup.button.callback('❌ Cancel', 'step_cancel')
@@ -2472,6 +2524,8 @@ export function createBot(env) {
 
     const keyboard = Markup.inlineKeyboard([
       [Markup.button.callback('🚀 Publish Now', 'action_publish')],
+      [Markup.button.callback(session.direct_link ? '🔗 Edit Direct Link' : '🔗 Add Direct Link', 'mode_direct_link')],
+      [Markup.button.callback('📂 Upload More Files/Folders', 'mode_folders')],
       [Markup.button.callback('📅 Schedule', 'action_schedule')],
       [Markup.button.callback('📝 Save as Draft', 'action_draft')]
     ]);
@@ -2955,6 +3009,7 @@ export function createBot(env) {
 
       const keyboard = Markup.inlineKeyboard([
         [Markup.button.callback('🚀 Publish Now', 'action_publish')],
+        [Markup.button.callback('📂 Also Add Files / Folders', 'mode_folders')],
         [Markup.button.callback('📅 Schedule', 'action_schedule')],
         [Markup.button.callback('📝 Save as Draft', 'action_draft')],
         [Markup.button.callback('❌ Cancel', 'step_cancel')]
@@ -3034,7 +3089,9 @@ export function createBot(env) {
               return await ctx.reply('⚠️ CHANNEL_ID is not configured in Worker environment.');
             }
 
-            const copied = await ctx.telegram.copyMessage(env.CHANNEL_ID, ctx.chat.id, msg.message_id);
+            const copied = await ctx.telegram.copyMessage(env.CHANNEL_ID, ctx.chat.id, msg.message_id, {
+              caption: ''
+            });
             itemMeta.channel_message_id = copied.message_id;
           } catch (copyErr) {
             console.error('Error forwarding file to storage channel:', copyErr);
