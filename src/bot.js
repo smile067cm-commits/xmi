@@ -13,6 +13,8 @@ import {
   togglePromotePost,
   createFolder,
   createFiles,
+  deleteFile,
+  deleteFolder,
   getGlobalStats,
   getSettings,
   updateSetting,
@@ -485,9 +487,10 @@ export function createBot(env) {
       }
     }
 
-    // 3. Post Deep Link: post_<post_id>
-    if (payload.startsWith('post_')) {
-      const postId = payload.replace('post_', '').trim();
+    // 3. Post Deep Link: post_<post_id> or post<post_id>
+    const postMatch = payload.match(/^post_?(\d+)$/);
+    if (postMatch) {
+      const postId = postMatch[1];
       
       try {
         const isAdmin = await isAdminUser(env, ctx.from?.id);
@@ -1117,6 +1120,9 @@ export function createBot(env) {
           Markup.button.callback('📁 Add Files/Folders', `admin_edit_files_${post.id}`)
         ],
         [
+          Markup.button.callback('🗑️ Manage & Remove Files', `admin_manage_files_${post.id}`)
+        ],
+        [
           Markup.button.callback(protectLabel, `admin_post_protect_${post.id}`),
           Markup.button.callback(`⏳ Timer: ${timerLabel}`, `admin_edit_timer_${post.id}`)
         ],
@@ -1193,6 +1199,9 @@ export function createBot(env) {
         [
           Markup.button.callback('🔗 Edit Link', `admin_edit_link_${updated.id}`),
           Markup.button.callback('📁 Add Files/Folders', `admin_edit_files_${updated.id}`)
+        ],
+        [
+          Markup.button.callback('🗑️ Manage & Remove Files', `admin_manage_files_${updated.id}`)
         ],
         [
           Markup.button.callback(protectLabel, `admin_post_protect_${updated.id}`),
@@ -1996,12 +2005,28 @@ export function createBot(env) {
     if (!(await isAdminUser(env, userId))) return;
 
     const postId = ctx.match[1];
+    const post = await getPostById(env, postId, userId, true);
+
     await setSession(env, userId, {
       step: 'EDIT_IMAGE',
       editPostId: postId
     });
 
     await ctx.answerCbQuery();
+
+    if (post?.preview_image) {
+      try {
+        await ctx.replyWithPhoto(post.preview_image, {
+          caption: `🖼️ *Current Preview Image:*\n${post.preview_image}`,
+          parse_mode: 'Markdown'
+        });
+      } catch (imgErr) {
+        await ctx.reply(`🖼️ *Current Preview Image:*\n${post.preview_image}`);
+      }
+    } else {
+      await ctx.reply('ℹ️ This post does not currently have a preview image.');
+    }
+
     return await ctx.reply(
       '🖼️ *Edit Preview Image:*\nPlease send a new image URL, upload a photo, or tap Remove Image:',
       {
@@ -2135,6 +2160,109 @@ export function createBot(env) {
     }
 
     return await sendStep3Prompt(ctx, { currentFiles: [], foldersCount: post?.folders?.length || 0, title: post?.title });
+  });
+
+  // Handler: Manage & Remove Files/Folders from Post
+  const handleManageFiles = async (ctx, postId) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const post = await getPostById(env, postId, userId, true);
+    if (!post) {
+      return await ctx.reply('⚠️ Post not found.');
+    }
+
+    let text = `🗂️ *Manage & Remove Attached Files*\n\n` +
+      `• *Post:* ${escapeMarkdown(post.title)}\n` +
+      `• *ID:* \`#${post.id}\`\n\n`;
+
+    const buttons = [];
+    let fileCount = 0;
+
+    if (post.folders && post.folders.length > 0) {
+      for (const fld of post.folders) {
+        text += `📁 *Folder:* \`${escapeMarkdown(fld.name)}\`\n`;
+        if (fld.files && fld.files.length > 0) {
+          for (const f of fld.files) {
+            fileCount++;
+            const icon = f.mime_type === 'link' ? '🔗' : '📄';
+            const fName = (f.file_name || 'File').length > 25 ? (f.file_name || 'File').substring(0, 22) + '...' : (f.file_name || 'File');
+            text += `  └ ${icon} ${escapeMarkdown(f.file_name || 'File')}\n`;
+            buttons.push([
+              Markup.button.callback(`🗑️ Delete: ${fName}`, `admin_delfile_${f.id}_${postId}`)
+            ]);
+          }
+        } else {
+          text += `  └ _(No files in this folder)_\n`;
+        }
+        buttons.push([
+          Markup.button.callback(`🗑️ Delete Whole Folder: ${fld.name}`, `admin_delfolder_${fld.id}_${postId}`)
+        ]);
+        text += `\n`;
+      }
+    }
+
+    if (fileCount === 0 && (!post.folders || post.folders.length === 0)) {
+      text += `_No files or folders are currently attached to this post._\n`;
+    }
+
+    buttons.push([
+      Markup.button.callback('➕ Add More Files/Folders', `admin_edit_files_${postId}`)
+    ]);
+    buttons.push([
+      Markup.button.callback('🔙 Return to Post', `admin_post_view_${postId}`)
+    ]);
+
+    if (ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
+      } catch (e) {
+        return await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
+      }
+    } else {
+      return await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
+    }
+  };
+
+  bot.action(/^admin_manage_files_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    return await handleManageFiles(ctx, ctx.match[1]);
+  });
+
+  bot.action(/^admin_delfile_(\d+)_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const fileId = ctx.match[1];
+    const postId = ctx.match[2];
+
+    try {
+      await deleteFile(env, fileId);
+      await ctx.answerCbQuery('✅ File removed successfully');
+    } catch (err) {
+      console.error('Error deleting file:', err);
+      await ctx.answerCbQuery('❌ Failed to delete file');
+    }
+
+    return await handleManageFiles(ctx, postId);
+  });
+
+  bot.action(/^admin_delfolder_(\d+)_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const folderId = ctx.match[1];
+    const postId = ctx.match[2];
+
+    try {
+      await deleteFolder(env, folderId);
+      await ctx.answerCbQuery('✅ Folder removed successfully');
+    } catch (err) {
+      console.error('Error deleting folder:', err);
+      await ctx.answerCbQuery('❌ Failed to delete folder');
+    }
+
+    return await handleManageFiles(ctx, postId);
   });
 
   // -------------------------------------------------------------
@@ -2637,8 +2765,9 @@ export function createBot(env) {
       await clearSession(env, userId);
       await ctx.answerCbQuery('Published!');
 
-      const botInfo = await ctx.telegram.getMe();
-      const deepLink = `https://t.me/${botInfo.username}?start=post_${postId}`;
+      const botInfo = await ctx.telegram.getMe().catch(() => ({ username: 'Xminty_bot' }));
+      const botUsername = env.BOT_USERNAME || botInfo?.username || 'Xminty_bot';
+      const deepLink = `https://t.me/${botUsername}?start=post_${postId}`;
 
       return await ctx.reply(
         `🚀 *Post Published Successfully!*\n\n` +

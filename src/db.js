@@ -460,6 +460,33 @@ export async function createFiles(env, filesArray) {
   return await res.json();
 }
 
+export async function deleteFile(env, fileId) {
+  const url = `${getSupabaseBaseUrl(env)}/files?id=eq.${fileId}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: getSupabaseHeaders(env)
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to delete file (${res.status}): ${await res.text()}`);
+  }
+  return true;
+}
+
+export async function deleteFolder(env, folderId) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+  await fetch(`${baseUrl}/files?folder_id=eq.${folderId}`, { method: 'DELETE', headers }).catch(() => {});
+  const url = `${baseUrl}/folders?id=eq.${folderId}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: headers
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to delete folder (${res.status}): ${await res.text()}`);
+  }
+  return true;
+}
+
 // ------------------------------------------
 // 3. ANALYTICS & ACTIVITY LOGGING
 // ------------------------------------------
