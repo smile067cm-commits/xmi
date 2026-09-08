@@ -1066,6 +1066,7 @@ const rawHtml = `<!DOCTYPE html>
       <!-- Admin Hub Navigation Sub-Tabs -->
       <div class="admin-subtabs-bar" id="adminSubtabs">
         <button class="admin-subtab active" data-atab="posts">📑 Manage Posts</button>
+        <button class="admin-subtab" data-atab="users">👥 Users Directory</button>
         <button class="admin-subtab" data-atab="shorteners">🔗 Multiple Shorteners</button>
         <button class="admin-subtab" data-atab="settings">⚙️ Points & Rules</button>
         <button class="admin-subtab" data-atab="channels">🛡️ Force Channels</button>
@@ -1081,6 +1082,41 @@ const rawHtml = `<!DOCTYPE html>
           <a href="https://t.me/__BOT_USERNAME__" class="btn btn-sm btn-primary">➕ Create Post in Bot</a>
         </div>
         <div class="posts-grid" id="adminPostsGrid"></div>
+      </div>
+
+      <!-- Admin Tab: Registered Users Directory -->
+      <div id="adminTabUsers" style="display: none;">
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 14px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
+            <h3 style="font-size: 0.95rem; font-weight: 700;">👥 Registered Users Directory</h3>
+            <button type="button" class="btn btn-sm btn-secondary" id="btnRefreshAdminUsers">🔄 Refresh Users</button>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; text-align: center;">
+            <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
+              <div style="font-size: 1.15rem; font-weight: 800; color: #38bdf8;" id="cntUsersTotal">0</div>
+              <div style="font-size: 0.68rem; color: var(--text-muted);">Total Users</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
+              <div style="font-size: 1.15rem; font-weight: 800; color: #4ade80;" id="cntUsersActive">0</div>
+              <div style="font-size: 0.68rem; color: var(--text-muted);">🟢 Active</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
+              <div style="font-size: 1.15rem; font-weight: 800; color: #f87171;" id="cntUsersBlocked">0</div>
+              <div style="font-size: 0.68rem; color: var(--text-muted);">🚫 Blocked</div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <input type="text" id="adminUsersSearchInput" class="form-input" placeholder="🔍 Search name, username, or ID..." style="font-size: 0.8rem;" />
+            <select id="adminUsersFilterSelect" class="form-input" style="width: 120px; font-size: 0.78rem; background: #1e293b;">
+              <option value="all">All</option>
+              <option value="active">Active Only</option>
+              <option value="blocked">Blocked Only</option>
+            </select>
+          </div>
+          <div id="adminUsersList" style="display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto;">
+            <div style="text-align: center; color: var(--text-muted); padding: 16px;">Loading users directory...</div>
+          </div>
+        </div>
       </div>
 
       <!-- Admin Tab 2: Multiple Manual Shorteners -->
@@ -1204,6 +1240,30 @@ const rawHtml = `<!DOCTYPE html>
                 <input type="checkbox" id="setForceJoinToggle" />
                 <span class="toggle-slider"></span>
               </label>
+            </div>
+          </div>
+
+          <!-- Require Bot Start Gate -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+              <div>
+                <div style="font-weight: 700; font-size: 0.92rem;">🛑 Require Users to Start Bot in Telegram</div>
+                <div style="font-size: 0.74rem; color: var(--text-muted);">Show center lock screen for users who have not started @__BOT_USERNAME__.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setRequireBotStartToggle" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div>
+                <label style="font-size: 0.74rem; font-weight: 600; color: var(--text-muted);">Prompt Message to Display</label>
+                <textarea id="setRequireBotStartMsg" class="form-input" rows="2" placeholder="Please start our official bot to unlock full access and view content."></textarea>
+              </div>
+              <div>
+                <label style="font-size: 0.74rem; font-weight: 600; color: var(--text-muted);">Custom Button Link (Optional - defaults to official bot start)</label>
+                <input type="url" id="setRequireBotStartLink" class="form-input" placeholder="https://t.me/__BOT_USERNAME__?start=start" />
+              </div>
             </div>
           </div>
 
@@ -1435,6 +1495,20 @@ const rawHtml = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- 4. Require Bot Start Modal (Middle Alert / Lock Screen) -->
+  <div class="modal-overlay" id="requireBotStartModal" style="z-index: 99999; backdrop-filter: blur(8px); background: rgba(5, 8, 18, 0.88);">
+    <div class="modal-content" style="max-width: 420px; text-align: center; border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8);">
+      <div style="font-size: 3.2rem; margin-bottom: 8px;">🤖</div>
+      <h3 style="font-size: 1.25rem; font-weight: 800; margin-bottom: 10px; color: #38bdf8;" id="reqStartModalTitle">Telegram Bot Required</h3>
+      <p style="font-size: 0.88rem; color: #cbd5e1; line-height: 1.5; margin-bottom: 20px;" id="reqStartModalMsg">
+        Please start our official Telegram bot first to unlock access and view content.
+      </p>
+      <a href="#" target="_blank" class="btn btn-primary" id="btnReqStartAction" style="width: 100%; padding: 14px; font-size: 0.95rem; font-weight: 700; text-decoration: none; justify-content: center; box-shadow: 0 4px 20px var(--primary-glow);">
+        🚀 Open Bot & Start
+      </a>
+    </div>
+  </div>
+
   <div id="toast"></div>
 
   <!-- Client-Side JavaScript Logic -->
@@ -1547,9 +1621,33 @@ const rawHtml = `<!DOCTYPE html>
             }
             banner.style.display = 'flex';
           }
+
+          // Check Require Bot Start Gate
+          checkRequireBotStart(data.has_started_bot);
         }
       } catch (e) {
         console.warn('Failed to load settings:', e);
+      }
+    }
+
+    function checkRequireBotStart(hasStartedBot) {
+      if (isAdmin) return; // Admins bypass start requirement
+      if (!globalSettings.require_bot_start_enabled) return;
+
+      if (!hasStartedBot) {
+        const modal = document.getElementById('requireBotStartModal');
+        const msgEl = document.getElementById('reqStartModalMsg');
+        const actionBtn = document.getElementById('btnReqStartAction');
+
+        if (globalSettings.require_bot_start_message) {
+          msgEl.textContent = globalSettings.require_bot_start_message;
+        }
+
+        const startLink = globalSettings.require_bot_start_link || ('https://t.me/' + botUsername + '?start=start');
+        actionBtn.href = startLink;
+
+        // Display locked middle screen modal
+        modal.classList.add('active');
       }
     }
 
@@ -1787,6 +1885,102 @@ const rawHtml = `<!DOCTYPE html>
       }
     }
 
+    // Render Registered Users Directory in Admin Hub
+    let cachedAdminUsers = [];
+    async function loadAdminUsers() {
+      if (!isAdmin) return;
+      const list = document.getElementById('adminUsersList');
+      if (!list) return;
+      list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">⏳ Fetching registered users...</div>';
+
+      try {
+        const res = await fetch('/api/admin/users?user_id=' + currentUserId);
+        const data = await res.json();
+        if (data.success) {
+          cachedAdminUsers = data.users || [];
+          const total = cachedAdminUsers.length;
+          const blocked = cachedAdminUsers.filter(u => Boolean(u.is_blocked)).length;
+          const active = total - blocked;
+
+          const elTotal = document.getElementById('cntUsersTotal');
+          if (elTotal) elTotal.textContent = total;
+          const elActive = document.getElementById('cntUsersActive');
+          if (elActive) elActive.textContent = active;
+          const elBlocked = document.getElementById('cntUsersBlocked');
+          if (elBlocked) elBlocked.textContent = blocked;
+
+          renderAdminUsers();
+        } else {
+          list.innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Failed to load users: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
+        }
+      } catch (e) {
+        list.innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Network error loading users</div>';
+      }
+    }
+
+    function renderAdminUsers() {
+      const list = document.getElementById('adminUsersList');
+      if (!list) return;
+      const filter = document.getElementById('adminUsersFilterSelect')?.value || 'all';
+      const search = (document.getElementById('adminUsersSearchInput')?.value || '').toLowerCase().trim();
+
+      let filtered = [...cachedAdminUsers];
+      if (filter === 'active') {
+        filtered = filtered.filter(u => !u.is_blocked);
+      } else if (filter === 'blocked') {
+        filtered = filtered.filter(u => Boolean(u.is_blocked));
+      }
+
+      if (search) {
+        filtered = filtered.filter(u => {
+          const idMatch = String(u.id || '').includes(search);
+          const nameMatch = (u.first_name || '').toLowerCase().includes(search);
+          const userMatch = (u.username || '').toLowerCase().includes(search);
+          return idMatch || nameMatch || userMatch;
+        });
+      }
+
+      list.innerHTML = '';
+      if (filtered.length === 0) {
+        list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No users matching filter / search.</div>';
+        return;
+      }
+
+      filtered.forEach(u => {
+        const isBlocked = Boolean(u.is_blocked);
+        const tgLink = u.username ? ('https://t.me/' + u.username) : ('tg://user?id=' + u.id);
+        const displayName = u.first_name ? escapeHtml(u.first_name) : (u.username ? '@' + escapeHtml(u.username) : ('User #' + u.id));
+        const usernameDisplay = u.username ? ('@' + escapeHtml(u.username)) : 'No username';
+
+        const row = document.createElement('div');
+        row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid ' + (isBlocked ? 'rgba(239, 68, 68, 0.35)' : 'var(--card-border)') + '; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;';
+        row.innerHTML = '<div style="display: flex; align-items: center; gap: 10px; min-width: 180px;">' +
+          '<div style="font-size: 1.4rem;">' + (isBlocked ? '🚫' : '👤') + '</div>' +
+          '<div>' +
+            '<div style="display: flex; align-items: center; gap: 6px;">' +
+              '<strong style="font-size: 0.88rem; color: var(--text-main);">' + displayName + '</strong>' +
+              '<span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; ' + (isBlocked ? 'background: rgba(239, 68, 68, 0.2); color: #f87171;' : 'background: rgba(34, 197, 94, 0.2); color: #4ade80;') + '">' +
+                (isBlocked ? 'BLOCKED' : 'ACTIVE') +
+              '</span>' +
+            '</div>' +
+            '<div style="font-size: 0.73rem; color: var(--text-muted); margin-top: 2px;">' +
+              usernameDisplay + ' • ID: <code>' + u.id + '</code>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="display: flex; align-items: center; gap: 10px; margin-left: auto;">' +
+          '<div style="text-align: right; font-size: 0.74rem; color: var(--text-muted);">' +
+            '<div>🪙 <strong style="color: #fbbf24;">' + (u.points || 0) + '</strong> pts</div>' +
+            '<div>🔄 ' + (u.interactions || 1) + ' acts</div>' +
+          '</div>' +
+          '<a href="' + tgLink + '" target="_blank" class="btn btn-sm btn-secondary" style="padding: 6px 10px; font-size: 0.75rem; text-decoration: none;">' +
+            '💬 Open' +
+          '</a>' +
+        '</div>';
+        list.appendChild(row);
+      });
+    }
+
     // Event Handlers
     function setupEventListeners() {
       // Admin Mode Switcher
@@ -1818,6 +2012,7 @@ const rawHtml = `<!DOCTYPE html>
         const atab = btn.dataset.atab;
 
         document.getElementById('adminTabPosts').style.display = atab === 'posts' ? 'block' : 'none';
+        document.getElementById('adminTabUsers').style.display = atab === 'users' ? 'block' : 'none';
         document.getElementById('adminTabShorteners').style.display = atab === 'shorteners' ? 'block' : 'none';
         document.getElementById('adminTabSettings').style.display = atab === 'settings' ? 'block' : 'none';
         document.getElementById('adminTabChannels').style.display = atab === 'channels' ? 'block' : 'none';
@@ -1826,6 +2021,7 @@ const rawHtml = `<!DOCTYPE html>
         document.getElementById('adminTabAnalytics').style.display = atab === 'analytics' ? 'block' : 'none';
 
         if (atab === 'posts') loadAdminPosts();
+        if (atab === 'users') loadAdminUsers();
         if (atab === 'shorteners') {
           loadShorteners();
           generateNewDestLink();
@@ -1847,8 +2043,16 @@ const rawHtml = `<!DOCTYPE html>
           document.getElementById('setReferralToggle').checked = Boolean(globalSettings.referral_enabled);
           document.getElementById('setReferralPointsVal').value = globalSettings.referral_points || 10;
           document.getElementById('setForceJoinToggle').checked = Boolean(globalSettings.force_join_enabled);
+          document.getElementById('setRequireBotStartToggle').checked = Boolean(globalSettings.require_bot_start_enabled);
+          document.getElementById('setRequireBotStartMsg').value = globalSettings.require_bot_start_message || '';
+          document.getElementById('setRequireBotStartLink').value = globalSettings.require_bot_start_link || '';
         }
       });
+
+      // Admin Users Search and Filters
+      document.getElementById('adminUsersSearchInput')?.addEventListener('input', renderAdminUsers);
+      document.getElementById('adminUsersFilterSelect')?.addEventListener('change', renderAdminUsers);
+      document.getElementById('btnRefreshAdminUsers')?.addEventListener('click', loadAdminUsers);
 
       // Admin Posts Grid: Edit and Delete Actions
       document.getElementById('adminPostsGrid')?.addEventListener('click', async (e) => {
@@ -2163,7 +2367,10 @@ const rawHtml = `<!DOCTYPE html>
           auto_delete_minutes: Number(document.getElementById('setAutoDeleteMinutes').value) ?? 30,
           referral_enabled: document.getElementById('setReferralToggle').checked,
           referral_points: Number(document.getElementById('setReferralPointsVal').value) || 10,
-          force_join_enabled: document.getElementById('setForceJoinToggle').checked
+          force_join_enabled: document.getElementById('setForceJoinToggle').checked,
+          require_bot_start_enabled: document.getElementById('setRequireBotStartToggle').checked,
+          require_bot_start_message: document.getElementById('setRequireBotStartMsg').value.trim(),
+          require_bot_start_link: document.getElementById('setRequireBotStartLink').value.trim()
         };
 
         try {

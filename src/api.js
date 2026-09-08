@@ -39,7 +39,8 @@ import {
   deleteAdmin,
   getDatabaseStorageStats,
   optimizeDatabase,
-  processEphemeralDeletions
+  processEphemeralDeletions,
+  updateUserBlockedStatus
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
@@ -228,6 +229,10 @@ export function createRouter() {
         'banner_title',
         'banner_text',
         'force_join_enabled',
+        'require_bot_start_enabled',
+        'require_bot_start_message',
+        'require_bot_start_link',
+        'blocked_user_ids',
         'shorteners'
       ];
 
@@ -522,6 +527,10 @@ export function createRouter() {
           } else {
             failedCount++;
             const desc = resData?.description || 'Telegram delivery failed';
+            const isBlocked = /blocked|deactivated|user is deactivated|bot was blocked|forbidden/i.test(desc);
+            if (isBlocked) {
+              updateUserBlockedStatus(env, targetId, true).catch(() => {});
+            }
             failedDetails.push({
               user_id: targetId,
               reason: desc
@@ -529,9 +538,13 @@ export function createRouter() {
           }
         } catch (e) {
           failedCount++;
+          const reasonMsg = e.message || 'Network exception';
+          if (/blocked|deactivated|forbidden/i.test(reasonMsg)) {
+            updateUserBlockedStatus(env, targetId, true).catch(() => {});
+          }
           failedDetails.push({
             user_id: targetId,
-            reason: e.message || 'Network exception'
+            reason: reasonMsg
           });
         }
       }
@@ -1592,7 +1605,8 @@ export function createRouter() {
       const webhookUrl = `${currentUrl.origin}/webhook`;
       const appUrl = env.WEB_APP_URL || currentUrl.origin;
 
-      let apiUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${encodeURIComponent(webhookUrl)}`;
+      const allowedUpdates = JSON.stringify(['message', 'callback_query', 'my_chat_member']);
+      let apiUrl = `https://api.telegram.org/bot${env.BOT_TOKEN}/setWebhook?url=${encodeURIComponent(webhookUrl)}&allowed_updates=${encodeURIComponent(allowedUpdates)}`;
       if (env.SECRET_TOKEN) {
         apiUrl += `&secret_token=${encodeURIComponent(env.SECRET_TOKEN)}`;
       }

@@ -24,6 +24,37 @@ function getSupabaseBaseUrl(env) {
 // 1. USERS (Profiles & Activity Tracking)
 // ------------------------------------------
 
+let cachedBlockedUserIds = null;
+let lastBlockedFetch = 0;
+
+export async function getBlockedUserIds(env) {
+  const now = Date.now();
+  if (cachedBlockedUserIds && (now - lastBlockedFetch < 10000)) {
+    return cachedBlockedUserIds;
+  }
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const res = await fetch(`${baseUrl}/settings?key=eq.blocked_user_ids&select=value`, { headers });
+    if (res.ok) {
+      const rows = await res.json();
+      if (rows && rows.length > 0) {
+        let val = rows[0].value;
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch (_) {}
+        }
+        cachedBlockedUserIds = new Set(Array.isArray(val) ? val.map(String) : []);
+        lastBlockedFetch = now;
+        return cachedBlockedUserIds;
+      }
+    }
+  } catch (e) {
+    console.warn('Error fetching blocked_user_ids:', e.message);
+  }
+  if (!cachedBlockedUserIds) cachedBlockedUserIds = new Set();
+  return cachedBlockedUserIds;
+}
+
 export async function saveOrUpdateUser(env, user) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY || !user || !user.id) return null;
 
@@ -48,14 +79,60 @@ export async function saveOrUpdateUser(env, user) {
       body: JSON.stringify(body)
     });
 
+    // If user interacted with bot, ensure they are marked unblocked
+    getBlockedUserIds(env).then(async (blockedSet) => {
+      if (blockedSet.has(String(user.id))) {
+        blockedSet.delete(String(user.id));
+        cachedBlockedUserIds = blockedSet;
+        await updateSetting(env, 'blocked_user_ids', Array.from(blockedSet));
+      }
+    }).catch(() => {});
+
     if (res.ok) {
       const inserted = await res.json();
-      return inserted ? inserted[0] : null;
+      const u = inserted ? inserted[0] : null;
+      if (u) u.is_blocked = false;
+      return u;
     }
     return null;
   } catch (error) {
     console.error('Error saving user to Supabase:', error);
     return null;
+  }
+}
+
+export async function updateUserBlockedStatus(env, userId, isBlocked) {
+  if (!env.SUPABASE_URL || !userId) return false;
+  try {
+    const strId = String(userId);
+    const blockedSet = await getBlockedUserIds(env);
+
+    if (isBlocked) {
+      blockedSet.add(strId);
+    } else {
+      blockedSet.delete(strId);
+    }
+    cachedBlockedUserIds = blockedSet;
+    lastBlockedFetch = Date.now();
+
+    // Persist blocked user IDs list to settings table
+    await updateSetting(env, 'blocked_user_ids', Array.from(blockedSet));
+
+    // Update user's last_activity in users table
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    await fetch(`${baseUrl}/users?id=eq.${userId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({
+        last_activity: new Date().toISOString()
+      })
+    }).catch(() => {});
+
+    return true;
+  } catch (e) {
+    console.warn('Error updating user blocked status:', e.message);
+    return false;
   }
 }
 
@@ -69,7 +146,13 @@ export async function getUser(env, userId) {
     });
     if (!res.ok) return null;
     const users = await res.json();
-    return users.length > 0 ? users[0] : null;
+    if (users.length > 0) {
+      const u = users[0];
+      const blockedSet = await getBlockedUserIds(env);
+      u.is_blocked = blockedSet.has(String(u.id));
+      return u;
+    }
+    return null;
   } catch (error) {
     console.error('Error fetching user from Supabase:', error);
     return null;
@@ -898,6 +981,9 @@ export async function getSettings(env) {
     banner_title: map.banner_title || '',
     banner_text: map.banner_text || '',
     force_join_enabled: Boolean(map.force_join_enabled),
+    require_bot_start_enabled: Boolean(map.require_bot_start_enabled),
+    require_bot_start_message: map.require_bot_start_message || '⚠️ Please start our official Telegram Bot to unlock and view content!',
+    require_bot_start_link: map.require_bot_start_link || '',
     shorteners: Array.isArray(map.shorteners) ? map.shorteners : []
   };
 
@@ -1343,7 +1429,13 @@ export async function getAllUsers(env) {
     const baseUrl = getSupabaseBaseUrl(env);
     const headers = getSupabaseHeaders(env);
     const res = await fetch(`${baseUrl}/users?order=last_activity.desc&select=*`, { headers });
-    return res.ok ? await res.json() : [];
+    if (!res.ok) return [];
+    const users = await res.json();
+    const blockedSet = await getBlockedUserIds(env);
+    return users.map(u => ({
+      ...u,
+      is_blocked: blockedSet.has(String(u.id))
+    }));
   } catch (e) {
     console.warn('Error fetching all users:', e);
     return [];

@@ -40,7 +40,8 @@ import {
   getDatabaseStorageStats,
   optimizeDatabase,
   recordPostView,
-  recordFileAccess
+  recordFileAccess,
+  updateUserBlockedStatus
 } from './db.js';
 import { getSession, setSession, clearSession } from './session.js';
 
@@ -319,8 +320,30 @@ export function createBot(env) {
   });
 
   // -------------------------------------------------------------
-  // Main Menu Presenter (Buttons Only)
+  // Event: my_chat_member (Detect Bot Block & Unblock events)
   // -------------------------------------------------------------
+  bot.on('my_chat_member', async (ctx) => {
+    try {
+      const update = ctx.update?.my_chat_member;
+      const targetUserId = update?.from?.id || update?.chat?.id;
+      const newStatus = update?.new_chat_member?.status;
+
+      if (targetUserId) {
+        if (newStatus === 'kicked' || newStatus === 'left') {
+          // User blocked the bot
+          await updateUserBlockedStatus(env, targetUserId, true);
+        } else if (newStatus === 'member') {
+          // User unblocked / started the bot
+          await updateUserBlockedStatus(env, targetUserId, false);
+          if (update.from) {
+            await saveOrUpdateUser(env, update.from);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error handling my_chat_member update:', e.message);
+    }
+  });
   async function showMainMenu(ctx) {
     const userId = ctx.from?.id;
 
@@ -1673,6 +1696,7 @@ export function createBot(env) {
     const bannerStatus = settings.banner_enabled ? '🟢 ON' : '🔴 OFF';
     const forceStatus = settings.force_join_enabled ? '🟢 ON' : '🔴 OFF';
     const protectAllStatus = settings.protect_all_posts ? '🟢 ON' : '🔴 OFF';
+    const reqStartStatus = settings.require_bot_start_enabled ? '🟢 ON' : '🔴 OFF';
 
     const text = `⚙️ *Hub Settings & Rules*\n\n` +
       `• 🎁 *Referrals & Points:* ${refStatus} (\`${settings.referral_points || 10} pts\`)\n` +
@@ -1681,7 +1705,8 @@ export function createBot(env) {
       `• ⏳ *Global Auto-Delete:* \`${settings.auto_delete_minutes || 30} minutes\`\n` +
       `• 🪙 *Points per Download:* \`${settings.points_per_post_download || 1} pt\`\n` +
       `• 🖼️ *Sponsor Banner:* ${bannerStatus}\n` +
-      `• 📢 *Force Join Channels:* ${forceStatus} (\`${channels.length} channel(s)\`)\n\n` +
+      `• 📢 *Force Join Channels:* ${forceStatus} (\`${channels.length} channel(s)\`)\n` +
+      `• 🛑 *Require Bot Start in App:* ${reqStartStatus}\n\n` +
       `Tap any toggle button below:`;
 
     const keyboard = Markup.inlineKeyboard([
@@ -1696,6 +1721,10 @@ export function createBot(env) {
       [
         Markup.button.callback(`📢 Force Join: ${forceStatus}`, 'admin_toggle_forcejoin'),
         Markup.button.callback('➕ Add Force Channel', 'admin_add_channel_btn')
+      ],
+      [
+        Markup.button.callback(`🛑 Require Start: ${reqStartStatus}`, 'admin_toggle_reqstart'),
+        Markup.button.callback('✏️ Start Prompt Text', 'admin_set_reqstart_msg')
       ],
       [
         Markup.button.callback('📋 View Channels', 'admin_view_channels_btn'),
@@ -1750,6 +1779,38 @@ export function createBot(env) {
     return await handleSettingsMenu(ctx);
   });
 
+  bot.action('admin_toggle_reqstart', async (ctx) => {
+    const settings = await getSettings(env);
+    await updateSetting(env, 'require_bot_start_enabled', !settings.require_bot_start_enabled);
+    return await handleSettingsMenu(ctx);
+  });
+
+  bot.action('admin_set_reqstart_msg', async (ctx) => {
+    const userId = ctx.from?.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    await setSession(env, userId, { step: 'AWAITING_REQSTART_MSG' });
+    await ctx.answerCbQuery();
+
+    const currentSettings = await getSettings(env);
+    const currMsg = currentSettings.require_bot_start_message || 'Please start our official bot to unlock full access and view content.';
+    const currLink = currentSettings.require_bot_start_link || '';
+
+    return await ctx.reply(
+      `🛑 *Configure Require Bot Start Message & Link*\n\n` +
+      `Current Message:\n_"${escapeMarkdown(currMsg)}"_\n\n` +
+      `Current Custom Link:\n\`${currLink || 'Default (https://t.me/Xminty_bot?start=start)'}\`\n\n` +
+      `Send your new message and optional link in this format:\n` +
+      `\`<Your Prompt Message> | <Custom Link or empty>\`\n\n` +
+      `*Example:*\n` +
+      `\`Please start our bot first to unlock access! | https://t.me/Xminty_bot?start=start\``,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', 'admin_menu_settings')]])
+      }
+    );
+  });
+
   bot.action('admin_add_channel_btn', async (ctx) => {
     const userId = ctx.from.id;
     if (!(await isAdminUser(env, userId))) return;
@@ -1775,34 +1836,40 @@ export function createBot(env) {
     await ctx.answerCbQuery();
 
     if (!channels || channels.length === 0) {
-      return await ctx.reply('📢 No force-join channels added yet.', {
+      return await ctx.reply('ℹ️ No force join channels configured yet.', {
         ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Back to Settings', 'admin_menu_settings')]])
       });
     }
 
-    const buttons = channels.map(ch => [
-      Markup.button.callback(`🗑️ Remove ${ch.channel_title}`, `admin_del_channel_${ch.id}`)
+    let text = `📢 *Configured Force Join Channels (${channels.length}):*\n\n`;
+    channels.forEach((c, idx) => {
+      text += `${idx + 1}. *${escapeMarkdown(c.channel_title || 'Channel')}*\n   ID: \`${c.channel_id}\`\n   Link: ${c.invite_link}\n\n`;
+    });
+
+    const buttons = channels.map(c => [
+      Markup.button.callback(`🗑️ Remove: ${c.channel_title.slice(0, 15)}`, `admin_remove_channel_${c.channel_id}`)
     ]);
     buttons.push([Markup.button.callback('🔙 Back to Settings', 'admin_menu_settings')]);
 
-    return await ctx.reply(
-      '📢 *Registered Force Join Channels:*\nTap to remove any channel:',
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard(buttons)
-      }
-    );
+    return await ctx.reply(text, {
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true,
+      ...Markup.inlineKeyboard(buttons)
+    });
   });
 
-  bot.action(/^admin_del_channel_(\d+)$/, async (ctx) => {
-    const id = ctx.match[1];
-    await removeForceChannel(env, id);
-    await ctx.answerCbQuery('Channel removed');
+  bot.action(/^admin_remove_channel_(.+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const channelId = ctx.match[1];
+    await removeForceChannel(env, channelId);
+    await ctx.answerCbQuery('Channel removed!');
     return await handleSettingsMenu(ctx);
   });
 
   // -------------------------------------------------------------
-  // Admins Management Handlers
+  // Admins & Users Management
   // -------------------------------------------------------------
   const handleAdminsMenu = async (ctx) => {
     const userId = ctx.from?.id;
@@ -1810,30 +1877,30 @@ export function createBot(env) {
 
     if (ctx.callbackQuery) await ctx.answerCbQuery();
 
-    const admins = await getAdmins(env);
-    let text = `👥 *Admins Management*\n\n` +
-      `All added admins have full management permissions (create/edit/delete posts, broadcast, monetization, and add other admins).\n\n` +
-      `*Current Admins (${admins.length}):*\n`;
+    const admins = await getAllAdmins(env);
+    let text = `👥 *Multi-Admin Management*\n\n` +
+      `Current Admins (${admins.length}):\n`;
 
-    admins.forEach((a, i) => {
-      const badge = a.is_primary ? '👑 Primary Owner' : '🛡️ Co-Admin';
-      const name = a.full_name || a.username || `User ${a.user_id}`;
-      text += `${i + 1}. *${escapeMarkdown(name)}* (\`${a.user_id}\`) — ${badge}\n`;
+    admins.forEach((adm, idx) => {
+      text += `${idx + 1}. \`${adm.user_id}\` — *${escapeMarkdown(adm.name || 'Admin')}* (Added: ${new Date(adm.created_at).toLocaleDateString()})\n`;
     });
 
-    const buttons = [];
-    admins.filter(a => !a.is_primary).forEach(a => {
-      const name = a.full_name || a.username || `ID ${a.user_id}`;
-      buttons.push([Markup.button.callback(`🗑️ Remove Admin ${name}`, `admin_del_admin_${a.user_id}`)]);
+    text += `\nAdmins have full access to create/edit posts, broadcast, manage storage, and configure hub rules.`;
+
+    const buttons = [
+      [
+        Markup.button.callback('➕ Add Admin', 'admin_add_admin_ask'),
+        Markup.button.callback('👥 View Users Directory', 'admin_view_users')
+      ]
+    ];
+
+    admins.forEach(adm => {
+      if (String(adm.user_id) !== String(env.ADMIN_ID)) {
+        buttons.push([Markup.button.callback(`🗑️ Remove Admin: ${adm.name || adm.user_id}`, `admin_remove_admin_${adm.user_id}`)]);
+      }
     });
 
-    buttons.push([
-      Markup.button.callback('➕ Add New Admin', 'admin_add_admin_ask'),
-      Markup.button.callback('👥 View Registered Users', 'admin_view_users')
-    ]);
-    buttons.push([
-      Markup.button.callback('🔙 Main Menu', 'admin_main_menu')
-    ]);
+    buttons.push([Markup.button.callback('🔙 Back to Hub Settings', 'admin_menu_settings')]);
 
     return await ctx.reply(text, {
       parse_mode: 'Markdown',
@@ -2405,7 +2472,11 @@ export function createBot(env) {
         sent++;
       } catch (e) {
         failed++;
-        failedDetails.push({ user_id: targetId, reason: e.message || 'Error' });
+        const reasonMsg = e.message || 'Error';
+        if (/blocked|deactivated|forbidden/i.test(reasonMsg)) {
+          updateUserBlockedStatus(env, targetId, true).catch(() => {});
+        }
+        failedDetails.push({ user_id: targetId, reason: reasonMsg });
       }
     }
 
@@ -2924,6 +2995,36 @@ export function createBot(env) {
 
       return await ctx.reply(
         `✅ *Channel Added Successfully!*\n\n• *Title:* ${escapeMarkdown(channel_title)}\n• *ID:* \`${channel_id}\``,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback('⚙️ Return to Settings', 'admin_menu_settings')]])
+        }
+      );
+    }
+
+    // STEP: AWAITING_REQSTART_MSG
+    if (session.step === 'AWAITING_REQSTART_MSG') {
+      if (!text) {
+        return await ctx.reply('⚠️ Please send a valid message text.');
+      }
+      let promptMsg = text.trim();
+      let promptLink = '';
+      if (text.includes('|')) {
+        const parts = text.split('|').map(s => s.trim());
+        promptMsg = parts[0] || 'Please start our official bot to unlock full access and view content.';
+        promptLink = parts[1] || '';
+      }
+
+      await updateSetting(env, 'require_bot_start_message', promptMsg);
+      if (promptLink) {
+        await updateSetting(env, 'require_bot_start_link', promptLink);
+      }
+      await clearSession(env, userId);
+
+      return await ctx.reply(
+        `✅ *Require Bot Start Prompt Saved!*\n\n` +
+        `• *Message:* ${escapeMarkdown(promptMsg)}\n` +
+        `• *Link:* \`${promptLink || 'Default (Bot Link)'}\``,
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([[Markup.button.callback('⚙️ Return to Settings', 'admin_menu_settings')]])
