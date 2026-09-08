@@ -41,7 +41,9 @@ import {
   optimizeDatabase,
   recordPostView,
   recordFileAccess,
-  updateUserBlockedStatus
+  updateUserBlockedStatus,
+  getNextPostNumber,
+  formatBytes
 } from './db.js';
 import { getSession, setSession, clearSession } from './session.js';
 
@@ -782,10 +784,11 @@ export function createBot(env) {
       const pagePosts = posts.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
 
       const buttons = pagePosts.map(p => {
-        const star = p.is_promoted ? '⭐ ' : '';
+        const star = p.is_promoted ? '⭐ [Exclusive] ' : '';
+        const displayTitle = (star + p.title).length > 32 ? (star + p.title).slice(0, 31) + '…' : (star + p.title);
         return [
           Markup.button.callback(
-            `${star}${p.title.slice(0, 28)}`,
+            displayTitle,
             `user_view_post_${p.id}`
           )
         ];
@@ -1063,8 +1066,8 @@ export function createBot(env) {
 
       const buttons = pagePosts.map(p => {
         const statusIcon = p.status === 'published' ? '🟢' : p.status === 'scheduled' ? '🟣' : '🟡';
-        const star = p.is_promoted ? '⭐ ' : '';
-        const displayTitle = p.title.length > 26 ? p.title.slice(0, 26) + '…' : p.title;
+        const star = p.is_promoted ? '⭐ Exclusive ' : '';
+        const displayTitle = p.title.length > 24 ? p.title.slice(0, 24) + '…' : p.title;
         return [
           Markup.button.callback(
             `${statusIcon} ${star}${displayTitle}`,
@@ -2534,10 +2537,14 @@ export function createBot(env) {
       return await ctx.reply('⛔ Unauthorized. Admin access only.');
     }
 
+    const nextNum = await getNextPostNumber(env);
+    const defaultTitle = `Post #${nextNum}`;
+
     const sessionData = {
       step: 'AWAITING_TITLE',
       postId: null,
-      title: '',
+      postNumber: nextNum,
+      title: defaultTitle,
       preview_image: null,
       direct_link: null,
       direct_link_title: null,
@@ -2549,18 +2556,53 @@ export function createBot(env) {
     if (ctx.callbackQuery) await ctx.answerCbQuery();
 
     const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback(`⏩ Use Default: ${defaultTitle}`, 'step_use_default_title')],
       [Markup.button.callback('❌ Cancel', 'step_cancel')]
     ]);
 
     return await ctx.reply(
-      '📝 *Step 1/3: Post Title*\n\n' +
-      'Please send the **Title** for your new post:',
+      `📝 *Step 1/3: Post Title*\n\n` +
+      `Default Title: *${defaultTitle}*\n\n` +
+      `• Send a title, or\n` +
+      `• Send folder/file size (e.g. *226.8 MB*) to make it *${defaultTitle} (226.8 MB)*, or\n` +
+      `• Tap the button below to use default:`,
       {
         parse_mode: 'Markdown',
         ...keyboard
       }
     );
   };
+
+  bot.action('step_use_default_title', async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const session = await getSession(env, userId);
+    if (!session || session.step !== 'AWAITING_TITLE') {
+      return await ctx.answerCbQuery('Action not available');
+    }
+
+    const nextNum = session.postNumber || (await getNextPostNumber(env));
+    session.title = `Post #${nextNum}`;
+    session.step = 'AWAITING_IMAGE';
+    await setSession(env, userId, session);
+    await ctx.answerCbQuery();
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('⏩ Skip Image', 'step_skip_image')],
+      [Markup.button.callback('❌ Cancel', 'step_cancel')]
+    ]);
+
+    return await ctx.reply(
+      `🖼️ *Step 2/3: Preview Image*\n\n` +
+      `Post Title: *${escapeMarkdown(session.title)}*\n\n` +
+      `Send an image URL (e.g. \`https://catbox.moe/...\`) or upload a photo, or tap Skip:`,
+      {
+        parse_mode: 'Markdown',
+        ...keyboard
+      }
+    );
+  });
 
   bot.command('addpost', startAddPostFlow);
   bot.action('admin_menu_addpost', startAddPostFlow);
@@ -3180,11 +3222,22 @@ export function createBot(env) {
 
     // STEP 1: Awaiting Title
     if (session.step === 'AWAITING_TITLE') {
-      if (!text) {
-        return await ctx.reply('⚠️ Please send a text title for the post.');
+      const nextNum = session.postNumber || (await getNextPostNumber(env));
+      const defaultTitle = `Post #${nextNum}`;
+      const trimmed = (text || '').trim();
+
+      if (!trimmed || trimmed.toLowerCase() === '/skip' || trimmed.toLowerCase() === 'skip') {
+        session.title = defaultTitle;
+      } else {
+        const isSizeOnly = /^\(?[0-9]+(\.[0-9]+)?\s*(B|KB|MB|GB|TB)\)?$/i.test(trimmed);
+        if (isSizeOnly) {
+          const cleanSize = trimmed.replace(/[()]/g, '').trim();
+          session.title = `Post #${nextNum} (${cleanSize})`;
+        } else {
+          session.title = trimmed;
+        }
       }
 
-      session.title = text;
       session.step = 'AWAITING_IMAGE';
       await setSession(env, userId, session);
 
@@ -3195,7 +3248,8 @@ export function createBot(env) {
 
       return await ctx.reply(
         `🖼️ *Step 2/3: Preview Image*\n\n` +
-        `Send an image URL (e.g. \`https://example.com/image.jpg\`) or upload a photo, or tap Skip:`,
+        `Post Title: *${escapeMarkdown(session.title)}*\n\n` +
+        `Send an image URL (e.g. \`https://catbox.moe/...\`) or upload a photo, or tap Skip:`,
         {
           parse_mode: 'Markdown',
           ...keyboard
@@ -3244,6 +3298,20 @@ export function createBot(env) {
 
       session.direct_link = urlPart;
       session.direct_link_title = labelParts || 'Open / Download Link';
+
+      if (labelParts) {
+        const sizeMatch = labelParts.match(/[0-9]+(\.[0-9]+)?\s*(B|KB|MB|GB|TB)/i);
+        if (sizeMatch) {
+          const s = sizeMatch[0].trim();
+          const m = session.title.match(/^(Post\s*#\d+)/i);
+          if (m) {
+            session.title = `${m[1]} (${s})`;
+          } else if (!session.title.includes('(')) {
+            session.title = `${session.title} (${s})`;
+          }
+        }
+      }
+
       session.step = 'AWAITING_PUBLISH_CHOICE';
       await setSession(env, userId, session);
 
@@ -3340,6 +3408,16 @@ export function createBot(env) {
         }
 
         session.currentFiles.push(itemMeta);
+        const totalBytes = session.currentFiles.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
+        if (totalBytes > 0) {
+          const formatted = formatBytes(totalBytes);
+          const m = session.title.match(/^(Post\s*#\d+)/i);
+          if (m) {
+            session.title = `${m[1]} (${formatted})`;
+          } else if (!session.title.includes('(')) {
+            session.title = `${session.title} (${formatted})`;
+          }
+        }
         await setSession(env, userId, session);
 
         const keyboard = Markup.inlineKeyboard([

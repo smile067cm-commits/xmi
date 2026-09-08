@@ -662,10 +662,16 @@ const rawHtml = `<!DOCTYPE html>
     }
 
     .status-promoted {
-      background: linear-gradient(135deg, rgba(245, 158, 11, 0.9), rgba(217, 119, 6, 0.9));
-      color: #0f172a;
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #fff;
       font-weight: 800;
-      border: 1px solid rgba(255, 255, 255, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+    }
+
+    .post-card.is-promoted {
+      border: 1px solid rgba(245, 158, 11, 0.45);
+      box-shadow: 0 4px 16px rgba(245, 158, 11, 0.12);
     }
 
     .category-badge-card {
@@ -1033,7 +1039,8 @@ const rawHtml = `<!DOCTYPE html>
         </div>
 
         <div class="sort-segmented-control" id="sortControl">
-          <button class="sort-segment active" data-sort="latest">🕒 Latest</button>
+          <button class="sort-segment active" data-sort="all">✨ All</button>
+          <button class="sort-segment" data-sort="latest">🕒 Latest</button>
           <button class="sort-segment" data-sort="views">🔥 Most Views</button>
           <button class="sort-segment" data-sort="likes">❤️ Most Liked</button>
         </div>
@@ -1077,9 +1084,9 @@ const rawHtml = `<!DOCTYPE html>
 
       <!-- Admin Tab 1: Manage Posts -->
       <div id="adminTabPosts">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 8px;">
           <h3 style="font-size: 1rem; font-weight: 700;">📑 Post Management</h3>
-          <a href="https://t.me/__BOT_USERNAME__" class="btn btn-sm btn-primary">➕ Create Post in Bot</a>
+          <button type="button" class="btn btn-sm btn-primary" id="btnOpenCreatePost">➕ Create Post</button>
         </div>
         <div class="posts-grid" id="adminPostsGrid"></div>
       </div>
@@ -1267,6 +1274,15 @@ const rawHtml = `<!DOCTYPE html>
             </div>
           </div>
 
+          <!-- Top Categories Management -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px;">
+            <div style="font-weight: 700; font-size: 0.92rem; margin-bottom: 4px;">🏷️ Top Categories Management</div>
+            <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 8px;">
+              Enter categories separated by commas. These will appear in the home top bar and post category dropdowns.
+            </div>
+            <input type="text" id="setAdminCategories" class="form-input" placeholder="All, Movies, Series, Courses, Software, Music, Tutorials" />
+          </div>
+
           <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">💾 Save Hub Settings</button>
         </form>
       </div>
@@ -1412,7 +1428,78 @@ const rawHtml = `<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- 2. Edit Post Modal (Admin Only) -->
+  <!-- 2A. Create Post Modal (Admin Only) -->
+  <div class="modal-overlay" id="createPostModal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 class="modal-title">➕ Create New Post</h3>
+        <button class="modal-close" id="btnCreatePostClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="createPostForm" style="display: flex; flex-direction: column; gap: 10px;">
+          <div>
+            <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Post Title (Default: Post #N)</label>
+            <input type="text" id="createPostTitle" class="form-input" placeholder="e.g. Post #76 (226.8 MB)" required />
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div>
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Size (e.g. 226.8 MB)</label>
+              <input type="text" id="createPostSize" class="form-input" placeholder="e.g. 226.8 MB" />
+            </div>
+            <div>
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Category</label>
+              <select id="createPostCategory" class="form-input" style="background: #1e293b;"></select>
+            </div>
+          </div>
+          <div>
+            <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Preview Image URL (Optional)</label>
+            <input type="url" id="createPostImage" class="form-input" placeholder="https://catbox.moe/... or image url" />
+          </div>
+          <div>
+            <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Direct / Mega Folder Link URL (Optional)</label>
+            <input type="url" id="createPostLink" class="form-input" placeholder="https://mega.nz/... or file url" />
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div>
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Button Text</label>
+              <input type="text" id="createPostLinkLabel" class="form-input" value="🔗 Open File / Folder" />
+            </div>
+            <div>
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Tags</label>
+              <input type="text" id="createPostTags" class="form-input" placeholder="#file" />
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <div>
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Status</label>
+              <select id="createPostStatus" class="form-input" style="background: #1e293b;">
+                <option value="published">🟢 Published</option>
+                <option value="draft">🟡 Draft</option>
+                <option value="scheduled">🟣 Scheduled</option>
+              </select>
+            </div>
+            <div id="createScheduledGroup" style="display: none;">
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Publish Date (UTC)</label>
+              <input type="datetime-local" id="createPostScheduledAt" class="form-input" />
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 0;">
+            <span style="font-size: 0.85rem; font-weight: 600;">⭐ Exclusive / Promoted (Show at Top)</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="createPostPromoted" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button type="submit" class="btn btn-primary" id="btnSubmitCreatePost" style="flex: 1;">🚀 Publish Post</button>
+            <button type="button" class="btn btn-ghost" id="btnCancelCreatePost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2B. Edit Post Modal (Admin Only) -->
   <div class="modal-overlay" id="editPostModal">
     <div class="modal-content" style="max-width: 520px;">
       <div class="modal-header">
@@ -1429,7 +1516,7 @@ const rawHtml = `<!DOCTYPE html>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
             <div>
               <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Category</label>
-              <input type="text" id="editPostCategory" class="form-input" />
+              <select id="editPostCategory" class="form-input" style="background: #1e293b;"></select>
             </div>
             <div>
               <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Tags</label>
@@ -1463,7 +1550,7 @@ const rawHtml = `<!DOCTYPE html>
             </div>
           </div>
           <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 0;">
-            <span style="font-size: 0.85rem; font-weight: 600;">⭐ Pin / Feature Post</span>
+            <span style="font-size: 0.85rem; font-weight: 600;">⭐ Exclusive / Promoted (Show at Top)</span>
             <label class="toggle-switch">
               <input type="checkbox" id="editPostPromoted" />
               <span class="toggle-slider"></span>
@@ -1474,6 +1561,38 @@ const rawHtml = `<!DOCTYPE html>
             <button type="button" class="btn btn-ghost" style="color: #f87171;" id="btnDeleteFromEdit">🗑️ Delete</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2C. User Action Modal (Contact Options for users with/without username) -->
+  <div class="modal-overlay" id="userActionModal">
+    <div class="modal-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="userActionModalTitle">👤 User Contact Options</h3>
+        <button class="modal-close" id="btnUserActionClose">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="font-size: 0.85rem; color: var(--text-muted);" id="userActionModalNotice">
+          This user does not have a public Telegram @username.
+        </div>
+        <div style="background: rgba(255,255,255,0.05); padding: 10px 14px; border-radius: 10px; font-size: 0.82rem; display: flex; align-items: center; justify-content: space-between;">
+          <span>User ID: <strong id="userActionUidDisplay" style="color: #fbbf24; font-family: monospace;"></strong></span>
+          <button type="button" class="btn btn-sm btn-ghost" id="btnUserActionCopyId">📋 Copy</button>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-secondary" id="btnUserActionOpenDirect" style="flex: 1; font-size: 0.8rem;">
+            💬 Open Telegram Chat
+          </button>
+          <button type="button" class="btn btn-secondary" id="btnUserActionOpenProfile" style="flex: 1; font-size: 0.8rem;">
+            👤 User Profile
+          </button>
+        </div>
+        <div style="border-top: 1px solid var(--card-border); padding-top: 12px;">
+          <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">✉️ Send Direct Message via Bot</label>
+          <textarea id="userActionDmText" class="form-input" rows="2" placeholder="Type a message to send directly to this user..."></textarea>
+          <button type="button" class="btn btn-primary" id="btnUserActionSendDm" style="width: 100%; margin-top: 8px;">📤 Send Message</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1528,12 +1647,47 @@ const rawHtml = `<!DOCTYPE html>
     let allPosts = [];
     let savedPostIds = new Set();
     let currentCategory = 'All';
-    let currentSort = 'latest';
+    let currentSort = 'all';
     let currentSearch = '';
     let currentView = 'feed';
     let globalSettings = {};
     let userPoints = 0;
     let activeCommentPostId = null;
+    let basePostNumber = 76;
+    let selectedUserForAction = null;
+
+    function renderCategoryChips(categories) {
+      const bar = document.getElementById('categoriesBar');
+      if (!bar) return;
+      const cats = Array.isArray(categories) && categories.length > 0 ? categories : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'];
+      bar.innerHTML = '';
+      cats.forEach(c => {
+        const chip = document.createElement('div');
+        chip.className = 'category-chip' + (c.toLowerCase() === currentCategory.toLowerCase() ? ' active' : '');
+        chip.dataset.cat = c;
+        chip.textContent = (c === 'All' ? '✨ ' : '') + c;
+        bar.appendChild(chip);
+      });
+    }
+
+    function populateCategoryDropdowns(categories) {
+      const cats = Array.isArray(categories) && categories.length > 0 ? categories : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'];
+      const selects = [document.getElementById('createPostCategory'), document.getElementById('editPostCategory')];
+      selects.forEach(sel => {
+        if (!sel) return;
+        const currentVal = sel.value;
+        sel.innerHTML = '';
+        cats.forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c;
+          opt.textContent = c;
+          sel.appendChild(opt);
+        });
+        if (currentVal && cats.includes(currentVal)) {
+          sel.value = currentVal;
+        }
+      });
+    }
 
     function showToast(msg) {
       const toast = document.getElementById('toast');
@@ -1622,6 +1776,15 @@ const rawHtml = `<!DOCTYPE html>
             banner.style.display = 'flex';
           }
 
+          // Setup Dynamic Categories
+          const cats = (Array.isArray(globalSettings.categories) && globalSettings.categories.length > 0)
+            ? globalSettings.categories
+            : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'];
+          const catInput = document.getElementById('setAdminCategories');
+          if (catInput) catInput.value = cats.join(', ');
+          renderCategoryChips(cats);
+          populateCategoryDropdowns(cats);
+
           // Check Require Bot Start Gate
           checkRequireBotStart(data.has_started_bot);
         }
@@ -1690,14 +1853,19 @@ const rawHtml = `<!DOCTYPE html>
         );
       }
 
-      // Sort
-      if (currentSort === 'views') {
-        list.sort((a, b) => (b.view_count || 0) - (a.view_count || 0));
-      } else if (currentSort === 'likes') {
-        list.sort((a, b) => (b.like_count || 0) - (a.like_count || 0));
-      } else {
-        list.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-      }
+      // Sort: Promoted / Exclusive posts ALWAYS appear at top!
+      list.sort((a, b) => {
+        if (a.is_promoted && !b.is_promoted) return -1;
+        if (!a.is_promoted && b.is_promoted) return 1;
+
+        if (currentSort === 'views') {
+          return (b.view_count || 0) - (a.view_count || 0);
+        } else if (currentSort === 'likes') {
+          return (b.like_count || 0) - (a.like_count || 0);
+        } else {
+          return new Date(b.created_at) - new Date(a.created_at);
+        }
+      });
 
       if (list.length === 0) {
         grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 40px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 38px; margin-bottom: 8px;">🔍</div><div style="font-weight: 600;">No posts found</div><div style="font-size: 0.8rem; margin-top: 4px;">Try a different search term or category.</div></div>';
@@ -1714,10 +1882,10 @@ const rawHtml = `<!DOCTYPE html>
 
         let imgHtml = '<div class="post-image-placeholder">📄</div>';
         if (post.preview_image) {
-          imgHtml = '<div class="post-image-backdrop" style="background-image: url(\\'' + escapeHtml(post.preview_image) + '\\');"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />';
+          imgHtml = '<div class="post-image-backdrop" style="background-image: url(\'' + escapeHtml(post.preview_image) + '\');"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />';
         }
 
-        let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted">⭐ Featured</span>' : '<span></span>';
+        let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted" style="color: #fff; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);">⭐ Exclusive</span>' : '<span></span>';
 
         card.innerHTML = '<div class="post-image-container">' + imgHtml + '<div class="post-badges-top">' + promotedBadge + '<span class="category-badge-card">' + escapeHtml(post.category || 'All') + '</span></div></div>' +
           '<div class="post-body">' +
@@ -1973,9 +2141,9 @@ const rawHtml = `<!DOCTYPE html>
             '<div>🪙 <strong style="color: #fbbf24;">' + (u.points || 0) + '</strong> pts</div>' +
             '<div>🔄 ' + (u.interactions || 1) + ' acts</div>' +
           '</div>' +
-          '<a href="' + tgLink + '" target="_blank" class="btn btn-sm btn-secondary" style="padding: 6px 10px; font-size: 0.75rem; text-decoration: none;">' +
+          '<button type="button" class="btn btn-sm btn-secondary btn-open-user-chat" data-uid="' + u.id + '" data-username="' + (u.username || '') + '" data-name="' + escapeHtml(displayName) + '" style="padding: 6px 10px; font-size: 0.75rem;">' +
             '💬 Open' +
-          '</a>' +
+          '</button>' +
         '</div>';
         list.appendChild(row);
       });
@@ -2046,13 +2214,197 @@ const rawHtml = `<!DOCTYPE html>
           document.getElementById('setRequireBotStartToggle').checked = Boolean(globalSettings.require_bot_start_enabled);
           document.getElementById('setRequireBotStartMsg').value = globalSettings.require_bot_start_message || '';
           document.getElementById('setRequireBotStartLink').value = globalSettings.require_bot_start_link || '';
+          const cats = (Array.isArray(globalSettings.categories) && globalSettings.categories.length > 0)
+            ? globalSettings.categories
+            : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'];
+          const catInput = document.getElementById('setAdminCategories');
+          if (catInput) catInput.value = cats.join(', ');
         }
       });
 
-      // Admin Users Search and Filters
+      // Admin Users Search, Filters & Chat Action
       document.getElementById('adminUsersSearchInput')?.addEventListener('input', renderAdminUsers);
       document.getElementById('adminUsersFilterSelect')?.addEventListener('change', renderAdminUsers);
       document.getElementById('btnRefreshAdminUsers')?.addEventListener('click', loadAdminUsers);
+
+      // Open User Chat / Contact Options
+      document.getElementById('adminUsersList')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn-open-user-chat');
+        if (!btn) return;
+        const uid = btn.dataset.uid;
+        const username = btn.dataset.username;
+        const name = btn.dataset.name || ('User #' + uid);
+
+        if (username && username !== 'none' && username.trim() !== '') {
+          const cleanUser = username.replace(/^@/, '');
+          const tgUrl = 'https://t.me/' + cleanUser;
+          if (tg && tg.openTelegramLink) {
+            tg.openTelegramLink(tgUrl);
+          } else {
+            window.open(tgUrl, '_blank');
+          }
+        } else {
+          // No username set! Open contact options modal
+          selectedUserForAction = { id: uid, name: name };
+          document.getElementById('userActionModalTitle').textContent = '👤 ' + name;
+          document.getElementById('userActionUidDisplay').textContent = uid;
+          document.getElementById('userActionModalNotice').textContent = 'This user does not have a public @username set in Telegram.';
+          document.getElementById('userActionDmText').value = '';
+          document.getElementById('userActionModal').classList.add('active');
+        }
+      });
+
+      // User Action Modal Handlers
+      document.getElementById('btnUserActionOpenDirect')?.addEventListener('click', () => {
+        if (!selectedUserForAction) return;
+        const uid = selectedUserForAction.id;
+        window.location.href = 'tg://openmessage?user_id=' + uid;
+      });
+
+      document.getElementById('btnUserActionOpenProfile')?.addEventListener('click', () => {
+        if (!selectedUserForAction) return;
+        const uid = selectedUserForAction.id;
+        window.location.href = 'tg://user?id=' + uid;
+      });
+
+      document.getElementById('btnUserActionCopyId')?.addEventListener('click', () => {
+        if (!selectedUserForAction) return;
+        navigator.clipboard?.writeText(String(selectedUserForAction.id));
+        showToast('📋 User ID copied to clipboard!');
+      });
+
+      document.getElementById('btnUserActionClose')?.addEventListener('click', () => {
+        document.getElementById('userActionModal').classList.remove('active');
+      });
+
+      document.getElementById('btnUserActionSendDm')?.addEventListener('click', async () => {
+        if (!selectedUserForAction) return;
+        const text = document.getElementById('userActionDmText').value.trim();
+        if (!text) {
+          showToast('⚠️ Please enter a message');
+          return;
+        }
+
+        const btn = document.getElementById('btnUserActionSendDm');
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+
+        try {
+          const res = await fetch('/api/admin/users/' + selectedUserForAction.id + '/message?user_id=' + currentUserId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+          });
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.error || 'Failed to send message');
+          }
+          showToast('✅ Message sent to user!');
+          document.getElementById('userActionDmText').value = '';
+          document.getElementById('userActionModal').classList.remove('active');
+        } catch (e) {
+          showToast('⚠️ ' + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '📤 Send Message';
+        }
+      });
+
+      // Open Create Post Modal
+      document.getElementById('btnOpenCreatePost')?.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/admin/posts/next-info?user_id=' + currentUserId);
+          const data = await res.json();
+          basePostNumber = data.next_number || 1;
+          document.getElementById('createPostTitle').value = data.default_title || ('Post #' + basePostNumber);
+        } catch (e) {
+          basePostNumber = (allPosts.length || 0) + 1;
+          document.getElementById('createPostTitle').value = 'Post #' + basePostNumber;
+        }
+        document.getElementById('createPostSize').value = '';
+        document.getElementById('createPostImage').value = '';
+        document.getElementById('createPostLink').value = '';
+        document.getElementById('createPostLinkLabel').value = '🔗 Open File / Folder';
+        document.getElementById('createPostTags').value = '#file #' + basePostNumber;
+        document.getElementById('createPostStatus').value = 'published';
+        document.getElementById('createPostPromoted').checked = false;
+        document.getElementById('createScheduledGroup').style.display = 'none';
+        populateCategoryDropdowns(globalSettings.categories);
+
+        document.getElementById('createPostModal').classList.add('active');
+      });
+
+      // Auto-format title when typing size
+      document.getElementById('createPostSize')?.addEventListener('input', (e) => {
+        const size = e.target.value.trim();
+        const curTitle = document.getElementById('createPostTitle').value;
+        if (/^Post\s*#\d+/i.test(curTitle) || !curTitle.trim()) {
+          document.getElementById('createPostTitle').value = size ? ('Post #' + basePostNumber + ' (' + size + ')') : ('Post #' + basePostNumber);
+        }
+      });
+
+      // Toggle scheduled date in create
+      document.getElementById('createPostStatus')?.addEventListener('change', (e) => {
+        document.getElementById('createScheduledGroup').style.display = e.target.value === 'scheduled' ? 'block' : 'none';
+      });
+
+      // Close Create Modal
+      document.getElementById('btnCreatePostClose')?.addEventListener('click', () => {
+        document.getElementById('createPostModal').classList.remove('active');
+      });
+      document.getElementById('btnCancelCreatePost')?.addEventListener('click', () => {
+        document.getElementById('createPostModal').classList.remove('active');
+      });
+
+      // Submit Create Post Form
+      document.getElementById('createPostForm')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('btnSubmitCreatePost');
+        btn.disabled = true;
+        btn.textContent = 'Publishing...';
+
+        try {
+          const payload = {
+            title: document.getElementById('createPostTitle').value.trim(),
+            size: document.getElementById('createPostSize').value.trim(),
+            category: document.getElementById('createPostCategory').value || 'All',
+            preview_image: document.getElementById('createPostImage').value.trim() || null,
+            direct_link: document.getElementById('createPostLink').value.trim() || null,
+            direct_link_title: document.getElementById('createPostLinkLabel').value.trim() || null,
+            tags: document.getElementById('createPostTags').value.trim() || '',
+            status: document.getElementById('createPostStatus').value,
+            scheduled_at: document.getElementById('createPostScheduledAt').value || null,
+            is_promoted: document.getElementById('createPostPromoted').checked
+          };
+
+          const res = await fetch('/api/admin/posts?user_id=' + currentUserId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          const data = await res.json();
+          if (!res.ok || !data.success) {
+            throw new Error(data.error || 'Failed to create post');
+          }
+
+          document.getElementById('createPostModal').classList.remove('active');
+          showToast('🚀 Post published successfully!');
+          if (tg && tg.HapticFeedback) {
+            tg.HapticFeedback.notificationOccurred('success');
+          }
+          await loadPosts();
+          await loadAdminPosts();
+        } catch (err) {
+          showToast('⚠️ ' + err.message);
+          if (tg && tg.HapticFeedback) {
+            tg.HapticFeedback.notificationOccurred('error');
+          }
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '🚀 Publish Post';
+        }
+      });
 
       // Admin Posts Grid: Edit and Delete Actions
       document.getElementById('adminPostsGrid')?.addEventListener('click', async (e) => {
@@ -2064,6 +2416,7 @@ const rawHtml = `<!DOCTYPE html>
             const data = await res.json();
             if (data.success && data.post) {
               const post = data.post;
+              populateCategoryDropdowns(globalSettings.categories);
               document.getElementById('editPostId').value = post.id;
               document.getElementById('editPostTitle').value = post.title || '';
               document.getElementById('editPostCategory').value = post.category || 'All';
@@ -2372,6 +2725,12 @@ const rawHtml = `<!DOCTYPE html>
           require_bot_start_message: document.getElementById('setRequireBotStartMsg').value.trim(),
           require_bot_start_link: document.getElementById('setRequireBotStartLink').value.trim()
         };
+
+        const catStr = document.getElementById('setAdminCategories')?.value || '';
+        const cats = catStr.split(',').map(s => s.trim()).filter(Boolean);
+        if (cats.length > 0) {
+          settings.categories = cats;
+        }
 
         try {
           const res = await fetch('/api/admin/settings', {

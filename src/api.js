@@ -40,7 +40,9 @@ import {
   getDatabaseStorageStats,
   optimizeDatabase,
   processEphemeralDeletions,
-  updateUserBlockedStatus
+  updateUserBlockedStatus,
+  getNextPostNumber,
+  formatBytes
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
@@ -233,6 +235,7 @@ export function createRouter() {
         'require_bot_start_message',
         'require_bot_start_link',
         'blocked_user_ids',
+        'categories',
         'shorteners'
       ];
 
@@ -1117,6 +1120,22 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
+  // GET /api/admin/posts/next-info - Get Next Post Number and Default Title
+  // -------------------------------------------------------------
+  router.get('/api/admin/posts/next-info', async (request, env) => {
+    try {
+      const nextNum = await getNextPostNumber(env);
+      return jsonResponse({
+        success: true,
+        next_number: nextNum,
+        default_title: `Post #${nextNum}`
+      });
+    } catch (err) {
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
   // POST /api/admin/posts - Create Post (Admin Only)
   // -------------------------------------------------------------
   router.post('/api/admin/posts', async (request, env) => {
@@ -1132,6 +1151,8 @@ export function createRouter() {
 
       const {
         title,
+        size,
+        file_size,
         preview_image,
         direct_link,
         direct_link_title,
@@ -1144,17 +1165,27 @@ export function createRouter() {
         protect_content = false
       } = body;
 
-      if (!title || !title.trim()) {
-        return errorResponse('Post title is required', 400);
+      const sizeStr = (size || file_size || '').trim();
+      let finalTitle = (title || '').trim();
+      const nextNum = await getNextPostNumber(env);
+
+      if (!finalTitle) {
+        finalTitle = sizeStr ? `Post #${nextNum} (${sizeStr})` : `Post #${nextNum}`;
+      } else if (sizeStr && !finalTitle.includes('(')) {
+        finalTitle = `${finalTitle} (${sizeStr})`;
       }
 
+      const finalTags = (tags !== undefined && tags !== null && tags.trim())
+        ? tags.trim()
+        : `#file #${nextNum}`;
+
       const postPayload = {
-        title: title.trim(),
+        title: finalTitle,
         preview_image: preview_image ? preview_image.trim() : null,
         direct_link: direct_link ? direct_link.trim() : null,
         direct_link_title: direct_link_title ? direct_link_title.trim() : null,
         category: category || 'All',
-        tags: tags || '',
+        tags: finalTags,
         status: status || 'published',
         scheduled_at: scheduled_at ? scheduled_at : null,
         is_promoted: Boolean(is_promoted),
@@ -1436,6 +1467,12 @@ export function createRouter() {
         updatePayload.auto_delete_minutes = (auto_delete_minutes !== null && auto_delete_minutes !== '' && !isNaN(auto_delete_minutes)) ? Number(auto_delete_minutes) : null;
       }
       if (protect_content !== undefined) updatePayload.protect_content = Boolean(protect_content);
+      if (body && body.size) {
+        const s = body.size.trim();
+        if (updatePayload.title && !updatePayload.title.includes('(')) {
+          updatePayload.title = `${updatePayload.title} (${s})`;
+        }
+      }
 
       const updated = await updatePost(env, id, updatePayload);
       return jsonResponse({ success: true, post: updated });
@@ -1449,6 +1486,51 @@ export function createRouter() {
   router.patch('/api/admin/posts/:id', handleEditPost);
   router.post('/api/admin/posts/:id', handleEditPost);
   router.put('/api/admin/posts/:id', handleEditPost);
+
+  // -------------------------------------------------------------
+  // POST /api/admin/users/:id/message - Send Direct Message to User via Bot
+  // -------------------------------------------------------------
+  router.post('/api/admin/users/:id/message', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const body = await request.json().catch(() => ({}));
+      const adminId = queryUserId || body.admin_id;
+
+      if (!adminId || !(await isAdminUser(env, adminId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const targetUserId = request.params.id;
+      const text = (body.text || body.message || '').trim();
+      if (!text) {
+        return errorResponse('Message text is required', 400);
+      }
+
+      if (!env.BOT_TOKEN) {
+        return errorResponse('BOT_TOKEN is not configured in Worker environment', 500);
+      }
+
+      const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: targetUserId,
+          text: text,
+          parse_mode: 'Markdown'
+        })
+      });
+
+      const tgData = await tgRes.json();
+      if (!tgData.ok) {
+        return errorResponse(tgData.description || 'Failed to send message via Telegram', 400);
+      }
+
+      return jsonResponse({ success: true, result: tgData.result });
+    } catch (err) {
+      return errorResponse(err.message, 500);
+    }
+  });
 
   // -------------------------------------------------------------
   // GET /api/admin/stats - Global Hub Statistics (Admin Only)

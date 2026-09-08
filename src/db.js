@@ -984,12 +984,52 @@ export async function getSettings(env) {
     require_bot_start_enabled: Boolean(map.require_bot_start_enabled),
     require_bot_start_message: map.require_bot_start_message || '⚠️ Please start our official Telegram Bot to unlock and view content!',
     require_bot_start_link: map.require_bot_start_link || '',
+    categories: (Array.isArray(map.categories) && map.categories.length > 0)
+      ? map.categories
+      : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'],
     shorteners: Array.isArray(map.shorteners) ? map.shorteners : []
   };
 
   cachedSettings = parsed;
   settingsCacheTime = now;
   return parsed;
+}
+
+export function formatBytes(bytes) {
+  if (!bytes || bytes <= 0 || isNaN(bytes)) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const val = parseFloat((bytes / Math.pow(k, i)).toFixed(1));
+  return val + ' ' + sizes[i];
+}
+
+export async function getNextPostNumber(env) {
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const res = await fetch(`${baseUrl}/posts?select=id,title&order=id.desc&limit=150`, { headers });
+    if (res.ok) {
+      const posts = await res.json();
+      let maxNum = 0;
+      for (const p of posts) {
+        if (p && p.title) {
+          const m = p.title.match(/Post\s*#(\d+)/i);
+          if (m) {
+            const num = parseInt(m[1], 10);
+            if (!isNaN(num) && num > maxNum) {
+              maxNum = num;
+            }
+          }
+        }
+      }
+      if (maxNum > 0) return maxNum + 1;
+      return posts.length + 1;
+    }
+  } catch (e) {
+    console.warn('Error determining next post number:', e.message);
+  }
+  return 1;
 }
 
 export async function updateSetting(env, key, value) {
