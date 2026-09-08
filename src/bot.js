@@ -65,17 +65,23 @@ async function checkForceJoin(ctx, env, userId) {
     if (!channels || channels.length === 0) return { passed: true };
 
     const unjoined = [];
-    for (const ch of channels) {
+    const checkPromises = channels.map(async (ch) => {
       try {
         const member = await ctx.telegram.getChatMember(ch.channel_id, userId);
         const validStatuses = ['creator', 'administrator', 'member', 'restricted'];
         if (!validStatuses.includes(member.status)) {
-          unjoined.push(ch);
+          return ch;
         }
       } catch (e) {
         console.warn(`Could not check membership for channel ${ch.channel_id}:`, e.message);
-        unjoined.push(ch);
+        return ch;
       }
+      return null;
+    });
+
+    const results = await Promise.all(checkPromises);
+    for (const r of results) {
+      if (r) unjoined.push(r);
     }
 
     if (unjoined.length > 0) {
@@ -143,8 +149,10 @@ async function sendPostToUser(ctx, env, post, postId) {
     }).catch(e => console.warn('Record file access warning in bot:', e.message));
   }
 
-  const folders = await getPostFoldersWithFiles(env, postId);
-  const settings = await getSettings(env);
+  const [folders, settings] = await Promise.all([
+    getPostFoldersWithFiles(env, postId),
+    getSettings(env)
+  ]);
   const globalTimer = (settings.auto_delete_minutes !== undefined && settings.auto_delete_minutes !== null && !isNaN(settings.auto_delete_minutes)) ? Number(settings.auto_delete_minutes) : 30;
   let autoDeleteMinutes = globalTimer;
   if (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined && post.auto_delete_minutes !== '') {
@@ -267,7 +275,7 @@ async function sendPostToUser(ctx, env, post, postId) {
       console.warn('Failed to send auto-delete notice:', nErr.message);
     }
 
-    // Register all sent message IDs for auto-deletion
+    // Register all sent message IDs for auto-deletion in the background
     if (sentMessageIds.length > 0) {
       const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
       const records = sentMessageIds.map(mid => ({
@@ -276,12 +284,12 @@ async function sendPostToUser(ctx, env, post, postId) {
         delete_at: deleteAt,
         is_deleted: false
       }));
-      await addEphemeralMessages(env, records);
+      addEphemeralMessages(env, records).catch(e => console.warn('Ephemeral add error:', e.message));
     }
   }
 
-  // Background cleanup of any past expired messages
-  await processEphemeralDeletions(env).catch(e => console.warn('Ephemeral cleanup warning:', e.message));
+  // Background cleanup of any past expired messages (non-blocking)
+  processEphemeralDeletions(env).catch(e => console.warn('Ephemeral cleanup warning:', e.message));
 }
 
 /**
@@ -315,19 +323,23 @@ export function createBot(env) {
   // -------------------------------------------------------------
   async function showMainMenu(ctx) {
     const userId = ctx.from?.id;
-    const isAdmin = await isAdminUser(env, userId);
-    const settings = await getSettings(env);
+
+    // Fetch admin status, settings, and user points in parallel
+    const [isAdmin, settings, userObj] = await Promise.all([
+      isAdminUser(env, userId),
+      getSettings(env),
+      getUser(env, userId).catch(() => null)
+    ]);
+
     const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${userId}` : `${appUrl}?user_id=${userId}`) : appUrl;
 
-    try {
-      if (userAppUrl.startsWith('https://')) {
-        await ctx.setChatMenuButton({
-          type: 'web_app',
-          text: '🚀 Open App',
-          web_app: { url: userAppUrl }
-        });
-      }
-    } catch (e) {}
+    if (userAppUrl.startsWith('https://')) {
+      ctx.setChatMenuButton({
+        type: 'web_app',
+        text: '🚀 Open App',
+        web_app: { url: userAppUrl }
+      }).catch(() => {});
+    }
 
     if (isAdmin) {
       // Admin Control Panel
@@ -376,9 +388,7 @@ export function createBot(env) {
       }
     } else {
       // Regular User Panel
-      let userPoints = 0;
-      const u = await getUser(env, userId);
-      userPoints = u?.points || 0;
+      const userPoints = userObj?.points || 0;
 
       const inlineButtons = [
         [Markup.button.webApp('🚀 Launch Mini App', userAppUrl)],

@@ -29,49 +29,30 @@ export async function saveOrUpdateUser(env, user) {
 
   try {
     const baseUrl = getSupabaseBaseUrl(env);
-    const checkUrl = `${baseUrl}/users?id=eq.${user.id}&select=id,interactions,first_seen`;
-    const checkRes = await fetch(checkUrl, {
-      method: 'GET',
-      headers: getSupabaseHeaders(env)
+    const headers = getSupabaseHeaders(env, {
+      'Prefer': 'resolution=merge-duplicates,return=representation'
     });
 
-    const existingUsers = checkRes.ok ? await checkRes.json() : [];
+    const body = {
+      id: user.id,
+      username: user.username || null,
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
+      language_code: user.language_code || 'en',
+      last_activity: new Date().toISOString()
+    };
 
-    if (existingUsers && existingUsers.length > 0) {
-      const existing = existingUsers[0];
-      const updateUrl = `${baseUrl}/users?id=eq.${user.id}`;
-      await fetch(updateUrl, {
-        method: 'PATCH',
-        headers: getSupabaseHeaders(env),
-        body: JSON.stringify({
-          username: user.username || null,
-          first_name: user.first_name || '',
-          last_name: user.last_name || '',
-          language_code: user.language_code || 'en',
-          last_activity: new Date().toISOString(),
-          interactions: (Number(existing.interactions) || 0) + 1
-        })
-      });
-      return existing;
-    } else {
-      const insertUrl = `${baseUrl}/users`;
-      const insertRes = await fetch(insertUrl, {
-        method: 'POST',
-        headers: getSupabaseHeaders(env),
-        body: JSON.stringify({
-          id: user.id,
-          username: user.username || null,
-          first_name: user.first_name || '',
-          last_name: user.last_name || '',
-          language_code: user.language_code || 'en',
-          first_seen: new Date().toISOString(),
-          last_activity: new Date().toISOString(),
-          interactions: 1
-        })
-      });
-      const inserted = await insertRes.json();
+    const res = await fetch(`${baseUrl}/users`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body)
+    });
+
+    if (res.ok) {
+      const inserted = await res.json();
       return inserted ? inserted[0] : null;
     }
+    return null;
   } catch (error) {
     console.error('Error saving user to Supabase:', error);
     return null;
@@ -873,10 +854,22 @@ export async function getSavedPosts(env, user_id) {
   }));
 }
 
-// ------------------------------------------
-// 7. GLOBAL SETTINGS & STAT COUNTERS
-// ------------------------------------------
+// In-memory cache for global settings (reduces Supabase calls on hot webhook traffic)
+let cachedSettings = null;
+let settingsCacheTime = 0;
+const SETTINGS_CACHE_TTL = 30000; // 30 seconds cache
+
+export function invalidateSettingsCache() {
+  cachedSettings = null;
+  settingsCacheTime = 0;
+}
+
 export async function getSettings(env) {
+  const now = Date.now();
+  if (cachedSettings && (now - settingsCacheTime < SETTINGS_CACHE_TTL)) {
+    return cachedSettings;
+  }
+
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
   const res = await fetch(`${baseUrl}/settings?select=key,value`, { headers });
@@ -890,7 +883,7 @@ export async function getSettings(env) {
     }
   });
 
-  return {
+  const parsed = {
     referral_enabled: Boolean(map.referral_enabled),
     referral_points: (map.referral_points !== undefined && map.referral_points !== null) ? Number(map.referral_points) : 10,
     shortener_enabled: Boolean(map.shortener_enabled),
@@ -907,9 +900,14 @@ export async function getSettings(env) {
     force_join_enabled: Boolean(map.force_join_enabled),
     shorteners: Array.isArray(map.shorteners) ? map.shorteners : []
   };
+
+  cachedSettings = parsed;
+  settingsCacheTime = now;
+  return parsed;
 }
 
 export async function updateSetting(env, key, value) {
+  invalidateSettingsCache();
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
   const res = await fetch(`${baseUrl}/settings`, {
@@ -979,16 +977,34 @@ export async function deleteShortener(env, id) {
 }
 
 // ------------------------------------------
-// 9. FORCE JOIN CHANNELS
+// 9. FORCE JOIN CHANNELS (With in-memory caching)
 // ------------------------------------------
+let cachedForceChannels = null;
+let forceChannelsCacheTime = 0;
+const FORCE_CHANNELS_CACHE_TTL = 60000; // 60 seconds
+
+export function invalidateForceChannelsCache() {
+  cachedForceChannels = null;
+  forceChannelsCacheTime = 0;
+}
+
 export async function getForceChannels(env) {
+  const now = Date.now();
+  if (cachedForceChannels && (now - forceChannelsCacheTime < FORCE_CHANNELS_CACHE_TTL)) {
+    return cachedForceChannels;
+  }
+
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
   const res = await fetch(`${baseUrl}/force_channels?order=created_at.asc`, { headers });
-  return res.ok ? await res.json() : [];
+  const data = res.ok ? await res.json() : [];
+  cachedForceChannels = data;
+  forceChannelsCacheTime = now;
+  return data;
 }
 
 export async function addForceChannel(env, { channel_id, channel_title, invite_link }) {
+  invalidateForceChannelsCache();
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
   const res = await fetch(`${baseUrl}/force_channels`, {
@@ -1000,6 +1016,7 @@ export async function addForceChannel(env, { channel_id, channel_title, invite_l
 }
 
 export async function removeForceChannel(env, id) {
+  invalidateForceChannelsCache();
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
   const res = await fetch(`${baseUrl}/force_channels?id=eq.${id}`, {
@@ -1350,20 +1367,38 @@ export async function getAllUserIds(env) {
 export const getAllRegisteredUserIds = getAllUserIds;
 
 // ------------------------------------------
-// 14. MULTI-ADMIN MANAGEMENT
+// 14. MULTI-ADMIN MANAGEMENT (With in-memory caching)
 // ------------------------------------------
+let cachedAdminIds = null;
+let adminCacheTime = 0;
+const ADMIN_CACHE_TTL = 60000; // 60 seconds
+
+export function invalidateAdminCache() {
+  cachedAdminIds = null;
+  adminCacheTime = 0;
+}
+
 export async function isAdminUser(env, userId) {
   if (!userId) return false;
   const uidStr = String(userId);
   if (env.ADMIN_ID && uidStr === String(env.ADMIN_ID)) return true;
 
+  const now = Date.now();
+  if (cachedAdminIds && (now - adminCacheTime < ADMIN_CACHE_TTL)) {
+    return cachedAdminIds.has(uidStr);
+  }
+
   try {
     const baseUrl = getSupabaseBaseUrl(env);
     const headers = getSupabaseHeaders(env);
-    const res = await fetch(`${baseUrl}/admins?user_id=eq.${userId}&select=user_id`, { headers });
+    const res = await fetch(`${baseUrl}/admins?select=user_id`, { headers });
     if (res.ok) {
       const rows = await res.json();
-      return Array.isArray(rows) && rows.length > 0;
+      const idSet = new Set((rows || []).map(r => String(r.user_id)));
+      if (env.ADMIN_ID) idSet.add(String(env.ADMIN_ID));
+      cachedAdminIds = idSet;
+      adminCacheTime = now;
+      return idSet.has(uidStr);
     }
   } catch (e) {
     console.warn('Error checking admin status:', e);
@@ -1405,6 +1440,7 @@ export async function getAdmins(env) {
 
 export async function addAdmin(env, { user_id, username = '', full_name = '', added_by = null }) {
   if (!user_id) throw new Error('user_id is required');
+  invalidateAdminCache();
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
 
@@ -1432,6 +1468,7 @@ export async function deleteAdmin(env, userId) {
   if (String(userId) === String(env.ADMIN_ID)) {
     throw new Error('Cannot remove primary root admin.');
   }
+  invalidateAdminCache();
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);
 
