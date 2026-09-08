@@ -1020,17 +1020,6 @@ const rawHtml = `<!DOCTYPE html>
         <div class="nav-pill" id="navAdminPill" style="display: none; background: rgba(251, 191, 36, 0.15); border-color: rgba(251, 191, 36, 0.4); color: #fbbf24; font-weight: 700;" data-view="admin">👑 Admin Hub</div>
       </div>
 
-      <!-- Categories Bar -->
-      <div class="categories-bar" id="categoriesBar">
-        <div class="category-chip active" data-cat="All">✨ All</div>
-        <div class="category-chip" data-cat="Movies">🎬 Movies</div>
-        <div class="category-chip" data-cat="Series">📺 Series</div>
-        <div class="category-chip" data-cat="Courses">🎓 Courses</div>
-        <div class="category-chip" data-cat="Software">💻 Software</div>
-        <div class="category-chip" data-cat="Music">🎵 Music</div>
-        <div class="category-chip" data-cat="Tutorials">📚 Tutorials</div>
-      </div>
-
       <!-- Controls Bar (Search & Modern Segmented Sort) -->
       <div class="controls-bar">
         <div class="search-input-wrapper">
@@ -1043,6 +1032,7 @@ const rawHtml = `<!DOCTYPE html>
           <button class="sort-segment" data-sort="latest">🕒 Latest</button>
           <button class="sort-segment" data-sort="views">🔥 Most Views</button>
           <button class="sort-segment" data-sort="likes">❤️ Most Liked</button>
+          <button class="sort-segment" data-sort="downloads">📥 Most Downloads</button>
         </div>
       </div>
 
@@ -1274,14 +1264,6 @@ const rawHtml = `<!DOCTYPE html>
             </div>
           </div>
 
-          <!-- Top Categories Management -->
-          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px;">
-            <div style="font-weight: 700; font-size: 0.92rem; margin-bottom: 4px;">🏷️ Top Categories Management</div>
-            <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 8px;">
-              Enter categories separated by commas. These will appear in the home top bar and post category dropdowns.
-            </div>
-            <input type="text" id="setAdminCategories" class="form-input" placeholder="All, Movies, Series, Courses, Software, Music, Tutorials" />
-          </div>
 
           <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">💾 Save Hub Settings</button>
         </form>
@@ -1441,15 +1423,9 @@ const rawHtml = `<!DOCTYPE html>
             <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Post Title (Default: Post #N)</label>
             <input type="text" id="createPostTitle" class="form-input" placeholder="e.g. Post #76 (226.8 MB)" required />
           </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <div>
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Size (e.g. 226.8 MB)</label>
-              <input type="text" id="createPostSize" class="form-input" placeholder="e.g. 226.8 MB" />
-            </div>
-            <div>
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Category</label>
-              <select id="createPostCategory" class="form-input" style="background: #1e293b;"></select>
-            </div>
+          <div>
+            <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Size (e.g. 226.8 MB)</label>
+            <input type="text" id="createPostSize" class="form-input" placeholder="e.g. 226.8 MB" />
           </div>
           <div>
             <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Preview Image URL (Optional)</label>
@@ -1513,15 +1489,9 @@ const rawHtml = `<!DOCTYPE html>
             <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Title</label>
             <input type="text" id="editPostTitle" class="form-input" required />
           </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-            <div>
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Category</label>
-              <select id="editPostCategory" class="form-input" style="background: #1e293b;"></select>
-            </div>
-            <div>
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Tags</label>
-              <input type="text" id="editPostTags" class="form-input" />
-            </div>
+          <div>
+            <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Tags</label>
+            <input type="text" id="editPostTags" class="form-input" />
           </div>
           <div>
             <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Preview Image URL</label>
@@ -1646,7 +1616,6 @@ const rawHtml = `<!DOCTYPE html>
 
     let allPosts = [];
     let savedPostIds = new Set();
-    let currentCategory = 'All';
     let currentSort = 'all';
     let currentSearch = '';
     let currentView = 'feed';
@@ -1655,39 +1624,6 @@ const rawHtml = `<!DOCTYPE html>
     let activeCommentPostId = null;
     let basePostNumber = 76;
     let selectedUserForAction = null;
-
-    function renderCategoryChips(categories) {
-      const bar = document.getElementById('categoriesBar');
-      if (!bar) return;
-      const cats = Array.isArray(categories) && categories.length > 0 ? categories : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'];
-      bar.innerHTML = '';
-      cats.forEach(c => {
-        const chip = document.createElement('div');
-        chip.className = 'category-chip' + (c.toLowerCase() === currentCategory.toLowerCase() ? ' active' : '');
-        chip.dataset.cat = c;
-        chip.textContent = (c === 'All' ? '✨ ' : '') + c;
-        bar.appendChild(chip);
-      });
-    }
-
-    function populateCategoryDropdowns(categories) {
-      const cats = Array.isArray(categories) && categories.length > 0 ? categories : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'];
-      const selects = [document.getElementById('createPostCategory'), document.getElementById('editPostCategory')];
-      selects.forEach(sel => {
-        if (!sel) return;
-        const currentVal = sel.value;
-        sel.innerHTML = '';
-        cats.forEach(c => {
-          const opt = document.createElement('option');
-          opt.value = c;
-          opt.textContent = c;
-          sel.appendChild(opt);
-        });
-        if (currentVal && cats.includes(currentVal)) {
-          sel.value = currentVal;
-        }
-      });
-    }
 
     function showToast(msg) {
       const toast = document.getElementById('toast');
@@ -1776,14 +1712,6 @@ const rawHtml = `<!DOCTYPE html>
             banner.style.display = 'flex';
           }
 
-          // Setup Dynamic Categories
-          const cats = (Array.isArray(globalSettings.categories) && globalSettings.categories.length > 0)
-            ? globalSettings.categories
-            : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'];
-          const catInput = document.getElementById('setAdminCategories');
-          if (catInput) catInput.value = cats.join(', ');
-          renderCategoryChips(cats);
-          populateCategoryDropdowns(cats);
 
           // Check Require Bot Start Gate
           checkRequireBotStart(data.has_started_bot);
@@ -1820,7 +1748,14 @@ const rawHtml = `<!DOCTYPE html>
         const res = await fetch('/api/posts?user_id=' + currentUserId);
         const data = await res.json();
         if (data.success) {
-          allPosts = data.posts || [];
+          allPosts = (data.posts || []).map(p => {
+            const likes = Number(p.like_count) || 0;
+            const downloads = Number(p.access_count) || 0;
+            const views = Number(p.view_count) || 0;
+            const base = (likes * 5) + (downloads * 4) + (views * 1);
+            p._popularityScore = (base + 1) * (0.8 + Math.random() * 0.4);
+            return p;
+          });
           savedPostIds = new Set(allPosts.filter(p => p.is_saved).map(p => p.id));
           renderFeed();
         }
@@ -1840,16 +1775,11 @@ const rawHtml = `<!DOCTYPE html>
         list = list.filter(p => savedPostIds.has(p.id));
       }
 
-      if (currentCategory !== 'All') {
-        list = list.filter(p => (p.category || 'All').toLowerCase() === currentCategory.toLowerCase());
-      }
-
       if (currentSearch.trim()) {
         const q = currentSearch.toLowerCase();
         list = list.filter(p =>
           (p.title || '').toLowerCase().includes(q) ||
-          (p.tags || '').toLowerCase().includes(q) ||
-          (p.category || '').toLowerCase().includes(q)
+          (p.tags || '').toLowerCase().includes(q)
         );
       }
 
@@ -1859,16 +1789,21 @@ const rawHtml = `<!DOCTYPE html>
         if (!a.is_promoted && b.is_promoted) return 1;
 
         if (currentSort === 'views') {
-          return (b.view_count || 0) - (a.view_count || 0);
+          return (Number(b.view_count) || 0) - (Number(a.view_count) || 0);
         } else if (currentSort === 'likes') {
-          return (b.like_count || 0) - (a.like_count || 0);
+          return (Number(b.like_count) || 0) - (Number(a.like_count) || 0);
+        } else if (currentSort === 'downloads') {
+          return (Number(b.access_count) || 0) - (Number(a.access_count) || 0);
+        } else if (currentSort === 'latest') {
+          return new Date(b.created_at || 0) - new Date(a.created_at || 0);
         } else {
-          return new Date(b.created_at) - new Date(a.created_at);
+          // Default 'all': Organic engagement ranking as per highest likes, views, and downloads with dynamic variety
+          return (b._popularityScore || 0) - (a._popularityScore || 0);
         }
       });
 
       if (list.length === 0) {
-        grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 40px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 38px; margin-bottom: 8px;">🔍</div><div style="font-weight: 600;">No posts found</div><div style="font-size: 0.8rem; margin-top: 4px;">Try a different search term or category.</div></div>';
+        grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 40px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 38px; margin-bottom: 8px;">🔍</div><div style="font-weight: 600;">No posts found</div><div style="font-size: 0.8rem; margin-top: 4px;">Try a different search term.</div></div>';
         return;
       }
 
@@ -1885,9 +1820,9 @@ const rawHtml = `<!DOCTYPE html>
           imgHtml = '<div class="post-image-backdrop" style="background-image: url(\'' + escapeHtml(post.preview_image) + '\');"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />';
         }
 
-        let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted" style="color: #fff; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);">⭐ Exclusive</span>' : '<span></span>';
+        let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted" style="color: #fff; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);">⭐ Exclusive</span>' : '';
 
-        card.innerHTML = '<div class="post-image-container">' + imgHtml + '<div class="post-badges-top">' + promotedBadge + '<span class="category-badge-card">' + escapeHtml(post.category || 'All') + '</span></div></div>' +
+        card.innerHTML = '<div class="post-image-container">' + imgHtml + (promotedBadge ? '<div class="post-badges-top">' + promotedBadge + '</div>' : '') + '</div>' +
           '<div class="post-body">' +
           '<h3 class="post-title">' + escapeHtml(post.title) + '</h3>' +
           '<div class="post-meta"><span>📅 ' + new Date(post.created_at).toLocaleDateString() + '</span>' + (post.tags ? '<span>• ' + escapeHtml(post.tags) + '</span>' : '') + (shortenerOn ? '<span style="color: #fbbf24; font-weight: 700;">• 🪙 ' + pointsRequired + ' pt' + (pointsRequired > 1 ? 's' : '') + '</span>' : '') + '</div>' +
@@ -2214,11 +2149,6 @@ const rawHtml = `<!DOCTYPE html>
           document.getElementById('setRequireBotStartToggle').checked = Boolean(globalSettings.require_bot_start_enabled);
           document.getElementById('setRequireBotStartMsg').value = globalSettings.require_bot_start_message || '';
           document.getElementById('setRequireBotStartLink').value = globalSettings.require_bot_start_link || '';
-          const cats = (Array.isArray(globalSettings.categories) && globalSettings.categories.length > 0)
-            ? globalSettings.categories
-            : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'];
-          const catInput = document.getElementById('setAdminCategories');
-          if (catInput) catInput.value = cats.join(', ');
         }
       });
 
@@ -2329,7 +2259,6 @@ const rawHtml = `<!DOCTYPE html>
         document.getElementById('createPostStatus').value = 'published';
         document.getElementById('createPostPromoted').checked = false;
         document.getElementById('createScheduledGroup').style.display = 'none';
-        populateCategoryDropdowns(globalSettings.categories);
 
         document.getElementById('createPostModal').classList.add('active');
       });
@@ -2367,7 +2296,7 @@ const rawHtml = `<!DOCTYPE html>
           const payload = {
             title: document.getElementById('createPostTitle').value.trim(),
             size: document.getElementById('createPostSize').value.trim(),
-            category: document.getElementById('createPostCategory').value || 'All',
+            category: 'All',
             preview_image: document.getElementById('createPostImage').value.trim() || null,
             direct_link: document.getElementById('createPostLink').value.trim() || null,
             direct_link_title: document.getElementById('createPostLinkLabel').value.trim() || null,
@@ -2416,10 +2345,8 @@ const rawHtml = `<!DOCTYPE html>
             const data = await res.json();
             if (data.success && data.post) {
               const post = data.post;
-              populateCategoryDropdowns(globalSettings.categories);
               document.getElementById('editPostId').value = post.id;
               document.getElementById('editPostTitle').value = post.title || '';
-              document.getElementById('editPostCategory').value = post.category || 'All';
               document.getElementById('editPostTags').value = post.tags || '';
               document.getElementById('editPostImage').value = post.preview_image || '';
               document.getElementById('editPostLink').value = post.direct_link || '';
@@ -2482,7 +2409,7 @@ const rawHtml = `<!DOCTYPE html>
         const payload = {
           user_id: currentUserId,
           title: document.getElementById('editPostTitle').value.trim(),
-          category: document.getElementById('editPostCategory').value.trim() || 'All',
+          category: 'All',
           tags: document.getElementById('editPostTags').value.trim(),
           preview_image: document.getElementById('editPostImage').value.trim(),
           direct_link: document.getElementById('editPostLink').value.trim(),
@@ -2566,15 +2493,6 @@ const rawHtml = `<!DOCTYPE html>
         renderFeed();
       });
 
-      // Category filter
-      document.getElementById('categoriesBar')?.addEventListener('click', (e) => {
-        const chip = e.target.closest('.category-chip');
-        if (!chip) return;
-        document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        currentCategory = chip.dataset.cat;
-        renderFeed();
-      });
 
       // Segmented Sort Control
       document.getElementById('sortControl')?.addEventListener('click', (e) => {
@@ -2726,11 +2644,6 @@ const rawHtml = `<!DOCTYPE html>
           require_bot_start_link: document.getElementById('setRequireBotStartLink').value.trim()
         };
 
-        const catStr = document.getElementById('setAdminCategories')?.value || '';
-        const cats = catStr.split(',').map(s => s.trim()).filter(Boolean);
-        if (cats.length > 0) {
-          settings.categories = cats;
-        }
 
         try {
           const res = await fetch('/api/admin/settings', {
