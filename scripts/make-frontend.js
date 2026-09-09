@@ -1817,7 +1817,7 @@ const rawHtml = `<!DOCTYPE html>
 
         let imgHtml = '<div class="post-image-placeholder">📄</div>';
         if (post.preview_image) {
-          imgHtml = '<div class="post-image-backdrop" style="background-image: url(\'' + escapeHtml(post.preview_image) + '\');"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />';
+          imgHtml = '<div class="post-image-backdrop" style="background-image: url(&quot;' + escapeHtml(post.preview_image) + '&quot;);"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />';
         }
 
         let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted" style="color: #fff; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);">⭐ Exclusive</span>' : '';
@@ -1861,7 +1861,7 @@ const rawHtml = `<!DOCTYPE html>
             const card = document.createElement('div');
             card.className = 'post-card';
             card.innerHTML = '<div class="post-image-container" style="height: 140px;">' +
-              (post.preview_image ? '<div class="post-image-backdrop" style="background-image: url(\\'' + escapeHtml(post.preview_image) + '\\');"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />' : '<div class="post-image-placeholder">📄</div>') +
+              (post.preview_image ? '<div class="post-image-backdrop" style="background-image: url(&quot;' + escapeHtml(post.preview_image) + '&quot;);"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />' : '<div class="post-image-placeholder">📄</div>') +
               '<div class="post-badges-top"><span class="post-status-badge status-' + post.status + '">' + post.status + '</span>' +
               (post.is_promoted ? '<span class="post-status-badge status-promoted">⭐ Pin</span>' : '') + '</div></div>' +
               '<div class="post-body">' +
@@ -2902,7 +2902,11 @@ const rawHtml = `<!DOCTYPE html>
     }
 
     // Start App
-    window.addEventListener('DOMContentLoaded', initApp);
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initApp);
+    } else {
+      initApp();
+    }
   </script>
 </body>
 </html>`;
