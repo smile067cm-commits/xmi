@@ -561,6 +561,7 @@ export async function deleteFolder(env, folderId) {
 export async function recordPostView(env, { post_id, user_id, username, first_name }) {
   if (!env.SUPABASE_URL || !post_id || !user_id) return null;
   try {
+    if (await isAdminUser(env, user_id)) return null;
     const url = `${getSupabaseBaseUrl(env)}/post_views`;
     await fetch(url, {
       method: 'POST',
@@ -583,6 +584,7 @@ export async function recordPostView(env, { post_id, user_id, username, first_na
 export async function recordFileAccess(env, { post_id, folder_id = null, file_id = null, item_name, user_id, username, first_name }) {
   if (!env.SUPABASE_URL || !post_id || !user_id) return null;
   try {
+    if (await isAdminUser(env, user_id)) return null;
     const url = `${getSupabaseBaseUrl(env)}/file_access_logs`;
     await fetch(url, {
       method: 'POST',
@@ -600,6 +602,22 @@ export async function recordFileAccess(env, { post_id, folder_id = null, file_id
   } catch (err) {
     console.warn('Record file access warning:', err.message);
   }
+}
+
+/**
+ * Reset/Clear all likes, post views, and file access logs
+ */
+export async function resetAllMetrics(env) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+
+  await Promise.all([
+    fetch(`${baseUrl}/likes?post_id=gt.0`, { method: 'DELETE', headers }).catch(() => {}),
+    fetch(`${baseUrl}/post_views?id=gt.0`, { method: 'DELETE', headers }).catch(() => {}),
+    fetch(`${baseUrl}/file_access_logs?id=gt.0`, { method: 'DELETE', headers }).catch(() => {})
+  ]);
+
+  return { success: true, message: 'All likes, views, and downloads have been cleared.' };
 }
 
 /**

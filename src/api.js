@@ -42,7 +42,8 @@ import {
   processEphemeralDeletions,
   updateUserBlockedStatus,
   getNextPostNumber,
-  formatBytes
+  formatBytes,
+  resetAllMetrics
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
@@ -984,7 +985,7 @@ export function createRouter() {
       const body = await request.json();
       const { user_id, username, first_name } = body || {};
 
-      if (user_id) {
+      if (user_id && !(await isAdminUser(env, user_id))) {
         await recordPostView(env, {
           post_id: id,
           user_id,
@@ -1008,7 +1009,7 @@ export function createRouter() {
       const body = await request.json();
       const { folder_id, file_id, item_name, user_id, username, first_name } = body || {};
 
-      if (user_id) {
+      if (user_id && !(await isAdminUser(env, user_id))) {
         await recordFileAccess(env, {
           post_id: id,
           folder_id,
@@ -1023,6 +1024,28 @@ export function createRouter() {
       return jsonResponse({ success: true });
     } catch (err) {
       return jsonResponse({ success: false, error: err.message }, 200);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/admin/metrics/reset - Reset All Likes, Views & Downloads (Admin Only)
+  // -------------------------------------------------------------
+  router.post('/api/admin/metrics/reset', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const body = await request.json().catch(() => ({}));
+      const userId = queryUserId || body.user_id;
+
+      if (!userId || !(await isAdminUser(env, userId))) {
+        return errorResponse('Admin access required', 403);
+      }
+
+      const res = await resetAllMetrics(env);
+      return jsonResponse(res);
+    } catch (err) {
+      console.error('API /api/admin/metrics/reset error:', err);
+      return errorResponse(err.message, 500);
     }
   });
 

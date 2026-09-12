@@ -1262,8 +1262,16 @@ const rawHtml = `<!DOCTYPE html>
                 <input type="url" id="setRequireBotStartLink" class="form-input" placeholder="https://t.me/__BOT_USERNAME__?start=start" />
               </div>
             </div>
+          <!-- Metrics Management (Reset Likes, Views & Downloads) -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 14px; padding: 14px;">
+            <div style="font-weight: 700; font-size: 0.92rem; color: #f87171; margin-bottom: 4px;">🧹 Reset Metrics &amp; Logs</div>
+            <div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 10px;">
+              Permanently clear all likes, views, and downloads across all posts. Admin views and downloads are never counted.
+            </div>
+            <button type="button" id="btnResetAllMetrics" class="btn" style="width: 100%; border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1); color: #f87171; padding: 10px; font-weight: 700; border-radius: 10px; cursor: pointer;">
+              🗑️ Clear All Likes, Views &amp; Downloads
+            </button>
           </div>
-
 
           <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">💾 Save Hub Settings</button>
         </form>
@@ -2661,6 +2669,34 @@ const rawHtml = `<!DOCTYPE html>
         }
       });
 
+      // Clear All Likes, Views & Downloads
+      document.getElementById('btnResetAllMetrics')?.addEventListener('click', async () => {
+        if (!confirm('⚠️ Are you sure you want to permanently reset and clear all likes, views, and downloads across all posts?')) {
+          return;
+        }
+        const btn = document.getElementById('btnResetAllMetrics');
+        btn.disabled = true;
+        btn.textContent = 'Clearing metrics...';
+        try {
+          const res = await fetch('/api/admin/metrics/reset?user_id=' + currentUserId, {
+            method: 'POST'
+          });
+          const data = await res.json();
+          if (data.success) {
+            showToast('✅ All likes, views & downloads cleared!');
+            await loadPosts();
+            await loadAdminPosts();
+          } else {
+            showToast(data.error || 'Failed to clear metrics');
+          }
+        } catch (e) {
+          showToast('Failed to clear metrics');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '🗑️ Clear All Likes, Views & Downloads';
+        }
+      });
+
       // Add Shortener Form
       document.getElementById('formAddShortener')?.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -2842,7 +2878,7 @@ const rawHtml = `<!DOCTYPE html>
       document.getElementById('commentsModal').classList.add('active');
 
       try {
-        const res = await fetch('/api/posts/' + postId);
+        const res = await fetch('/api/posts/' + postId + '?user_id=' + currentUserId);
         const data = await res.json();
         if (data.success) {
           const comments = data.post?.comments || [];
@@ -2853,9 +2889,23 @@ const rawHtml = `<!DOCTYPE html>
           list.innerHTML = '';
           comments.forEach(c => {
             const item = document.createElement('div');
-            item.style.cssText = 'background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 10px; margin-bottom: 8px; border: 1px solid var(--card-border);';
-            item.innerHTML = '<div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><strong style="font-size: 0.82rem; color: var(--primary);">' + escapeHtml(c.username) + '</strong><span style="font-size: 0.7rem; color: var(--text-muted);">' + new Date(c.created_at).toLocaleDateString() + '</span></div>' +
-              '<div style="font-size: 0.85rem; color: #e2e8f0; word-break: break-word;">' + escapeHtml(c.text) + '</div>';
+            item.style.cssText = 'background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 10px; margin-bottom: 8px; border: 1px solid ' + (c.is_hidden ? 'rgba(239, 68, 68, 0.45)' : 'var(--card-border)') + ';';
+
+            let adminControlsHtml = '';
+            if (isAdmin) {
+              const hideToggleBtn = c.is_hidden
+                ? '<button class="btn-comment-mod" data-cid="' + c.id + '" data-cact="unhide" style="padding: 3px 8px; font-size: 0.72rem; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; cursor: pointer; font-weight: 600;">👁️ Unhide</button>'
+                : '<button class="btn-comment-mod" data-cid="' + c.id + '" data-cact="hide" style="padding: 3px 8px; font-size: 0.72rem; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 6px; cursor: pointer; font-weight: 600;">🙈 Hide</button>';
+              const deleteBtn = '<button class="btn-comment-mod" data-cid="' + c.id + '" data-cact="delete" style="padding: 3px 7px; font-size: 0.72rem; background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 6px; cursor: pointer;" title="Delete permanently">🗑️</button>';
+              const hiddenBadge = c.is_hidden ? '<span style="font-size: 0.68rem; font-weight: 700; color: #f87171; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); padding: 2px 6px; border-radius: 4px;">HIDDEN</span>' : '';
+              adminControlsHtml = '<div style="display: flex; gap: 6px; align-items: center;">' + hiddenBadge + hideToggleBtn + deleteBtn + '</div>';
+            }
+
+            item.innerHTML = '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">' +
+              '<div style="display: flex; align-items: center; gap: 6px;"><strong style="font-size: 0.82rem; color: var(--primary);">' + escapeHtml(c.username || 'User') + '</strong><span style="font-size: 0.68rem; color: var(--text-muted);">' + new Date(c.created_at).toLocaleDateString() + '</span></div>' +
+              adminControlsHtml +
+              '</div>' +
+              '<div style="font-size: 0.85rem; color: ' + (c.is_hidden ? '#94a3b8; font-style: italic;' : '#e2e8f0;') + ' word-break: break-word;">' + escapeHtml(c.text) + '</div>';
             list.appendChild(item);
           });
         }
@@ -2863,6 +2913,39 @@ const rawHtml = `<!DOCTYPE html>
         list.innerHTML = '<div style="color: #f87171;">Failed to load comments.</div>';
       }
     }
+
+    // Comment Moderation Actions (Hide / Unhide / Delete)
+    document.getElementById('commentsList')?.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.btn-comment-mod');
+      if (!btn || !activeCommentPostId) return;
+      const commentId = btn.dataset.cid;
+      const action = btn.dataset.cact;
+      if (action === 'delete' && !confirm('⚠️ Are you sure you want to permanently delete this comment?')) {
+        return;
+      }
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/comments/moderate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            comment_id: commentId,
+            action,
+            user_id: currentUserId
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(action === 'delete' ? '🗑️ Comment deleted' : (action === 'hide' ? '🙈 Comment hidden from public' : '👁️ Comment unhidden'));
+          await openCommentsModal(activeCommentPostId);
+          await loadPosts();
+        } else {
+          showToast(data.error || 'Failed to moderate comment');
+        }
+      } catch (err) {
+        showToast('Error moderating comment');
+      }
+    });
 
     document.getElementById('btnCommentsClose')?.addEventListener('click', () => {
       document.getElementById('commentsModal').classList.remove('active');
