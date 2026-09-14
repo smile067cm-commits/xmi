@@ -45,7 +45,8 @@ import {
   formatBytes,
   resetAllMetrics,
   getUserActivity,
-  getAllCommentsForAdmin
+  getAllCommentsForAdmin,
+  updateUserLastActivity
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
@@ -172,6 +173,9 @@ export function createRouter() {
       let userData = null;
       let hasStartedBot = false;
       if (userId && Number(userId) > 0) {
+        // Track app open presence
+        updateUserLastActivity(env, userId, '📱 Opened Mini App').catch(() => {});
+
         const u = await getUser(env, userId);
         if (u) {
           hasStartedBot = (Number(u.interactions) || 0) > 0;
@@ -195,6 +199,22 @@ export function createRouter() {
       });
     } catch (err) {
       console.error('API /api/settings error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/user/heartbeat - Heartbeat to track active presence
+  // -------------------------------------------------------------
+  router.post('/api/user/heartbeat', async (request, env) => {
+    try {
+      const body = await request.json().catch(() => ({}));
+      const userId = body.user_id;
+      if (!userId) return errorResponse('Missing user_id', 400);
+
+      await updateUserLastActivity(env, userId, body.action || null);
+      return jsonResponse({ success: true, timestamp: new Date().toISOString() });
+    } catch (err) {
       return errorResponse(err.message, 500);
     }
   });

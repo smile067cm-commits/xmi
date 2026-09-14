@@ -674,7 +674,7 @@ export async function getGlobalStats(env) {
   try {
     const [usersRes, postsRes, viewsRes, filesRes, likesRes, commentsRes, settingsRes] = await Promise.all([
       fetch(`${baseUrl}/users?select=id,points`, { headers }),
-      fetch(`${baseUrl}/posts?select=id,title,status,is_promoted,post_views(id),likes(user_id)`, { headers }),
+      fetch(`${baseUrl}/posts?select=id,title,status,is_promoted,post_views(id),likes(user_id),file_access_logs(id)`, { headers }),
       fetch(`${baseUrl}/post_views?select=id`, { headers }),
       fetch(`${baseUrl}/file_access_logs?select=id`, { headers }),
       fetch(`${baseUrl}/likes?select=post_id`, { headers }),
@@ -721,6 +721,18 @@ export async function getGlobalStats(env) {
       .sort((a, b) => b.like_count - a.like_count)
       .slice(0, 5);
 
+    // Calculate Top 5 Downloaded Posts
+    const topDownloads = [...posts]
+      .map(p => ({
+        id: p.id,
+        title: p.title,
+        download_count: p.file_access_logs ? p.file_access_logs.length : 0,
+        view_count: p.post_views ? p.post_views.length : 0,
+        like_count: p.likes ? p.likes.length : 0
+      }))
+      .sort((a, b) => b.download_count - a.download_count)
+      .slice(0, 5);
+
     return {
       total_users: users.length,
       total_posts: posts.length,
@@ -738,7 +750,9 @@ export async function getGlobalStats(env) {
       total_points_distributed: Number(statsCounters.total_points_distributed) || 0,
       total_points_spent: Number(statsCounters.total_points_spent) || 0,
       top_views: topViews,
-      top_likes: topLikes
+      top_likes: topLikes,
+      top_downloads: topDownloads,
+      highest_download_post: (topDownloads[0] && topDownloads[0].download_count > 0) ? topDownloads[0] : (topDownloads[0] || null)
     };
   } catch (err) {
     console.error('Error fetching global stats:', err);
@@ -1105,15 +1119,29 @@ export async function getSettingValue(env, key, defaultValue = null) {
 /**
  * Log user message or action to user_msgs_${userId}
  */
-export async function logUserMessage(env, userId, text, type = 'text') {
+export async function logUserMessage(env, userId, text, type = 'text', source = null) {
   if (!userId || !text) return;
   try {
     const key = `user_msgs_${userId}`;
     const msgs = (await getSettingValue(env, key, [])) || [];
+    const inferredSource = source || (type === 'app' ? 'app' : 'bot');
+    const nowIso = new Date().toISOString();
+
+    // Prevent duplicate consecutive entries within 60 seconds (e.g. repeated app opens/heartbeats)
+    if (msgs.length > 0 && msgs[0].text === text && msgs[0].type === type) {
+      const lastTime = new Date(msgs[0].date).getTime();
+      if (Date.now() - lastTime < 60000) {
+        msgs[0].date = nowIso;
+        await updateSetting(env, key, msgs);
+        return;
+      }
+    }
+
     msgs.unshift({
       text: String(text).slice(0, 500),
       type,
-      date: new Date().toISOString()
+      source: inferredSource,
+      date: nowIso
     });
     // Keep the most recent 50 messages
     if (msgs.length > 50) msgs.length = 50;
@@ -1124,11 +1152,42 @@ export async function logUserMessage(env, userId, text, type = 'text') {
 }
 
 /**
+ * Update user last_activity timestamp and log app action
+ */
+export async function updateUserLastActivity(env, userId, actionText = null, source = 'app') {
+  if (!env.SUPABASE_URL || !userId) return false;
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const now = new Date().toISOString();
+
+    // 1. Update last_activity in users table
+    await fetch(`${baseUrl}/users?id=eq.${userId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ last_activity: now })
+    }).catch(() => {});
+
+    // 2. If action text provided, log it
+    if (actionText) {
+      await logUserMessage(env, userId, actionText, 'app', source);
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('Error updating user last activity:', err.message);
+    return false;
+  }
+}
+
+/**
  * Fetch detailed user activity:
- * 1. User profile and status
- * 2. Messages & commands sent to bot
- * 3. Post files downloaded / accessed
- * 4. Posts watched / viewed
+ * 1. User profile and online status
+ * 2. Complete unified chronological action timeline (clearly distinguishing Bot vs Mini App)
+ * 3. Messages & commands sent to bot
+ * 4. Post files downloaded / accessed
+ * 5. Posts watched / viewed
+ * 6. Cause/last action before blocking (if blocked)
  */
 export async function getUserActivity(env, userId) {
   const baseUrl = getSupabaseBaseUrl(env);
@@ -1137,15 +1196,141 @@ export async function getUserActivity(env, userId) {
   const [user, messages, downloadsRes, viewsRes] = await Promise.all([
     getUser(env, userId).catch(() => null),
     getSettingValue(env, `user_msgs_${userId}`, []),
-    fetch(`${baseUrl}/file_access_logs?user_id=eq.${userId}&order=accessed_at.desc&limit=50&select=*,posts(id,title)`, { headers }).then(r => r.ok ? r.json() : []).catch(() => []),
-    fetch(`${baseUrl}/post_views?user_id=eq.${userId}&order=viewed_at.desc&limit=50&select=*,posts(id,title)`, { headers }).then(r => r.ok ? r.json() : []).catch(() => [])
+    fetch(`${baseUrl}/file_access_logs?user_id=eq.${userId}&order=accessed_at.desc&limit=100&select=*,posts(id,title)`, { headers }).then(r => r.ok ? r.json() : []).catch(() => []),
+    fetch(`${baseUrl}/post_views?user_id=eq.${userId}&order=viewed_at.desc&limit=100&select=*,posts(id,title)`, { headers }).then(r => r.ok ? r.json() : []).catch(() => [])
   ]);
 
+  const rawMessages = Array.isArray(messages) ? messages : [];
+  const rawDownloads = Array.isArray(downloadsRes) ? downloadsRes : [];
+  const rawViews = Array.isArray(viewsRes) ? viewsRes : [];
+
+  // Build unified chronological timeline with clear Bot vs Mini App tags
+  const timeline = [];
+
+  // 1. Initial join / start
+  if (user && user.first_seen) {
+    timeline.push({
+      type: 'join',
+      source: 'bot',
+      source_name: '🤖 Bot',
+      title: 'Joined & Started Bot',
+      description: 'First registered in bot directory',
+      date: user.first_seen,
+      icon: '🟢'
+    });
+  }
+
+  // 2. Bot & App Messages
+  for (const m of rawMessages) {
+    let icon = '💬';
+    let typeName = 'User Message';
+    const isApp = m.source === 'app' || m.type === 'app';
+    let itemSource = isApp ? 'app' : 'bot';
+    let sourceName = isApp ? '📱 Mini App' : '🤖 Bot';
+
+    if (m.type === 'callback') {
+      icon = '🔘';
+      typeName = 'Button Click';
+      itemSource = 'bot';
+      sourceName = '🤖 Bot';
+    } else if (m.type === 'app') {
+      icon = '📱';
+      typeName = 'Mini App Action';
+      itemSource = 'app';
+      sourceName = '📱 Mini App';
+    } else if (m.type === 'block') {
+      icon = '🚫';
+      typeName = 'Bot Blocked';
+      itemSource = 'bot';
+      sourceName = '🤖 Bot';
+    } else if (m.type === 'unblock') {
+      icon = '🟢';
+      typeName = 'Bot Unblocked';
+      itemSource = 'bot';
+      sourceName = '🤖 Bot';
+    }
+    timeline.push({
+      type: m.type || 'message',
+      source: itemSource,
+      source_name: sourceName,
+      title: m.text,
+      description: typeName,
+      date: m.date,
+      icon
+    });
+  }
+
+  // 3. Post Views (all viewed in Mini App feed)
+  for (const v of rawViews) {
+    const pTitle = v.posts?.title || `Post #${v.post_id}`;
+    timeline.push({
+      type: 'view',
+      source: 'app',
+      source_name: '📱 Mini App',
+      title: `Viewed Post: ${pTitle}`,
+      description: `Post #${v.post_id}`,
+      post_id: v.post_id,
+      date: v.viewed_at,
+      icon: '👁️'
+    });
+  }
+
+  // 4. File Downloads / Accesses (delivered via Telegram bot or direct item delivery)
+  for (const d of rawDownloads) {
+    const pTitle = d.posts?.title || `Post #${d.post_id}`;
+    timeline.push({
+      type: 'download',
+      source: 'bot',
+      source_name: '🤖 Bot',
+      title: `Downloaded: ${d.item_name || 'File'}`,
+      description: `From ${pTitle}`,
+      post_id: d.post_id,
+      date: d.accessed_at,
+      icon: '📥'
+    });
+  }
+
+  // 5. Block event (if blocked and not already in messages)
+  if (user && user.is_blocked && user.last_activity && !rawMessages.some(m => m.type === 'block')) {
+    timeline.push({
+      type: 'block',
+      source: 'bot',
+      source_name: '🤖 Bot',
+      title: '🚫 Blocked / Stopped Bot',
+      description: 'User stopped or blocked the Telegram bot',
+      date: user.last_activity,
+      icon: '🚫'
+    });
+  }
+
+  // Sort timeline descending (most recent first)
+  timeline.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  // Check if currently online (last_activity within last 5 minutes)
+  let isOnline = false;
+  if (user && user.last_activity) {
+    const diffMs = Date.now() - new Date(user.last_activity).getTime();
+    isOnline = diffMs >= 0 && diffMs < 5 * 60 * 1000;
+  }
+
+  // Determine last action before blocking if user is blocked
+  let lastActionBeforeBlock = null;
+  if (user && user.is_blocked) {
+    const nonBlockEvents = timeline.filter(e => e.type !== 'block');
+    if (nonBlockEvents.length > 0) {
+      lastActionBeforeBlock = nonBlockEvents[0];
+    }
+  }
+
   return {
-    user,
-    messages: Array.isArray(messages) ? messages : [],
-    downloads: Array.isArray(downloadsRes) ? downloadsRes : [],
-    views: Array.isArray(viewsRes) ? viewsRes : []
+    user: user ? { ...user, is_online: isOnline } : null,
+    is_online: isOnline,
+    last_action: timeline[0] || null,
+    last_action_before_block: lastActionBeforeBlock,
+    timeline,
+    messages: rawMessages,
+    downloads: rawDownloads,
+    views: rawViews
   };
 }
 
@@ -1577,10 +1762,18 @@ export async function getAllUsers(env) {
     if (!res.ok) return [];
     const users = await res.json();
     const blockedSet = await getBlockedUserIds(env);
-    return users.map(u => ({
-      ...u,
-      is_blocked: blockedSet.has(String(u.id))
-    }));
+    const now = Date.now();
+    return users.map(u => {
+      const isBlocked = blockedSet.has(String(u.id));
+      const lastAct = u.last_activity ? new Date(u.last_activity).getTime() : 0;
+      const diffMs = now - lastAct;
+      const isOnline = diffMs >= 0 && diffMs < 5 * 60 * 1000;
+      return {
+        ...u,
+        is_blocked: isBlocked,
+        is_online: isOnline
+      };
+    });
   } catch (e) {
     console.warn('Error fetching all users:', e);
     return [];

@@ -1089,24 +1089,29 @@ const rawHtml = `<!DOCTYPE html>
             <h3 style="font-size: 0.95rem; font-weight: 700;">👥 Registered Users Directory</h3>
             <button type="button" class="btn btn-sm btn-secondary" id="btnRefreshAdminUsers">🔄 Refresh Users</button>
           </div>
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; text-align: center;">
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px; text-align: center;">
             <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
               <div style="font-size: 1.15rem; font-weight: 800; color: #38bdf8;" id="cntUsersTotal">0</div>
-              <div style="font-size: 0.68rem; color: var(--text-muted);">Total Users</div>
+              <div style="font-size: 0.65rem; color: var(--text-muted);">Total</div>
             </div>
             <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
               <div style="font-size: 1.15rem; font-weight: 800; color: #4ade80;" id="cntUsersActive">0</div>
-              <div style="font-size: 0.68rem; color: var(--text-muted);">🟢 Active</div>
+              <div style="font-size: 0.65rem; color: var(--text-muted);">🟢 Active</div>
+            </div>
+            <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
+              <div style="font-size: 1.15rem; font-weight: 800; color: #22d3ee;" id="cntUsersOnline">0</div>
+              <div style="font-size: 0.65rem; color: var(--text-muted);">🌐 Online</div>
             </div>
             <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
               <div style="font-size: 1.15rem; font-weight: 800; color: #f87171;" id="cntUsersBlocked">0</div>
-              <div style="font-size: 0.68rem; color: var(--text-muted);">🚫 Blocked</div>
+              <div style="font-size: 0.65rem; color: var(--text-muted);">🚫 Blocked</div>
             </div>
           </div>
           <div style="display: flex; gap: 8px; margin-bottom: 10px;">
             <input type="text" id="adminUsersSearchInput" class="form-input" placeholder="🔍 Search name, username, or ID..." style="font-size: 0.8rem;" />
-            <select id="adminUsersFilterSelect" class="form-input" style="width: 120px; font-size: 0.78rem; background: #1e293b;">
-              <option value="all">All</option>
+            <select id="adminUsersFilterSelect" class="form-input" style="width: 130px; font-size: 0.78rem; background: #1e293b;">
+              <option value="all">All Users</option>
+              <option value="online">🟢 Online Now</option>
               <option value="active">Active Only</option>
               <option value="blocked">Blocked Only</option>
             </select>
@@ -1391,6 +1396,13 @@ const rawHtml = `<!DOCTYPE html>
             <div class="stat-value" style="color: #a78bfa;" id="gaDownloads">0</div>
             <div class="stat-label">📥 Downloads</div>
           </div>
+        </div>
+
+        <div id="adminHighestDownloadCard" style="display: none; background: linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(74, 222, 128, 0.1)); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 14px; padding: 14px 16px; margin: 12px 0;"></div>
+
+        <div class="leaderboard-section">
+          <div class="leaderboard-title">📥 Top 5 Most Downloaded Posts (Highest Downloads)</div>
+          <div id="adminTopDownloads"></div>
         </div>
 
         <div class="leaderboard-section">
@@ -1685,14 +1697,15 @@ const rawHtml = `<!DOCTYPE html>
         </div>
 
         <!-- Subtabs inside modal -->
-        <div style="display: flex; gap: 6px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px; margin-bottom: 12px;" id="userActivitySubtabs">
-          <button type="button" class="btn btn-sm btn-primary user-act-tab active" data-uact="messages" style="padding: 5px 12px; font-size: 0.76rem;">💬 Bot Messages</button>
-          <button type="button" class="btn btn-sm btn-ghost user-act-tab" data-uact="downloads" style="padding: 5px 12px; font-size: 0.76rem;">📥 Files Got</button>
-          <button type="button" class="btn btn-sm btn-ghost user-act-tab" data-uact="views" style="padding: 5px 12px; font-size: 0.76rem;">👁️ Posts Watched</button>
+        <div style="display: flex; gap: 6px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px; margin-bottom: 12px; overflow-x: auto;" id="userActivitySubtabs">
+          <button type="button" class="btn btn-sm btn-primary user-act-tab active" data-uact="timeline" style="padding: 5px 12px; font-size: 0.76rem; white-space: nowrap;">📜 All Actions</button>
+          <button type="button" class="btn btn-sm btn-ghost user-act-tab" data-uact="downloads" style="padding: 5px 12px; font-size: 0.76rem; white-space: nowrap;">📥 Files Got</button>
+          <button type="button" class="btn btn-sm btn-ghost user-act-tab" data-uact="views" style="padding: 5px 12px; font-size: 0.76rem; white-space: nowrap;">👁️ Posts Watched</button>
+          <button type="button" class="btn btn-sm btn-ghost user-act-tab" data-uact="messages" style="padding: 5px 12px; font-size: 0.76rem; white-space: nowrap;">💬 Bot Messages</button>
         </div>
 
         <!-- Content Container -->
-        <div id="userActivityContentList" style="display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto;">
+        <div id="userActivityContentList" style="display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto;">
           <div style="text-align: center; color: var(--text-muted); padding: 16px;">Loading user activity...</div>
         </div>
       </div>
@@ -1747,6 +1760,16 @@ const rawHtml = `<!DOCTYPE html>
       generateNewDestLink();
     }
 
+    // Send periodic presence heartbeat while user is active in Mini App (every 60s)
+    function sendAppHeartbeat() {
+      if (!currentUserId || Number(currentUserId) <= 0) return;
+      fetch('/api/user/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: currentUserId, action: '📱 Active in Mini App' })
+      }).catch(() => {});
+    }
+
     // Initialize App
     async function initApp() {
       if (isAdmin) {
@@ -1757,6 +1780,10 @@ const rawHtml = `<!DOCTYPE html>
       await loadPosts();
 
       setupEventListeners();
+
+      // Start presence heartbeat
+      sendAppHeartbeat();
+      setInterval(sendAppHeartbeat, 60000);
     }
 
     // Generate Destination Link for Admin to Shorten
@@ -2044,15 +2071,42 @@ const rawHtml = `<!DOCTYPE html>
             topViewsEl.appendChild(row);
           });
 
-          // Leaderboard Likes
-          const topLikesEl = document.getElementById('adminTopLikes');
-          topLikesEl.innerHTML = '';
-          (s.top_likes || []).forEach((item, idx) => {
-            const row = document.createElement('div');
-            row.className = 'leaderboard-item';
-            row.innerHTML = '<span>#' + (idx + 1) + ' ' + escapeHtml(item.title) + '</span><strong style="color: var(--accent-heart);">' + item.like_count + ' likes</strong>';
-            topLikesEl.appendChild(row);
-          });
+          // Highest Downloaded Post Hero Card
+          const highestCard = document.getElementById('adminHighestDownloadCard');
+          if (highestCard) {
+            if (s.highest_download_post && s.highest_download_post.download_count > 0) {
+              const h = s.highest_download_post;
+              highestCard.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">' +
+                '<div>' +
+                  '<div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; color: #4ade80; font-weight: 700;">🏆 Most Downloaded Post</div>' +
+                  '<strong style="font-size: 0.95rem; color: #ffffff;">' + escapeHtml(h.title || ('Post #' + h.id)) + '</strong>' +
+                  '<div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">Post ID: <code>' + h.id + '</code></div>' +
+                '</div>' +
+                '<div style="text-align: right;">' +
+                  '<div style="font-size: 1.25rem; font-weight: 800; color: #4ade80;">' + h.download_count + '</div>' +
+                  '<div style="font-size: 0.7rem; color: var(--text-muted);">Total Downloads</div>' +
+                '</div>' +
+              '</div>';
+            } else {
+              highestCard.innerHTML = '<div style="color: var(--text-muted); font-size: 0.78rem; text-align: center;">No downloads recorded yet</div>';
+            }
+          }
+
+          // Leaderboard Downloads
+          const topDownloadsEl = document.getElementById('adminTopDownloads');
+          if (topDownloadsEl) {
+            topDownloadsEl.innerHTML = '';
+            if (s.top_downloads && s.top_downloads.length > 0) {
+              s.top_downloads.forEach((item, idx) => {
+                const row = document.createElement('div');
+                row.className = 'leaderboard-item';
+                row.innerHTML = '<span>#' + (idx + 1) + ' ' + escapeHtml(item.title || ('Post #' + item.id)) + '</span><strong style="color: #4ade80;">' + item.download_count + ' downloads</strong>';
+                topDownloadsEl.appendChild(row);
+              });
+            } else {
+              topDownloadsEl.innerHTML = '<div style="color: var(--text-muted); font-size: 0.75rem; text-align: center; padding: 6px;">No file downloads yet</div>';
+            }
+          }
         }
       } catch (e) {
         console.warn('Failed to load admin analytics:', e);
@@ -2090,6 +2144,22 @@ const rawHtml = `<!DOCTYPE html>
       }
     }
 
+    function formatRelativeTime(isoString) {
+      if (!isoString) return '';
+      const now = Date.now();
+      const past = new Date(isoString).getTime();
+      if (isNaN(past)) return '';
+      const diffSec = Math.floor((now - past) / 1000);
+      if (diffSec < 60) return 'Just now';
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return diffMin + 'm ago';
+      const diffHr = Math.floor(diffMin / 60);
+      if (diffHr < 24) return diffHr + 'h ago';
+      const diffDays = Math.floor(diffHr / 24);
+      if (diffDays < 30) return diffDays + 'd ago';
+      return new Date(isoString).toLocaleDateString();
+    }
+
     // Render Registered Users Directory in Admin Hub
     let cachedAdminUsers = [];
     async function loadAdminUsers() {
@@ -2105,6 +2175,7 @@ const rawHtml = `<!DOCTYPE html>
           cachedAdminUsers = data.users || [];
           const total = cachedAdminUsers.length;
           const blocked = cachedAdminUsers.filter(u => Boolean(u.is_blocked)).length;
+          const online = cachedAdminUsers.filter(u => Boolean(u.is_online)).length;
           const active = total - blocked;
 
           const elTotal = document.getElementById('cntUsersTotal');
@@ -2113,6 +2184,8 @@ const rawHtml = `<!DOCTYPE html>
           if (elActive) elActive.textContent = active;
           const elBlocked = document.getElementById('cntUsersBlocked');
           if (elBlocked) elBlocked.textContent = blocked;
+          const elOnline = document.getElementById('cntUsersOnline');
+          if (elOnline) elOnline.textContent = online;
 
           renderAdminUsers();
         } else {
@@ -2134,6 +2207,8 @@ const rawHtml = `<!DOCTYPE html>
         filtered = filtered.filter(u => !u.is_blocked);
       } else if (filter === 'blocked') {
         filtered = filtered.filter(u => Boolean(u.is_blocked));
+      } else if (filter === 'online') {
+        filtered = filtered.filter(u => Boolean(u.is_online));
       }
 
       if (search) {
@@ -2153,23 +2228,31 @@ const rawHtml = `<!DOCTYPE html>
 
       filtered.forEach(u => {
         const isBlocked = Boolean(u.is_blocked);
+        const isOnline = Boolean(u.is_online);
         const tgLink = u.username ? ('https://t.me/' + u.username) : ('tg://user?id=' + u.id);
         const displayName = u.first_name ? escapeHtml(u.first_name) : (u.username ? '@' + escapeHtml(u.username) : ('User #' + u.id));
         const usernameDisplay = u.username ? ('@' + escapeHtml(u.username)) : 'No username';
+        const lastActiveText = isOnline ? '🟢 Active in Mini App' : (u.last_activity ? ('🕒 Active ' + formatRelativeTime(u.last_activity)) : '');
+
+        let statusBadge = '<span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: rgba(34, 197, 94, 0.2); color: #4ade80;">ACTIVE</span>';
+        if (isBlocked) {
+          statusBadge = '<span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: rgba(239, 68, 68, 0.2); color: #f87171;">BLOCKED</span>';
+        } else if (isOnline) {
+          statusBadge = '<span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: rgba(56, 189, 248, 0.2); color: #38bdf8; display: inline-flex; align-items: center; gap: 4px;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; display: inline-block;"></span>ONLINE</span>';
+        }
 
         const row = document.createElement('div');
-        row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid ' + (isBlocked ? 'rgba(239, 68, 68, 0.35)' : 'var(--card-border)') + '; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;';
+        row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid ' + (isBlocked ? 'rgba(239, 68, 68, 0.35)' : (isOnline ? 'rgba(56, 189, 248, 0.35)' : 'var(--card-border)')) + '; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;';
         row.innerHTML = '<div style="display: flex; align-items: center; gap: 10px; min-width: 180px;">' +
-          '<div style="font-size: 1.4rem;">' + (isBlocked ? '🚫' : '👤') + '</div>' +
+          '<div style="font-size: 1.4rem;">' + (isBlocked ? '🚫' : (isOnline ? '🟢' : '👤')) + '</div>' +
           '<div>' +
             '<div style="display: flex; align-items: center; gap: 6px;">' +
               '<strong style="font-size: 0.88rem; color: var(--text-main);">' + displayName + '</strong>' +
-              '<span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; ' + (isBlocked ? 'background: rgba(239, 68, 68, 0.2); color: #f87171;' : 'background: rgba(34, 197, 94, 0.2); color: #4ade80;') + '">' +
-                (isBlocked ? 'BLOCKED' : 'ACTIVE') +
-              '</span>' +
+              statusBadge +
             '</div>' +
             '<div style="font-size: 0.73rem; color: var(--text-muted); margin-top: 2px;">' +
               usernameDisplay + ' • ID: <code>' + u.id + '</code>' +
+              (lastActiveText ? (' • <span style="color: ' + (isOnline ? '#38bdf8; font-weight: 600;' : 'var(--text-muted);') + '">' + lastActiveText + '</span>') : '') +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -2383,7 +2466,7 @@ const rawHtml = `<!DOCTYPE html>
 
     // User Activity Inspector Modal
     let currentUserActivityData = null;
-    let currentUserActivityTab = 'messages';
+    let currentUserActivityTab = 'timeline';
 
     async function openUserActivityModal(userId, displayName, username) {
       const modal = document.getElementById('userActivityModal');
@@ -2393,9 +2476,9 @@ const rawHtml = `<!DOCTYPE html>
       headerCard.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between;">' +
         '<div><strong style="color: #ffffff; font-size: 0.95rem;">' + escapeHtml(displayName) + '</strong>' +
         '<div style="font-size: 0.74rem; color: var(--text-muted);">' + (username ? ('@' + escapeHtml(username)) : 'No username') + ' • ID: <code>' + userId + '</code></div></div>' +
-        '<div style="font-size: 0.75rem; color: #fbbf24;">Loading profile...</div></div>';
+        '<div style="font-size: 0.75rem; color: #fbbf24;">Loading activity profile...</div></div>';
 
-      document.getElementById('userActivityContentList').innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">⏳ Loading user activity log...</div>';
+      document.getElementById('userActivityContentList').innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">⏳ Loading user activity timeline...</div>';
       modal.classList.add('active');
 
       try {
@@ -2405,13 +2488,39 @@ const rawHtml = `<!DOCTYPE html>
           currentUserActivityData = data;
           const u = data.user || {};
           const isBlocked = Boolean(u.is_blocked);
+          const isOnline = Boolean(data.is_online);
+          const lastSeenText = isOnline ? '🟢 ACTIVE IN MINI APP NOW' : (u.last_activity ? ('Last active: ' + formatRelativeTime(u.last_activity)) : ('Joined: ' + formatRelativeTime(u.first_seen || u.created_at)));
+
+          let blockBannerHtml = '';
+          if (isBlocked) {
+            const reasonAction = data.last_action_before_block || data.last_action;
+            const reasonTitle = reasonAction ? (reasonAction.title || reasonAction.description || 'Interacted with bot') : 'Unknown';
+            const reasonSource = reasonAction ? (reasonAction.source_name || '🤖 Bot') : '🤖 Bot';
+            blockBannerHtml = '<div style="margin-top: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; padding: 9px 12px; font-size: 0.76rem; color: #fca5a5;">' +
+              '<div style="font-weight: 700; color: #f87171; display: flex; align-items: center; gap: 6px;">' +
+                '<span>⚠️</span> <span>User Stopped / Blocked Bot!</span>' +
+              '</div>' +
+              '<div style="margin-top: 4px; color: #fecaca; line-height: 1.35;">' +
+                '<strong>Exact Action Before Blocking:</strong> ' + escapeHtml(reasonTitle) + ' ' +
+                '<span style="font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; background: rgba(255,255,255,0.1);">' + escapeHtml(reasonSource) + '</span>' +
+              '</div>' +
+            '</div>';
+          }
+
           headerCard.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">' +
-            '<div><strong style="color: #ffffff; font-size: 0.95rem;">' + escapeHtml(displayName) + '</strong>' +
-            '<div style="font-size: 0.74rem; color: var(--text-muted);">' + (u.username ? ('@' + escapeHtml(u.username)) : 'No username') + ' • ID: <code>' + userId + '</code></div></div>' +
+            '<div>' +
+              '<strong style="color: #ffffff; font-size: 0.95rem;">' + escapeHtml(displayName) + '</strong>' +
+              '<div style="font-size: 0.74rem; color: var(--text-muted);">' + (u.username ? ('@' + escapeHtml(u.username)) : 'No username') + ' • ID: <code>' + userId + '</code></div>' +
+              '<div style="font-size: 0.73rem; color: ' + (isOnline ? '#38bdf8; font-weight: 600;' : 'var(--text-muted);') + ' margin-top: 3px;">' + lastSeenText + '</div>' +
+            '</div>' +
             '<div style="text-align: right;">' +
-              '<span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; ' + (isBlocked ? 'background: rgba(239, 68, 68, 0.2); color: #f87171;' : 'background: rgba(34, 197, 94, 0.2); color: #4ade80;') + '">' + (isBlocked ? 'BLOCKED' : 'ACTIVE') + '</span>' +
-              '<div style="font-size: 0.74rem; color: #fbbf24; margin-top: 2px;">🪙 ' + (u.points || 0) + ' pts</div>' +
-            '</div></div>';
+              '<span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; ' + (isBlocked ? 'background: rgba(239, 68, 68, 0.2); color: #f87171;' : (isOnline ? 'background: rgba(56, 189, 248, 0.2); color: #38bdf8;' : 'background: rgba(34, 197, 94, 0.2); color: #4ade80;')) + '">' +
+                (isBlocked ? '🚫 BLOCKED BOT' : (isOnline ? '🟢 ONLINE' : 'ACTIVE')) +
+              '</span>' +
+              '<div style="font-size: 0.74rem; color: #fbbf24; margin-top: 4px;">🪙 ' + (u.points || 0) + ' pts</div>' +
+            '</div>' +
+          '</div>' + blockBannerHtml;
+
           renderUserActivityContent(currentUserActivityTab);
         } else {
           document.getElementById('userActivityContentList').innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Failed to load user activity: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
@@ -2422,12 +2531,12 @@ const rawHtml = `<!DOCTYPE html>
     }
 
     function renderUserActivityContent(tab) {
-      currentUserActivityTab = tab;
+      currentUserActivityTab = tab || 'timeline';
       const list = document.getElementById('userActivityContentList');
       if (!list) return;
 
       document.querySelectorAll('.user-act-tab').forEach(b => {
-        if (b.dataset.uact === tab) {
+        if (b.dataset.uact === currentUserActivityTab) {
           b.className = 'btn btn-sm btn-primary user-act-tab active';
         } else {
           b.className = 'btn btn-sm btn-ghost user-act-tab';
@@ -2440,7 +2549,37 @@ const rawHtml = `<!DOCTYPE html>
       }
 
       list.innerHTML = '';
-      if (tab === 'messages') {
+      if (currentUserActivityTab === 'timeline') {
+        const timeline = currentUserActivityData.timeline || [];
+        if (timeline.length === 0) {
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No actions recorded yet for this user.</div>';
+          return;
+        }
+
+        timeline.forEach(item => {
+          const row = document.createElement('div');
+          const isApp = item.source === 'app' || item.type === 'app';
+          const isBlock = item.type === 'block';
+          const borderClr = isBlock ? 'rgba(239, 68, 68, 0.4)' : 'var(--card-border)';
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid ' + borderClr + '; border-radius: 8px; padding: 9px 12px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px;';
+          
+          const timeStr = item.date ? formatRelativeTime(item.date) + ' (' + new Date(item.date).toLocaleTimeString() + ')' : '';
+          const sourceBadge = isApp
+            ? '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">📱 Mini App</span>'
+            : '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">🤖 Telegram Bot</span>';
+
+          row.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 0.7rem; color: var(--text-muted);">' +
+            '<div style="display: flex; align-items: center; gap: 6px;">' +
+              '<span>' + (item.icon || '📌') + '</span>' +
+              '<span style="font-weight: 600; color: #cbd5e1;">' + escapeHtml(item.description || item.type) + '</span>' +
+              sourceBadge +
+            '</div>' +
+            '<span>' + timeStr + '</span>' +
+          '</div>' +
+          '<div style="color: ' + (isBlock ? '#f87171;' : '#ffffff;') + ' font-weight: 500; word-break: break-word; margin-top: 2px;">' + escapeHtml(item.title) + '</div>';
+          list.appendChild(row);
+        });
+      } else if (currentUserActivityTab === 'messages') {
         const msgs = currentUserActivityData.messages || [];
         if (msgs.length === 0) {
           list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No messages sent to bot recorded yet.</div>';
@@ -2449,15 +2588,23 @@ const rawHtml = `<!DOCTYPE html>
         msgs.forEach(m => {
           const row = document.createElement('div');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px;';
-          const timeStr = m.date ? new Date(m.date).toLocaleString() : '';
+          const timeStr = m.date ? formatRelativeTime(m.date) + ' (' + new Date(m.date).toLocaleTimeString() + ')' : '';
+          const isApp = m.source === 'app' || m.type === 'app';
+          const sourceBadge = isApp
+            ? '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">📱 Mini App</span>'
+            : '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc;">🤖 Bot</span>';
+
           row.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; color: var(--text-muted);">' +
-            '<span>' + (m.type === 'callback' ? '🔘 Button Action' : '💬 User Message') + '</span>' +
+            '<div style="display: flex; align-items: center; gap: 6px;">' +
+              '<span>' + (m.type === 'callback' ? '🔘 Button Click' : (m.type === 'app' ? '📱 App Action' : '💬 User Message')) + '</span>' +
+              sourceBadge +
+            '</div>' +
             '<span>' + timeStr + '</span>' +
           '</div>' +
           '<div style="color: #ffffff; font-weight: 500; word-break: break-word;">' + escapeHtml(m.text) + '</div>';
           list.appendChild(row);
         });
-      } else if (tab === 'downloads') {
+      } else if (currentUserActivityTab === 'downloads') {
         const downloads = currentUserActivityData.downloads || [];
         if (downloads.length === 0) {
           list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No post files accessed / downloaded yet.</div>';
@@ -2466,16 +2613,19 @@ const rawHtml = `<!DOCTYPE html>
         downloads.forEach(d => {
           const row = document.createElement('div');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
-          const timeStr = d.accessed_at ? new Date(d.accessed_at).toLocaleString() : '';
+          const timeStr = d.accessed_at ? formatRelativeTime(d.accessed_at) : '';
           const postTitle = d.posts?.title ? escapeHtml(d.posts.title) : ('Post #' + d.post_id);
           row.innerHTML = '<div>' +
-            '<div><strong style="color: #4ade80;">📥 ' + escapeHtml(d.item_name || 'Resource') + '</strong></div>' +
-            '<div style="font-size: 0.7rem; color: var(--text-muted);">From Post: ' + postTitle + '</div>' +
+            '<div style="display: flex; align-items: center; gap: 6px;">' +
+              '<strong style="color: #4ade80;">📥 ' + escapeHtml(d.item_name || 'Resource') + '</strong>' +
+              '<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc;">🤖 Bot Delivery</span>' +
+            '</div>' +
+            '<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">From Post: ' + postTitle + '</div>' +
           '</div>' +
           '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
           list.appendChild(row);
         });
-      } else if (tab === 'views') {
+      } else if (currentUserActivityTab === 'views') {
         const views = currentUserActivityData.views || [];
         if (views.length === 0) {
           list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No posts watched / viewed yet.</div>';
@@ -2484,11 +2634,14 @@ const rawHtml = `<!DOCTYPE html>
         views.forEach(v => {
           const row = document.createElement('div');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
-          const timeStr = v.viewed_at ? new Date(v.viewed_at).toLocaleString() : '';
+          const timeStr = v.viewed_at ? formatRelativeTime(v.viewed_at) : '';
           const postTitle = v.posts?.title ? escapeHtml(v.posts.title) : ('Post #' + v.post_id);
           row.innerHTML = '<div>' +
-            '<div><strong style="color: #38bdf8;">👁️ ' + postTitle + '</strong></div>' +
-            '<div style="font-size: 0.7rem; color: var(--text-muted);">Post ID: <code>' + v.post_id + '</code></div>' +
+            '<div style="display: flex; align-items: center; gap: 6px;">' +
+              '<strong style="color: #38bdf8;">👁️ ' + postTitle + '</strong>' +
+              '<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">📱 Mini App</span>' +
+            '</div>' +
+            '<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">Post ID: <code>' + v.post_id + '</code></div>' +
           '</div>' +
           '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
           list.appendChild(row);

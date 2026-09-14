@@ -342,9 +342,11 @@ export function createBot(env) {
         if (newStatus === 'kicked' || newStatus === 'left') {
           // User blocked the bot
           await updateUserBlockedStatus(env, targetUserId, true);
+          logUserMessage(env, targetUserId, '🚫 User stopped / blocked the Telegram bot', 'block').catch(() => {});
         } else if (newStatus === 'member') {
           // User unblocked / started the bot
           await updateUserBlockedStatus(env, targetUserId, false);
+          logUserMessage(env, targetUserId, '🟢 User started / unblocked the Telegram bot', 'unblock').catch(() => {});
           if (update.from) {
             await saveOrUpdateUser(env, update.from);
           }
