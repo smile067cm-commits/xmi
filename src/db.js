@@ -192,6 +192,7 @@ export async function getPublishedPosts(env, userId = null) {
     status: post.status,
     created_at: post.created_at,
     like_count: post.likes ? post.likes.length : 0,
+    liked: userId ? (post.likes || []).some(l => String(l.user_id) === String(userId)) : false,
     comment_count: post.comments ? post.comments.filter(c => !c.is_hidden).length : 0,
     view_count: post.post_views ? post.post_views.length : 0,
     access_count: post.file_access_logs ? post.file_access_logs.length : 0,

@@ -286,6 +286,7 @@ async function sendPostToUser(ctx, env, post, postId) {
         ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
         : `👉 *Please forward or save to your Saved Messages now before they disappear.*`);
 
+    const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
     const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${ctx.from?.id}` : `${appUrl}?user_id=${ctx.from?.id}`) : appUrl;
     const noticeButtons = [];
     if (userAppUrl.startsWith('https://')) {
@@ -312,7 +313,7 @@ async function sendPostToUser(ctx, env, post, postId) {
         delete_at: deleteAt,
         is_deleted: false
       }));
-      addEphemeralMessages(env, records).catch(e => console.warn('Ephemeral add error:', e.message));
+      await addEphemeralMessages(env, records).catch(e => console.warn('Ephemeral add error:', e.message));
     }
   }
 
@@ -387,22 +388,23 @@ export function createBot(env) {
   async function sendPostFeedToUser(ctx, env, page = 1) {
     const userId = ctx.from?.id;
     const PAGE_SIZE = 3;
-    const offset = Math.max(0, (page - 1) * PAGE_SIZE);
 
-    const baseUrl = getSupabaseBaseUrl(env);
-    const headers = getSupabaseHeaders(env);
-
-    // Fetch total published posts count and the 3 posts for current page
-    const [postsRes, countRes, channels] = await Promise.all([
-      fetch(`${baseUrl}/posts?status=eq.published&order=created_at.desc&limit=${PAGE_SIZE}&offset=${offset}&select=id,title,preview_image,category,tags,created_at,likes(user_id),files(id,file_size,mime_type,display_name)`, { headers }),
-      fetch(`${baseUrl}/posts?status=eq.published&select=id`, { headers }),
+    // Fetch published posts and force channels using existing db functions
+    const [allPosts, channels] = await Promise.all([
+      getPublishedPosts(env, userId).catch(err => {
+        console.error('Error fetching published posts for feed:', err);
+        return [];
+      }),
       getForceChannels(env).catch(() => [])
     ]);
 
-    const posts = postsRes.ok ? await postsRes.json() : [];
-    const totalCount = countRes.ok ? (await countRes.json()).length : 0;
-    const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+    const totalCount = allPosts.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+    const safePage = Math.max(1, Math.min(page, totalPages));
+    const offset = (safePage - 1) * PAGE_SIZE;
+    const posts = allPosts.slice(offset, offset + PAGE_SIZE);
 
+    const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
     const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${userId}` : `${appUrl}?user_id=${userId}`) : appUrl;
 
     if (userAppUrl.startsWith('https://')) {
@@ -423,21 +425,11 @@ export function createBot(env) {
 
     // Send each of the 3 posts as interactive preview cards
     for (const post of posts) {
-      const isLiked = post.likes ? post.likes.some(l => String(l.user_id) === String(userId)) : false;
-      const likeCount = post.likes ? post.likes.length : 0;
+      const isLiked = Boolean(post.liked);
+      const likeCount = post.like_count || 0;
       const cleanTitle = cleanPostDisplayTitle(post.title, post.id);
 
-      // File size if files exist
-      let sizeInfo = '';
-      if (post.files && post.files.length > 0) {
-        const totalBytes = post.files.reduce((acc, f) => acc + (Number(f.file_size) || 0), 0);
-        if (totalBytes > 0) {
-          sizeInfo = formatBytes(totalBytes);
-        }
-      }
-
       let caption = `📌 *${escapeMarkdown(cleanTitle)}*\n`;
-      if (sizeInfo) caption += `💾 *Size:* \`${sizeInfo}\`\n`;
       if (post.category && post.category !== 'All') caption += `📁 *Category:* \`${escapeMarkdown(post.category)}\`\n`;
 
       const postKeyboard = [
@@ -476,11 +468,11 @@ export function createBot(env) {
 
     // Pagination buttons
     const pageRow = [];
-    if (page > 1) {
-      pageRow.push(Markup.button.callback(`⬅️ Prev 3 Posts`, `bot_feed_page_${page - 1}`));
+    if (safePage > 1) {
+      pageRow.push(Markup.button.callback(`⬅️ Prev 3 Posts`, `bot_feed_page_${safePage - 1}`));
     }
-    if (page < totalPages) {
-      pageRow.push(Markup.button.callback(`➡️ Next 3 Posts`, `bot_feed_page_${page + 1}`));
+    if (safePage < totalPages) {
+      pageRow.push(Markup.button.callback(`➡️ Next 3 Posts`, `bot_feed_page_${safePage + 1}`));
     }
     if (pageRow.length > 0) {
       navButtons.push(pageRow);
@@ -493,7 +485,7 @@ export function createBot(env) {
 
     const footerText = `✨ *Use our Telegram Mini App for the best experience!*\n\n` +
       `Instant search, faster browsing, and full collection of *${totalCount}+* posts.\n\n` +
-      `📄 *Showing Page ${page} of ${totalPages}*`;
+      `📄 *Showing Page ${safePage} of ${totalPages}*`;
 
     return await ctx.reply(footerText, {
       parse_mode: 'Markdown',
