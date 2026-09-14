@@ -1064,6 +1064,7 @@ const rawHtml = `<!DOCTYPE html>
       <div class="admin-subtabs-bar" id="adminSubtabs">
         <button class="admin-subtab active" data-atab="posts">📑 Manage Posts</button>
         <button class="admin-subtab" data-atab="users">👥 Users Directory</button>
+        <button class="admin-subtab" data-atab="comments">💬 Comments</button>
         <button class="admin-subtab" data-atab="shorteners">🔗 Multiple Shorteners</button>
         <button class="admin-subtab" data-atab="settings">⚙️ Points & Rules</button>
         <button class="admin-subtab" data-atab="channels">🛡️ Force Channels</button>
@@ -1112,6 +1113,30 @@ const rawHtml = `<!DOCTYPE html>
           </div>
           <div id="adminUsersList" style="display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto;">
             <div style="text-align: center; color: var(--text-muted); padding: 16px;">Loading users directory...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Admin Tab: Comments Moderation -->
+      <div id="adminTabComments" style="display: none;">
+        <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 14px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
+            <div>
+              <h3 style="font-size: 0.95rem; font-weight: 700;">💬 Comments Moderation</h3>
+              <p style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">Manage, hide, or delete user comments across all posts</p>
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" id="btnRefreshAdminComments">🔄 Refresh Comments</button>
+          </div>
+          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+            <input type="text" id="adminCommentsSearchInput" class="form-input" placeholder="Search comments by user or text..." style="flex: 2; padding: 7px 10px; font-size: 0.8rem;" />
+            <select id="adminCommentsFilterSelect" class="form-select" style="flex: 1; padding: 7px 10px; font-size: 0.8rem;">
+              <option value="all">All Comments</option>
+              <option value="active">Active Only</option>
+              <option value="hidden">Hidden Only</option>
+            </select>
+          </div>
+          <div id="adminCommentsList" style="display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto;">
+            <div style="text-align: center; color: var(--text-muted); padding: 16px;">Loading comments...</div>
           </div>
         </div>
       </div>
@@ -1262,6 +1287,8 @@ const rawHtml = `<!DOCTYPE html>
                 <input type="url" id="setRequireBotStartLink" class="form-input" placeholder="https://t.me/__BOT_USERNAME__?start=start" />
               </div>
             </div>
+          </div>
+
           <!-- Metrics Management (Reset Likes, Views & Downloads) -->
           <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 14px; padding: 14px;">
             <div style="font-weight: 700; font-size: 0.92rem; color: #f87171; margin-bottom: 4px;">🧹 Reset Metrics &amp; Logs</div>
@@ -1606,6 +1633,72 @@ const rawHtml = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- 5. Post Stats Modal (Admin Only) -->
+  <div class="modal-overlay" id="postStatsModal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="postStatsTitle">📊 Post Stats</h3>
+        <button class="modal-close" id="btnPostStatsClose">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <!-- Metrics Counters -->
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; text-align: center;">
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
+            <div style="font-size: 1.2rem; font-weight: 800; color: #38bdf8;" id="postStatViewsCnt">0</div>
+            <div style="font-size: 0.7rem; color: var(--text-muted);">👁️ Views</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
+            <div style="font-size: 1.2rem; font-weight: 800; color: #4ade80;" id="postStatAccessCnt">0</div>
+            <div style="font-size: 0.7rem; color: var(--text-muted);">📥 Downloads</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
+            <div style="font-size: 1.2rem; font-weight: 800; color: #f43f5e;" id="postStatLikesCnt">0</div>
+            <div style="font-size: 0.7rem; color: var(--text-muted);">❤️ Likes</div>
+          </div>
+        </div>
+
+        <!-- Subtabs inside modal -->
+        <div style="display: flex; gap: 6px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px; margin-bottom: 12px;" id="postStatSubtabs">
+          <button type="button" class="btn btn-sm btn-primary post-stat-tab active" data-pstab="downloads" style="padding: 5px 12px; font-size: 0.76rem;">📥 Downloads</button>
+          <button type="button" class="btn btn-sm btn-ghost post-stat-tab" data-pstab="views" style="padding: 5px 12px; font-size: 0.76rem;">👁️ Views</button>
+          <button type="button" class="btn btn-sm btn-ghost post-stat-tab" data-pstab="likes" style="padding: 5px 12px; font-size: 0.76rem;">❤️ Likes</button>
+        </div>
+
+        <!-- Log List -->
+        <div id="postStatLogsList" style="display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto;">
+          <div style="text-align: center; color: var(--text-muted); padding: 16px;">Loading stats...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. User Activity Inspector Modal (Admin Only) -->
+  <div class="modal-overlay" id="userActivityModal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="userActivityTitle">🔍 User Activity</h3>
+        <button class="modal-close" id="btnUserActivityClose">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <!-- User Info Header Card -->
+        <div id="userActivityHeaderCard" style="background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px; margin-bottom: 14px;">
+        </div>
+
+        <!-- Subtabs inside modal -->
+        <div style="display: flex; gap: 6px; border-bottom: 1px solid var(--card-border); padding-bottom: 8px; margin-bottom: 12px;" id="userActivitySubtabs">
+          <button type="button" class="btn btn-sm btn-primary user-act-tab active" data-uact="messages" style="padding: 5px 12px; font-size: 0.76rem;">💬 Bot Messages</button>
+          <button type="button" class="btn btn-sm btn-ghost user-act-tab" data-uact="downloads" style="padding: 5px 12px; font-size: 0.76rem;">📥 Files Got</button>
+          <button type="button" class="btn btn-sm btn-ghost user-act-tab" data-uact="views" style="padding: 5px 12px; font-size: 0.76rem;">👁️ Posts Watched</button>
+        </div>
+
+        <!-- Content Container -->
+        <div id="userActivityContentList" style="display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow-y: auto;">
+          <div style="text-align: center; color: var(--text-muted); padding: 16px;">Loading user activity...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="toast"></div>
 
   <!-- Client-Side JavaScript Logic -->
@@ -1877,6 +1970,7 @@ const rawHtml = `<!DOCTYPE html>
               '<div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 10px;">👁️ ' + (post.view_count || 0) + ' views • ❤️ ' + (post.like_count || 0) + ' likes • 📥 ' + (post.access_count || 0) + ' accesses</div>' +
               '<div style="display: flex; gap: 6px; margin-top: auto;">' +
               '<button class="btn btn-sm btn-secondary" style="flex: 1;" data-aact="edit" data-id="' + post.id + '">✏️ Edit</button>' +
+              '<button class="btn btn-sm btn-ghost" style="color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);" data-aact="stats" data-id="' + post.id + '" title="View Stats">📊</button>' +
               '<button class="btn btn-sm btn-ghost" style="color: #f87171;" data-aact="del" data-id="' + post.id + '">🗑️</button>' +
               '</div></div>';
             grid.appendChild(card);
@@ -2084,12 +2178,322 @@ const rawHtml = `<!DOCTYPE html>
             '<div>🪙 <strong style="color: #fbbf24;">' + (u.points || 0) + '</strong> pts</div>' +
             '<div>🔄 ' + (u.interactions || 1) + ' acts</div>' +
           '</div>' +
+          '<button type="button" class="btn btn-sm btn-info btn-open-user-activity" data-uid="' + u.id + '" data-username="' + (u.username || '') + '" data-name="' + escapeHtml(displayName) + '" style="padding: 6px 10px; font-size: 0.75rem; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8;">' +
+            '🔍 Activity' +
+          '</button>' +
           '<button type="button" class="btn btn-sm btn-secondary btn-open-user-chat" data-uid="' + u.id + '" data-username="' + (u.username || '') + '" data-name="' + escapeHtml(displayName) + '" style="padding: 6px 10px; font-size: 0.75rem;">' +
             '💬 Open' +
           '</button>' +
         '</div>';
         list.appendChild(row);
       });
+    }
+
+    // Render Comments Moderation in Admin Hub
+    let cachedAdminComments = [];
+    async function loadAdminComments() {
+      if (!isAdmin) return;
+      const list = document.getElementById('adminCommentsList');
+      if (!list) return;
+      list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">⏳ Fetching comments...</div>';
+
+      try {
+        const res = await fetch('/api/admin/comments?user_id=' + currentUserId);
+        const data = await res.json();
+        if (data.success) {
+          cachedAdminComments = data.comments || [];
+          renderAdminComments();
+        } else {
+          list.innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Failed to load comments: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
+        }
+      } catch (e) {
+        list.innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Network error loading comments</div>';
+      }
+    }
+
+    function renderAdminComments() {
+      const list = document.getElementById('adminCommentsList');
+      if (!list) return;
+      const filter = document.getElementById('adminCommentsFilterSelect')?.value || 'all';
+      const search = (document.getElementById('adminCommentsSearchInput')?.value || '').toLowerCase().trim();
+
+      let filtered = [...cachedAdminComments];
+      if (filter === 'active') {
+        filtered = filtered.filter(c => !c.is_hidden);
+      } else if (filter === 'hidden') {
+        filtered = filtered.filter(c => Boolean(c.is_hidden));
+      }
+
+      if (search) {
+        filtered = filtered.filter(c => {
+          const userMatch = (c.username || '').toLowerCase().includes(search);
+          const textMatch = (c.text || '').toLowerCase().includes(search);
+          const postMatch = (c.posts?.title || '').toLowerCase().includes(search);
+          return userMatch || textMatch || postMatch;
+        });
+      }
+
+      list.innerHTML = '';
+      if (filtered.length === 0) {
+        list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No comments matching filter / search.</div>';
+        return;
+      }
+
+      filtered.forEach(c => {
+        const isHidden = Boolean(c.is_hidden);
+        const dateStr = c.created_at ? new Date(c.created_at).toLocaleString() : '';
+        const postTitle = c.posts?.title ? escapeHtml(c.posts.title) : ('Post #' + c.post_id);
+        const userDisplay = c.username ? ('@' + escapeHtml(c.username)) : ('User #' + c.user_id);
+
+        const card = document.createElement('div');
+        card.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid ' + (isHidden ? 'rgba(239, 68, 68, 0.35)' : 'var(--card-border)') + '; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;';
+        card.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">' +
+          '<div style="display: flex; align-items: center; gap: 6px;">' +
+            '<span style="font-size: 1.1rem;">💬</span>' +
+            '<strong style="font-size: 0.85rem; color: var(--text-main);">' + userDisplay + '</strong>' +
+            '<span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; ' + (isHidden ? 'background: rgba(239, 68, 68, 0.2); color: #f87171;' : 'background: rgba(34, 197, 94, 0.2); color: #4ade80;') + '">' +
+              (isHidden ? 'HIDDEN' : 'ACTIVE') +
+            '</span>' +
+          '</div>' +
+          '<div style="font-size: 0.7rem; color: var(--text-muted);">' + dateStr + '</div>' +
+        '</div>' +
+        '<div style="font-size: 0.74rem; color: var(--primary);">📌 On Post: <strong>' + postTitle + '</strong></div>' +
+        '<div style="background: rgba(0,0,0,0.25); border-radius: 8px; padding: 8px 10px; font-size: 0.82rem; color: #f1f5f9; line-height: 1.4; word-break: break-word;">' +
+          escapeHtml(c.text) +
+        '</div>' +
+        '<div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 4px;">' +
+          '<button type="button" class="btn btn-sm btn-ghost" data-cact="toggle-hide" data-id="' + c.id + '" data-hidden="' + (isHidden ? '1' : '0') + '" style="font-size: 0.74rem; padding: 4px 10px; border: 1px solid var(--card-border);">' +
+            (isHidden ? '👁️ Unhide' : '🙈 Hide') +
+          '</button>' +
+          '<button type="button" class="btn btn-sm btn-ghost" data-cact="delete" data-id="' + c.id + '" style="font-size: 0.74rem; padding: 4px 10px; color: #f87171; border: 1px solid rgba(239,68,68,0.3);">' +
+            '🗑️ Delete' +
+          '</button>' +
+        '</div>';
+        list.appendChild(card);
+      });
+    }
+
+    // Post Stats Modal logic
+    let currentPostStatsData = null;
+    let currentPostStatsActiveTab = 'downloads';
+
+    async function openPostStatsModal(postId) {
+      const modal = document.getElementById('postStatsModal');
+      if (!modal) return;
+      document.getElementById('postStatsTitle').textContent = '📊 Loading Post Stats...';
+      document.getElementById('postStatViewsCnt').textContent = '0';
+      document.getElementById('postStatAccessCnt').textContent = '0';
+      document.getElementById('postStatLikesCnt').textContent = '0';
+      document.getElementById('postStatLogsList').innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">⏳ Loading stats...</div>';
+      modal.classList.add('active');
+
+      try {
+        const res = await fetch('/api/admin/posts/' + postId + '/analytics?user_id=' + currentUserId);
+        const data = await res.json();
+        if (data.success && data.analytics) {
+          currentPostStatsData = data.analytics;
+          document.getElementById('postStatsTitle').textContent = '📊 Stats: ' + (data.post_title || ('Post #' + postId));
+          document.getElementById('postStatViewsCnt').textContent = currentPostStatsData.views ? currentPostStatsData.views.length : 0;
+          document.getElementById('postStatAccessCnt').textContent = currentPostStatsData.accesses ? currentPostStatsData.accesses.length : 0;
+          document.getElementById('postStatLikesCnt').textContent = currentPostStatsData.likes ? currentPostStatsData.likes.length : 0;
+          renderPostStatLogs(currentPostStatsActiveTab);
+        } else {
+          document.getElementById('postStatLogsList').innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Failed to load stats: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
+        }
+      } catch (err) {
+        document.getElementById('postStatLogsList').innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Network error loading post stats</div>';
+      }
+    }
+
+    function renderPostStatLogs(tab) {
+      currentPostStatsActiveTab = tab;
+      const list = document.getElementById('postStatLogsList');
+      if (!list) return;
+
+      document.querySelectorAll('.post-stat-tab').forEach(b => {
+        if (b.dataset.pstab === tab) {
+          b.className = 'btn btn-sm btn-primary post-stat-tab active';
+        } else {
+          b.className = 'btn btn-sm btn-ghost post-stat-tab';
+        }
+      });
+
+      if (!currentPostStatsData) {
+        list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No data loaded</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+      if (tab === 'downloads') {
+        const logs = currentPostStatsData.accesses || [];
+        if (logs.length === 0) {
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No downloads / accesses recorded yet.</div>';
+          return;
+        }
+        logs.forEach(item => {
+          const row = document.createElement('div');
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+          const uName = item.username ? ('@' + escapeHtml(item.username)) : (item.first_name ? escapeHtml(item.first_name) : ('User #' + item.user_id));
+          const timeStr = item.accessed_at ? new Date(item.accessed_at).toLocaleString() : '';
+          row.innerHTML = '<div>' +
+            '<div><strong style="color: #ffffff;">' + escapeHtml(item.item_name || 'Resource') + '</strong></div>' +
+            '<div style="font-size: 0.7rem; color: var(--text-muted);">' + uName + ' • ID: <code>' + item.user_id + '</code></div>' +
+          '</div>' +
+          '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
+          list.appendChild(row);
+        });
+      } else if (tab === 'views') {
+        const logs = currentPostStatsData.views || [];
+        if (logs.length === 0) {
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No views recorded yet.</div>';
+          return;
+        }
+        logs.forEach(item => {
+          const row = document.createElement('div');
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+          const uName = item.username ? ('@' + escapeHtml(item.username)) : (item.first_name ? escapeHtml(item.first_name) : ('User #' + item.user_id));
+          const timeStr = item.viewed_at ? new Date(item.viewed_at).toLocaleString() : '';
+          row.innerHTML = '<div>' +
+            '<div><strong style="color: #ffffff;">👁️ ' + uName + '</strong></div>' +
+            '<div style="font-size: 0.7rem; color: var(--text-muted);">ID: <code>' + item.user_id + '</code></div>' +
+          '</div>' +
+          '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
+          list.appendChild(row);
+        });
+      } else if (tab === 'likes') {
+        const logs = currentPostStatsData.likes || [];
+        if (logs.length === 0) {
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No likes recorded yet.</div>';
+          return;
+        }
+        logs.forEach(item => {
+          const row = document.createElement('div');
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+          const uName = item.username ? ('@' + escapeHtml(item.username)) : (item.first_name ? escapeHtml(item.first_name) : ('User #' + item.user_id));
+          const timeStr = item.created_at ? new Date(item.created_at).toLocaleString() : '';
+          row.innerHTML = '<div>' +
+            '<div><strong style="color: #f43f5e;">❤️ ' + uName + '</strong></div>' +
+            '<div style="font-size: 0.7rem; color: var(--text-muted);">ID: <code>' + item.user_id + '</code></div>' +
+          '</div>' +
+          '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
+          list.appendChild(row);
+        });
+      }
+    }
+
+    // User Activity Inspector Modal
+    let currentUserActivityData = null;
+    let currentUserActivityTab = 'messages';
+
+    async function openUserActivityModal(userId, displayName, username) {
+      const modal = document.getElementById('userActivityModal');
+      if (!modal) return;
+      document.getElementById('userActivityTitle').textContent = '🔍 Activity: ' + displayName;
+      const headerCard = document.getElementById('userActivityHeaderCard');
+      headerCard.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between;">' +
+        '<div><strong style="color: #ffffff; font-size: 0.95rem;">' + escapeHtml(displayName) + '</strong>' +
+        '<div style="font-size: 0.74rem; color: var(--text-muted);">' + (username ? ('@' + escapeHtml(username)) : 'No username') + ' • ID: <code>' + userId + '</code></div></div>' +
+        '<div style="font-size: 0.75rem; color: #fbbf24;">Loading profile...</div></div>';
+
+      document.getElementById('userActivityContentList').innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">⏳ Loading user activity log...</div>';
+      modal.classList.add('active');
+
+      try {
+        const res = await fetch('/api/admin/users/' + userId + '/activity?user_id=' + currentUserId);
+        const data = await res.json();
+        if (data.success) {
+          currentUserActivityData = data;
+          const u = data.user || {};
+          const isBlocked = Boolean(u.is_blocked);
+          headerCard.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">' +
+            '<div><strong style="color: #ffffff; font-size: 0.95rem;">' + escapeHtml(displayName) + '</strong>' +
+            '<div style="font-size: 0.74rem; color: var(--text-muted);">' + (u.username ? ('@' + escapeHtml(u.username)) : 'No username') + ' • ID: <code>' + userId + '</code></div></div>' +
+            '<div style="text-align: right;">' +
+              '<span style="font-size: 0.68rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; ' + (isBlocked ? 'background: rgba(239, 68, 68, 0.2); color: #f87171;' : 'background: rgba(34, 197, 94, 0.2); color: #4ade80;') + '">' + (isBlocked ? 'BLOCKED' : 'ACTIVE') + '</span>' +
+              '<div style="font-size: 0.74rem; color: #fbbf24; margin-top: 2px;">🪙 ' + (u.points || 0) + ' pts</div>' +
+            '</div></div>';
+          renderUserActivityContent(currentUserActivityTab);
+        } else {
+          document.getElementById('userActivityContentList').innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Failed to load user activity: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
+        }
+      } catch (err) {
+        document.getElementById('userActivityContentList').innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Network error loading user activity</div>';
+      }
+    }
+
+    function renderUserActivityContent(tab) {
+      currentUserActivityTab = tab;
+      const list = document.getElementById('userActivityContentList');
+      if (!list) return;
+
+      document.querySelectorAll('.user-act-tab').forEach(b => {
+        if (b.dataset.uact === tab) {
+          b.className = 'btn btn-sm btn-primary user-act-tab active';
+        } else {
+          b.className = 'btn btn-sm btn-ghost user-act-tab';
+        }
+      });
+
+      if (!currentUserActivityData) {
+        list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No activity loaded</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+      if (tab === 'messages') {
+        const msgs = currentUserActivityData.messages || [];
+        if (msgs.length === 0) {
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No messages sent to bot recorded yet.</div>';
+          return;
+        }
+        msgs.forEach(m => {
+          const row = document.createElement('div');
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px;';
+          const timeStr = m.date ? new Date(m.date).toLocaleString() : '';
+          row.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; color: var(--text-muted);">' +
+            '<span>' + (m.type === 'callback' ? '🔘 Button Action' : '💬 User Message') + '</span>' +
+            '<span>' + timeStr + '</span>' +
+          '</div>' +
+          '<div style="color: #ffffff; font-weight: 500; word-break: break-word;">' + escapeHtml(m.text) + '</div>';
+          list.appendChild(row);
+        });
+      } else if (tab === 'downloads') {
+        const downloads = currentUserActivityData.downloads || [];
+        if (downloads.length === 0) {
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No post files accessed / downloaded yet.</div>';
+          return;
+        }
+        downloads.forEach(d => {
+          const row = document.createElement('div');
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+          const timeStr = d.accessed_at ? new Date(d.accessed_at).toLocaleString() : '';
+          const postTitle = d.posts?.title ? escapeHtml(d.posts.title) : ('Post #' + d.post_id);
+          row.innerHTML = '<div>' +
+            '<div><strong style="color: #4ade80;">📥 ' + escapeHtml(d.item_name || 'Resource') + '</strong></div>' +
+            '<div style="font-size: 0.7rem; color: var(--text-muted);">From Post: ' + postTitle + '</div>' +
+          '</div>' +
+          '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
+          list.appendChild(row);
+        });
+      } else if (tab === 'views') {
+        const views = currentUserActivityData.views || [];
+        if (views.length === 0) {
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No posts watched / viewed yet.</div>';
+          return;
+        }
+        views.forEach(v => {
+          const row = document.createElement('div');
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+          const timeStr = v.viewed_at ? new Date(v.viewed_at).toLocaleString() : '';
+          const postTitle = v.posts?.title ? escapeHtml(v.posts.title) : ('Post #' + v.post_id);
+          row.innerHTML = '<div>' +
+            '<div><strong style="color: #38bdf8;">👁️ ' + postTitle + '</strong></div>' +
+            '<div style="font-size: 0.7rem; color: var(--text-muted);">Post ID: <code>' + v.post_id + '</code></div>' +
+          '</div>' +
+          '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
+          list.appendChild(row);
+        });
+      }
     }
 
     // Event Handlers
@@ -2124,6 +2528,7 @@ const rawHtml = `<!DOCTYPE html>
 
         document.getElementById('adminTabPosts').style.display = atab === 'posts' ? 'block' : 'none';
         document.getElementById('adminTabUsers').style.display = atab === 'users' ? 'block' : 'none';
+        document.getElementById('adminTabComments').style.display = atab === 'comments' ? 'block' : 'none';
         document.getElementById('adminTabShorteners').style.display = atab === 'shorteners' ? 'block' : 'none';
         document.getElementById('adminTabSettings').style.display = atab === 'settings' ? 'block' : 'none';
         document.getElementById('adminTabChannels').style.display = atab === 'channels' ? 'block' : 'none';
@@ -2133,6 +2538,7 @@ const rawHtml = `<!DOCTYPE html>
 
         if (atab === 'posts') loadAdminPosts();
         if (atab === 'users') loadAdminUsers();
+        if (atab === 'comments') loadAdminComments();
         if (atab === 'shorteners') {
           loadShorteners();
           generateNewDestLink();
@@ -2160,13 +2566,79 @@ const rawHtml = `<!DOCTYPE html>
         }
       });
 
+      // Admin Comments Search, Filters & Action Listeners
+      document.getElementById('adminCommentsSearchInput')?.addEventListener('input', renderAdminComments);
+      document.getElementById('adminCommentsFilterSelect')?.addEventListener('change', renderAdminComments);
+      document.getElementById('btnRefreshAdminComments')?.addEventListener('click', loadAdminComments);
+
+      document.getElementById('adminCommentsList')?.addEventListener('click', async (e) => {
+        const toggleBtn = e.target.closest('[data-cact="toggle-hide"]');
+        if (toggleBtn) {
+          const commentId = toggleBtn.dataset.id;
+          const isCurrentlyHidden = toggleBtn.dataset.hidden === '1';
+          const nextAction = isCurrentlyHidden ? 'unhide' : 'hide';
+          try {
+            const res = await fetch('/api/admin/comments/' + commentId + '/moderate?user_id=' + currentUserId, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: nextAction, user_id: currentUserId })
+            });
+            const data = await res.json();
+            if (data.success) {
+              showToast(isCurrentlyHidden ? '👁️ Comment unhidden' : '🙈 Comment hidden');
+              const item = cachedAdminComments.find(c => String(c.id) === String(commentId));
+              if (item) item.is_hidden = !isCurrentlyHidden;
+              renderAdminComments();
+            } else {
+              showToast(data.error || 'Failed to moderate comment');
+            }
+          } catch (err) {
+            showToast('Error moderating comment');
+          }
+          return;
+        }
+
+        const delBtn = e.target.closest('[data-cact="delete"]');
+        if (delBtn) {
+          const commentId = delBtn.dataset.id;
+          if (!confirm('⚠️ Permanently delete this comment? This cannot be undone.')) return;
+          try {
+            const res = await fetch('/api/admin/comments/' + commentId + '?user_id=' + currentUserId, {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'delete', user_id: currentUserId })
+            });
+            const data = await res.json();
+            if (data.success) {
+              showToast('🗑️ Comment permanently deleted');
+              cachedAdminComments = cachedAdminComments.filter(c => String(c.id) !== String(commentId));
+              renderAdminComments();
+            } else {
+              showToast(data.error || 'Failed to delete comment');
+            }
+          } catch (err) {
+            showToast('Error deleting comment');
+          }
+          return;
+        }
+      });
+
       // Admin Users Search, Filters & Chat Action
       document.getElementById('adminUsersSearchInput')?.addEventListener('input', renderAdminUsers);
       document.getElementById('adminUsersFilterSelect')?.addEventListener('change', renderAdminUsers);
       document.getElementById('btnRefreshAdminUsers')?.addEventListener('click', loadAdminUsers);
 
-      // Open User Chat / Contact Options
+      // Open User Chat / Contact Options or Activity Inspector
       document.getElementById('adminUsersList')?.addEventListener('click', (e) => {
+        const actBtn = e.target.closest('.btn-open-user-activity');
+        if (actBtn) {
+          const uid = actBtn.dataset.uid;
+          const name = actBtn.dataset.name || ('User #' + uid);
+          const username = actBtn.dataset.username || '';
+          openUserActivityModal(uid, name, username);
+          return;
+        }
+
         const btn = e.target.closest('.btn-open-user-chat');
         if (!btn) return;
         const uid = btn.dataset.uid;
@@ -2190,6 +2662,17 @@ const rawHtml = `<!DOCTYPE html>
           document.getElementById('userActionDmText').value = '';
           document.getElementById('userActionModal').classList.add('active');
         }
+      });
+
+      // User Activity Modal Listeners
+      document.getElementById('btnUserActivityClose')?.addEventListener('click', () => {
+        document.getElementById('userActivityModal')?.classList.remove('active');
+      });
+
+      document.getElementById('userActivitySubtabs')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.user-act-tab');
+        if (!btn) return;
+        renderUserActivityContent(btn.dataset.uact);
       });
 
       // User Action Modal Handlers
@@ -2377,6 +2860,13 @@ const rawHtml = `<!DOCTYPE html>
           return;
         }
 
+        const statsBtn = e.target.closest('[data-aact="stats"]');
+        if (statsBtn) {
+          const postId = statsBtn.dataset.id;
+          openPostStatsModal(postId);
+          return;
+        }
+
         const delBtn = e.target.closest('[data-aact="del"]');
         if (delBtn) {
           const postId = delBtn.dataset.id;
@@ -2398,6 +2888,17 @@ const rawHtml = `<!DOCTYPE html>
           }
           return;
         }
+      });
+
+      // Post Stats Modal Listeners
+      document.getElementById('btnPostStatsClose')?.addEventListener('click', () => {
+        document.getElementById('postStatsModal')?.classList.remove('active');
+      });
+
+      document.getElementById('postStatSubtabs')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.post-stat-tab');
+        if (!btn) return;
+        renderPostStatLogs(btn.dataset.pstab);
       });
 
       // Status selector change inside Edit Post Modal

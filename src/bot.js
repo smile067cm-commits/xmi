@@ -43,7 +43,8 @@ import {
   recordFileAccess,
   updateUserBlockedStatus,
   getNextPostNumber,
-  formatBytes
+  formatBytes,
+  logUserMessage
 } from './db.js';
 import { getSession, setSession, clearSession } from './session.js';
 
@@ -311,6 +312,13 @@ export function createBot(env) {
         saveOrUpdateUser(env, ctx.from).catch(err => {
           console.error('Failed to log user to Supabase:', err);
         });
+
+        // Log messages and button interactions for admin activity inspection
+        if (ctx.message?.text) {
+          logUserMessage(env, ctx.from.id, ctx.message.text, 'text').catch(() => {});
+        } else if (ctx.callbackQuery?.data) {
+          logUserMessage(env, ctx.from.id, `[Button] ${ctx.callbackQuery.data}`, 'callback').catch(() => {});
+        }
       }
       return await next();
     } catch (err) {

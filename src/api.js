@@ -43,7 +43,9 @@ import {
   updateUserBlockedStatus,
   getNextPostNumber,
   formatBytes,
-  resetAllMetrics
+  resetAllMetrics,
+  getUserActivity,
+  getAllCommentsForAdmin
 } from './db.js';
 import { createBot } from './bot.js';
 import { getAppHtml } from './frontend.js';
@@ -294,6 +296,35 @@ export function createRouter() {
       });
     } catch (err) {
       console.error('API /api/admin/users error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // GET /api/admin/users/:id/activity - Detailed User Activity Log
+  // -------------------------------------------------------------
+  router.get('/api/admin/users/:id/activity', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+      const targetUserId = request.params?.id;
+
+      if (!queryUserId || !(await isAdminUser(env, queryUserId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      if (!targetUserId) {
+        return errorResponse('Missing user id', 400);
+      }
+
+      const activity = await getUserActivity(env, targetUserId);
+      return jsonResponse({
+        success: true,
+        user_id: targetUserId,
+        ...activity
+      });
+    } catch (err) {
+      console.error('API /api/admin/users/:id/activity error:', err);
       return errorResponse(err.message, 500);
     }
   });
@@ -1062,8 +1093,16 @@ export function createRouter() {
         return errorResponse('Unauthorized admin access', 403);
       }
 
-      const analytics = await getPostAnalytics(env, id);
-      return jsonResponse({ success: true, analytics });
+      const [post, analytics] = await Promise.all([
+        getPostById(env, id).catch(() => null),
+        getPostAnalytics(env, id)
+      ]);
+      return jsonResponse({
+        success: true,
+        post_id: id,
+        post_title: post?.title || `Post #${id}`,
+        analytics
+      });
     } catch (err) {
       console.error('API post analytics error:', err);
       return errorResponse(err.message, 500);
@@ -1632,6 +1671,27 @@ export function createRouter() {
   router.post('/api/comments/moderate', handleModerateComment);
   router.post('/api/admin/comments/:id/moderate', handleModerateComment);
   router.delete('/api/admin/comments/:id', handleModerateComment);
+
+  // GET /api/admin/comments - All comments across posts for Admin Moderation
+  router.get('/api/admin/comments', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const queryUserId = url.searchParams.get('user_id');
+
+      if (!queryUserId || !(await isAdminUser(env, queryUserId))) {
+        return errorResponse('Unauthorized admin action', 403);
+      }
+
+      const comments = await getAllCommentsForAdmin(env);
+      return jsonResponse({
+        success: true,
+        comments
+      });
+    } catch (err) {
+      console.error('API /api/admin/comments error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
 
   // -------------------------------------------------------------
   // POST /api/likes & POST /api/posts/:id/like - Toggle Like

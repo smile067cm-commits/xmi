@@ -816,6 +816,26 @@ export async function moderateComment(env, { comment_id, action }) {
   }
 }
 
+/**
+ * Fetch all comments across all posts for Admin moderation
+ */
+export async function getAllCommentsForAdmin(env) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+  try {
+    const url = `${baseUrl}/comments?select=id,post_id,user_id,username,text,is_hidden,created_at,posts(id,title)&order=created_at.desc&limit=200`;
+    const res = await fetch(url, { headers });
+    if (res.ok) {
+      return await res.json();
+    }
+    const fallbackRes = await fetch(`${baseUrl}/comments?select=id,post_id,user_id,username,text,is_hidden,created_at&order=created_at.desc&limit=200`, { headers });
+    return fallbackRes.ok ? await fallbackRes.json() : [];
+  } catch (e) {
+    console.error('getAllCommentsForAdmin error:', e);
+    return [];
+  }
+}
+
 // ------------------------------------------
 // 5. LIKES & SCHEDULER
 // ------------------------------------------
@@ -1060,6 +1080,73 @@ export async function updateSetting(env, key, value) {
     body: JSON.stringify({ key, value: JSON.stringify(value), updated_at: new Date().toISOString() })
   });
   return res.ok;
+}
+
+/**
+ * Fetch a specific arbitrary setting key from the settings table
+ */
+export async function getSettingValue(env, key, defaultValue = null) {
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const res = await fetch(`${baseUrl}/settings?key=eq.${encodeURIComponent(key)}&select=value`, { headers });
+    if (res.ok) {
+      const rows = await res.json();
+      if (rows.length > 0) {
+        return typeof rows[0].value === 'string' ? JSON.parse(rows[0].value) : rows[0].value;
+      }
+    }
+  } catch (e) {
+    console.warn(`Failed to fetch setting ${key}:`, e.message);
+  }
+  return defaultValue;
+}
+
+/**
+ * Log user message or action to user_msgs_${userId}
+ */
+export async function logUserMessage(env, userId, text, type = 'text') {
+  if (!userId || !text) return;
+  try {
+    const key = `user_msgs_${userId}`;
+    const msgs = (await getSettingValue(env, key, [])) || [];
+    msgs.unshift({
+      text: String(text).slice(0, 500),
+      type,
+      date: new Date().toISOString()
+    });
+    // Keep the most recent 50 messages
+    if (msgs.length > 50) msgs.length = 50;
+    await updateSetting(env, key, msgs);
+  } catch (err) {
+    console.warn(`Error logging user message for ${userId}:`, err.message);
+  }
+}
+
+/**
+ * Fetch detailed user activity:
+ * 1. User profile and status
+ * 2. Messages & commands sent to bot
+ * 3. Post files downloaded / accessed
+ * 4. Posts watched / viewed
+ */
+export async function getUserActivity(env, userId) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const headers = getSupabaseHeaders(env);
+
+  const [user, messages, downloadsRes, viewsRes] = await Promise.all([
+    getUser(env, userId).catch(() => null),
+    getSettingValue(env, `user_msgs_${userId}`, []),
+    fetch(`${baseUrl}/file_access_logs?user_id=eq.${userId}&order=accessed_at.desc&limit=50&select=*,posts(id,title)`, { headers }).then(r => r.ok ? r.json() : []).catch(() => []),
+    fetch(`${baseUrl}/post_views?user_id=eq.${userId}&order=viewed_at.desc&limit=50&select=*,posts(id,title)`, { headers }).then(r => r.ok ? r.json() : []).catch(() => [])
+  ]);
+
+  return {
+    user,
+    messages: Array.isArray(messages) ? messages : [],
+    downloads: Array.isArray(downloadsRes) ? downloadsRes : [],
+    views: Array.isArray(viewsRes) ? viewsRes : []
+  };
 }
 
 export async function incrementStatCounter(env, counterName, amount = 1) {
