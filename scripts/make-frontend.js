@@ -2530,6 +2530,58 @@ const rawHtml = `<!DOCTYPE html>
       }
     }
 
+    function formatActivityActionTitle(title) {
+      if (!title) return 'Activity recorded';
+      let t = String(title).trim();
+
+      // Clean nested titles like "Post #69 (Post #64 (16.9 MB))"
+      const nestedView = t.match(/^Viewed Post:\s*Post\s*#\d+\s*\((Post\s*#\d+.*?)\)$/i);
+      if (nestedView && nestedView[1]) {
+        return 'Viewed Post: ' + nestedView[1];
+      }
+      const nestedDl = t.match(/^Downloaded:\s*Post\s*#\d+\s*\((Post\s*#\d+.*?)\)$/i);
+      if (nestedDl && nestedDl[1]) {
+        return 'Downloaded: ' + nestedDl[1];
+      }
+      const rawNested = t.match(/^Post\s*#\d+\s*\((Post\s*#\d+.*?)\)$/i);
+      if (rawNested && rawNested[1]) {
+        return rawNested[1];
+      }
+
+      // Convert button callbacks into plain friendly English
+      if (t.startsWith('[Button] user_view_post_')) {
+        const pid = t.replace('[Button] user_view_post_', '').trim();
+        return '🔘 Clicked: "View Post #' + pid + '"';
+      }
+      if (t.startsWith('[Button] user_browse_page_')) {
+        const page = t.replace('[Button] user_browse_page_', '').trim();
+        return '🔘 Clicked: "Browse Page ' + page + '"';
+      }
+      if (t.startsWith('[Button] bot_get_post_')) {
+        const pid = t.replace('[Button] bot_get_post_', '').trim();
+        return '📥 Clicked: "Download Post #' + pid + '"';
+      }
+      if (t.startsWith('[Button] bot_like_')) {
+        const pid = t.replace('[Button] bot_like_', '').trim();
+        return '❤️ Clicked: "Like Post #' + pid + '"';
+      }
+      if (t.startsWith('[Button] bot_feed_page_')) {
+        const page = t.replace('[Button] bot_feed_page_', '').trim();
+        return '🔘 Clicked: "Next/Prev Feed Page ' + page + '"';
+      }
+      if (t.startsWith('[Button]')) {
+        return '🔘 Clicked: "' + t.replace('[Button]', '').trim() + '"';
+      }
+      if (t.startsWith('/start post_')) {
+        const pid = t.replace('/start post_', '').trim();
+        return '🔗 Opened Direct Post Link: Post #' + pid;
+      }
+      if (t === '/start') {
+        return '🟢 Started / Opened Telegram Bot';
+      }
+      return t;
+    }
+
     function renderUserActivityContent(tab) {
       currentUserActivityTab = tab || 'timeline';
       const list = document.getElementById('userActivityContentList');
@@ -2548,51 +2600,74 @@ const rawHtml = `<!DOCTYPE html>
         return;
       }
 
-      list.innerHTML = '';
+      const allTimeline = currentUserActivityData.timeline || [];
+      const allDownloads = currentUserActivityData.downloads || [];
+      const allViews = currentUserActivityData.views || [];
+      const allMsgs = currentUserActivityData.messages || [];
+
+      // Summary strip
+      let summaryStrip = '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.76rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">' +
+        '<div>📥 <strong style="color: #4ade80;">' + allDownloads.length + '</strong> Downloads</div>' +
+        '<div>👁️ <strong style="color: #38bdf8;">' + allViews.length + '</strong> Views</div>' +
+        '<div>💬 <strong style="color: #c084fc;">' + allMsgs.length + '</strong> Messages</div>' +
+        '<div>📜 <strong style="color: #fbbf24;">' + allTimeline.length + '</strong> Total Events</div>' +
+      '</div>';
+
+      list.innerHTML = summaryStrip;
+
       if (currentUserActivityTab === 'timeline') {
-        const timeline = currentUserActivityData.timeline || [];
-        if (timeline.length === 0) {
-          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No actions recorded yet for this user.</div>';
+        if (allTimeline.length === 0) {
+          list.innerHTML += '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No actions recorded yet for this user.</div>';
           return;
         }
 
-        timeline.forEach(item => {
+        const triggerAction = currentUserActivityData.last_action_before_block;
+
+        allTimeline.forEach(item => {
           const row = document.createElement('div');
           const isApp = item.source === 'app' || item.type === 'app';
           const isBlock = item.type === 'block';
-          const borderClr = isBlock ? 'rgba(239, 68, 68, 0.4)' : 'var(--card-border)';
-          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid ' + borderClr + '; border-radius: 8px; padding: 9px 12px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px;';
+          const isTrigger = currentUserActivityData.user?.is_blocked && triggerAction && (item.date === triggerAction.date || item.title === triggerAction.title);
+
+          const borderClr = isBlock ? 'rgba(239, 68, 68, 0.5)' : (isTrigger ? 'rgba(245, 158, 11, 0.5)' : 'var(--card-border)');
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid ' + borderClr + '; border-radius: 8px; padding: 9px 12px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px;';
           
           const timeStr = item.date ? formatRelativeTime(item.date) + ' (' + new Date(item.date).toLocaleTimeString() + ')' : '';
           const sourceBadge = isApp
             ? '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">📱 Mini App</span>'
             : '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">🤖 Telegram Bot</span>';
 
-          row.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 0.7rem; color: var(--text-muted);">' +
-            '<div style="display: flex; align-items: center; gap: 6px;">' +
+          const triggerBadge = isTrigger ? '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4);">⚠️ Action before block</span>' : '';
+
+          const displayActionTitle = formatActivityActionTitle(item.title);
+
+          row.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 0.7rem; color: var(--text-muted); flex-wrap: wrap;">' +
+            '<div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">' +
               '<span>' + (item.icon || '📌') + '</span>' +
               '<span style="font-weight: 600; color: #cbd5e1;">' + escapeHtml(item.description || item.type) + '</span>' +
               sourceBadge +
+              triggerBadge +
             '</div>' +
             '<span>' + timeStr + '</span>' +
           '</div>' +
-          '<div style="color: ' + (isBlock ? '#f87171;' : '#ffffff;') + ' font-weight: 500; word-break: break-word; margin-top: 2px;">' + escapeHtml(item.title) + '</div>';
+          '<div style="color: ' + (isBlock ? '#f87171;' : '#ffffff;') + ' font-weight: 500; word-break: break-word; margin-top: 2px;">' + escapeHtml(displayActionTitle) + '</div>';
           list.appendChild(row);
         });
       } else if (currentUserActivityTab === 'messages') {
-        const msgs = currentUserActivityData.messages || [];
-        if (msgs.length === 0) {
-          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No messages sent to bot recorded yet.</div>';
+        if (allMsgs.length === 0) {
+          list.innerHTML += '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No messages sent to bot recorded yet.</div>';
           return;
         }
-        msgs.forEach(m => {
+        allMsgs.forEach(m => {
           const row = document.createElement('div');
-          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px;';
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px;';
           const timeStr = m.date ? formatRelativeTime(m.date) + ' (' + new Date(m.date).toLocaleTimeString() + ')' : '';
           const isApp = m.source === 'app' || m.type === 'app';
           const sourceBadge = isApp
             ? '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">📱 Mini App</span>'
             : '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc;">🤖 Bot</span>';
+
+          const displayMsg = formatActivityActionTitle(m.text);
 
           row.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.7rem; color: var(--text-muted);">' +
             '<div style="display: flex; align-items: center; gap: 6px;">' +
@@ -2601,23 +2676,24 @@ const rawHtml = `<!DOCTYPE html>
             '</div>' +
             '<span>' + timeStr + '</span>' +
           '</div>' +
-          '<div style="color: #ffffff; font-weight: 500; word-break: break-word;">' + escapeHtml(m.text) + '</div>';
+          '<div style="color: #ffffff; font-weight: 500; word-break: break-word;">' + escapeHtml(displayMsg) + '</div>';
           list.appendChild(row);
         });
       } else if (currentUserActivityTab === 'downloads') {
-        const downloads = currentUserActivityData.downloads || [];
-        if (downloads.length === 0) {
-          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No post files accessed / downloaded yet.</div>';
+        if (allDownloads.length === 0) {
+          list.innerHTML += '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No post files accessed / downloaded yet.</div>';
           return;
         }
-        downloads.forEach(d => {
+        allDownloads.forEach(d => {
           const row = document.createElement('div');
-          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;';
           const timeStr = d.accessed_at ? formatRelativeTime(d.accessed_at) : '';
-          const postTitle = d.posts?.title ? escapeHtml(d.posts.title) : ('Post #' + d.post_id);
+          const postTitle = formatActivityActionTitle(d.posts?.title ? escapeHtml(d.posts.title) : ('Post #' + d.post_id));
+          const itemName = formatActivityActionTitle(d.item_name || 'Resource');
+
           row.innerHTML = '<div>' +
             '<div style="display: flex; align-items: center; gap: 6px;">' +
-              '<strong style="color: #4ade80;">📥 ' + escapeHtml(d.item_name || 'Resource') + '</strong>' +
+              '<strong style="color: #4ade80;">📥 ' + escapeHtml(itemName) + '</strong>' +
               '<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc;">🤖 Bot Delivery</span>' +
             '</div>' +
             '<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">From Post: ' + postTitle + '</div>' +
@@ -2626,16 +2702,16 @@ const rawHtml = `<!DOCTYPE html>
           list.appendChild(row);
         });
       } else if (currentUserActivityTab === 'views') {
-        const views = currentUserActivityData.views || [];
-        if (views.length === 0) {
-          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No posts watched / viewed yet.</div>';
+        if (allViews.length === 0) {
+          list.innerHTML += '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No posts watched / viewed yet.</div>';
           return;
         }
-        views.forEach(v => {
+        allViews.forEach(v => {
           const row = document.createElement('div');
-          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;';
           const timeStr = v.viewed_at ? formatRelativeTime(v.viewed_at) : '';
-          const postTitle = v.posts?.title ? escapeHtml(v.posts.title) : ('Post #' + v.post_id);
+          const postTitle = formatActivityActionTitle(v.posts?.title ? escapeHtml(v.posts.title) : ('Post #' + v.post_id));
+
           row.innerHTML = '<div>' +
             '<div style="display: flex; align-items: center; gap: 6px;">' +
               '<strong style="color: #38bdf8;">👁️ ' + postTitle + '</strong>' +

@@ -44,7 +44,8 @@ import {
   updateUserBlockedStatus,
   getNextPostNumber,
   formatBytes,
-  logUserMessage
+  logUserMessage,
+  toggleLike
 } from './db.js';
 import { getSession, setSession, clearSession } from './session.js';
 
@@ -54,6 +55,21 @@ import { getSession, setSession, clearSession } from './session.js';
 function escapeMarkdown(text) {
   if (!text) return '';
   return String(text).replace(/([_*`\[\]])/g, '\\$1');
+}
+
+/**
+ * Clean nested post display titles (e.g. Post #69 (Post #64 (16.9 MB)) -> Post #64 (16.9 MB))
+ */
+function cleanPostDisplayTitle(title, fallbackId = '') {
+  if (!title) return `Post #${fallbackId}`;
+  let t = String(title).trim();
+  const m = t.match(/^Post\s*#\d+\s*\((.+)\)$/i);
+  if (m && m[1]) {
+    if (/^Post\s*#\d+/i.test(m[1])) {
+      return m[1];
+    }
+  }
+  return t;
 }
 
 /**
@@ -260,19 +276,27 @@ async function sendPostToUser(ctx, env, post, postId) {
     }
   }
 
-  // 6. Send Expires Warning as a SEPARATE MESSAGE
+  // 6. Send Expires Warning & Anti-Block Retention Notice as a SEPARATE MESSAGE
   if (autoDeleteMinutes > 0) {
     const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
-    const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
-      `This message and all files/links above will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
+    const noticeText = `⏳ ⚠️ *Auto-Delete Notice:*\n\n` +
+      `All files and messages above will automatically delete in *${minuteUnit}* to protect content!\n\n` +
+      `💡 *Keep this bot unblocked & unmuted* so you can re-download anytime and get notified when new files drop!\n\n` +
       (protectContent
         ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
         : `👉 *Please forward or save to your Saved Messages now before they disappear.*`);
 
+    const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${ctx.from?.id}` : `${appUrl}?user_id=${ctx.from?.id}`) : appUrl;
+    const noticeButtons = [];
+    if (userAppUrl.startsWith('https://')) {
+      noticeButtons.push([Markup.button.webApp('🚀 Open Mini App (Browse All Files)', userAppUrl)]);
+    }
+
     try {
       const noticeMsg = await ctx.reply(noticeText, {
         parse_mode: 'Markdown',
-        protect_content: protectContent
+        protect_content: protectContent,
+        ...(noticeButtons.length > 0 ? Markup.inlineKeyboard(noticeButtons) : {})
       });
       if (noticeMsg?.message_id) sentMessageIds.push(noticeMsg.message_id);
     } catch (nErr) {
@@ -356,6 +380,127 @@ export function createBot(env) {
       console.warn('Error handling my_chat_member update:', e.message);
     }
   });
+
+  /**
+   * Sends 3 latest posts as interactive cards directly to the chat
+   */
+  async function sendPostFeedToUser(ctx, env, page = 1) {
+    const userId = ctx.from?.id;
+    const PAGE_SIZE = 3;
+    const offset = Math.max(0, (page - 1) * PAGE_SIZE);
+
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+
+    // Fetch total published posts count and the 3 posts for current page
+    const [postsRes, countRes, channels] = await Promise.all([
+      fetch(`${baseUrl}/posts?status=eq.published&order=created_at.desc&limit=${PAGE_SIZE}&offset=${offset}&select=id,title,preview_image,category,tags,created_at,likes(user_id),files(id,file_size,mime_type,display_name)`, { headers }),
+      fetch(`${baseUrl}/posts?status=eq.published&select=id`, { headers }),
+      getForceChannels(env).catch(() => [])
+    ]);
+
+    const posts = postsRes.ok ? await postsRes.json() : [];
+    const totalCount = countRes.ok ? (await countRes.json()).length : 0;
+    const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
+
+    const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${userId}` : `${appUrl}?user_id=${userId}`) : appUrl;
+
+    if (userAppUrl.startsWith('https://')) {
+      ctx.setChatMenuButton({
+        type: 'web_app',
+        text: '🚀 Open App',
+        web_app: { url: userAppUrl }
+      }).catch(() => {});
+    }
+
+    if (!posts || posts.length === 0) {
+      return await ctx.reply('✨ No posts available yet. Check back soon!', {
+        ...Markup.inlineKeyboard([
+          [Markup.button.webApp('🚀 Open Mini App', userAppUrl)]
+        ])
+      });
+    }
+
+    // Send each of the 3 posts as interactive preview cards
+    for (const post of posts) {
+      const isLiked = post.likes ? post.likes.some(l => String(l.user_id) === String(userId)) : false;
+      const likeCount = post.likes ? post.likes.length : 0;
+      const cleanTitle = cleanPostDisplayTitle(post.title, post.id);
+
+      // File size if files exist
+      let sizeInfo = '';
+      if (post.files && post.files.length > 0) {
+        const totalBytes = post.files.reduce((acc, f) => acc + (Number(f.file_size) || 0), 0);
+        if (totalBytes > 0) {
+          sizeInfo = formatBytes(totalBytes);
+        }
+      }
+
+      let caption = `📌 *${escapeMarkdown(cleanTitle)}*\n`;
+      if (sizeInfo) caption += `💾 *Size:* \`${sizeInfo}\`\n`;
+      if (post.category && post.category !== 'All') caption += `📁 *Category:* \`${escapeMarkdown(post.category)}\`\n`;
+
+      const postKeyboard = [
+        [
+          Markup.button.callback('📥 Get File / Download', `bot_get_post_${post.id}`),
+          Markup.button.callback(isLiked ? `❤️ Liked (${likeCount})` : `🤍 Like (${likeCount})`, `bot_like_${post.id}`)
+        ]
+      ];
+
+      if (post.preview_image) {
+        try {
+          await ctx.replyWithPhoto(post.preview_image, {
+            caption,
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(postKeyboard)
+          });
+        } catch (e) {
+          await ctx.reply(caption, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(postKeyboard)
+          });
+        }
+      } else {
+        await ctx.reply(caption, {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard(postKeyboard)
+        });
+      }
+    }
+
+    // Navigation & Mini App recommendation card
+    const navButtons = [];
+    if (userAppUrl.startsWith('https://')) {
+      navButtons.push([Markup.button.webApp('🚀 Open Mini App (Best Experience)', userAppUrl)]);
+    }
+
+    // Pagination buttons
+    const pageRow = [];
+    if (page > 1) {
+      pageRow.push(Markup.button.callback(`⬅️ Prev 3 Posts`, `bot_feed_page_${page - 1}`));
+    }
+    if (page < totalPages) {
+      pageRow.push(Markup.button.callback(`➡️ Next 3 Posts`, `bot_feed_page_${page + 1}`));
+    }
+    if (pageRow.length > 0) {
+      navButtons.push(pageRow);
+    }
+
+    // Official Channel / Backup Channel link
+    if (channels && channels.length > 0 && channels[0].invite_link) {
+      navButtons.push([Markup.button.url('📢 Join Official Channel', channels[0].invite_link)]);
+    }
+
+    const footerText = `✨ *Use our Telegram Mini App for the best experience!*\n\n` +
+      `Instant search, faster browsing, and full collection of *${totalCount}+* posts.\n\n` +
+      `📄 *Showing Page ${page} of ${totalPages}*`;
+
+    return await ctx.reply(footerText, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard(navButtons)
+    });
+  }
+
   async function showMainMenu(ctx) {
     const userId = ctx.from?.id;
 
@@ -394,7 +539,7 @@ export function createBot(env) {
         ],
         [
           Markup.button.callback('⚙️ Hub Settings', 'admin_menu_settings'),
-          Markup.button.callback('🔍 Browse Posts', 'user_browse_posts')
+          Markup.button.callback('🔍 Browse Posts (Feed)', 'bot_feed_page_1')
         ]
       ];
 
@@ -422,48 +567,11 @@ export function createBot(env) {
         });
       }
     } else {
-      // Regular User Panel
-      const userPoints = userObj?.points || 0;
-
-      const inlineButtons = [
-        [Markup.button.webApp('🚀 Launch Mini App', userAppUrl)],
-        [
-          Markup.button.callback('🔍 Browse Posts', 'user_browse_posts'),
-          Markup.button.callback('🔖 Saved Posts', 'user_menu_saved')
-        ]
-      ];
-
-      if (settings.referral_enabled) {
-        inlineButtons.push([
-          Markup.button.callback(`🪙 My Points: ${userPoints}`, 'user_menu_points'),
-          Markup.button.callback('🎁 Invite Friends', 'user_menu_invite')
-        ]);
-      }
-
-      const text = `👋 *Welcome to xmi Content Hub!*\n\n` +
-        `• Access premium content, downloads, and exclusive files.\n` +
-        (settings.referral_enabled ? `• 🪙 *Your Balance:* \`${userPoints} Points\`\n` : '') +
-        `\nTap **Launch Mini App** or choose an option below:`;
-
+      // Regular User: Send 3 posts automatically
       if (ctx.callbackQuery) {
         await ctx.answerCbQuery();
-        try {
-          return await ctx.editMessageText(text, {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(inlineButtons)
-          });
-        } catch (e) {
-          return await ctx.reply(text, {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard(inlineButtons)
-          });
-        }
-      } else {
-        return await ctx.reply(text, {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard(inlineButtons)
-        });
       }
+      return await sendPostFeedToUser(ctx, env, 1);
     }
   }
 
@@ -607,6 +715,111 @@ export function createBot(env) {
 
   bot.action('main_menu', showMainMenu);
   bot.action('admin_main_menu', showMainMenu);
+
+  // -------------------------------------------------------------
+  // Feed Pagination Callback: bot_feed_page_<N>
+  // -------------------------------------------------------------
+  bot.action(/^bot_feed_page_(\d+)$/, async (ctx) => {
+    const page = Number(ctx.match[1]) || 1;
+    await ctx.answerCbQuery(`Loading page ${page}...`);
+    return await sendPostFeedToUser(ctx, env, page);
+  });
+
+  // -------------------------------------------------------------
+  // In-Bot Like Toggle Callback: bot_like_<postId>
+  // -------------------------------------------------------------
+  bot.action(/^bot_like_(\d+)$/, async (ctx) => {
+    try {
+      const postId = Number(ctx.match[1]);
+      const userId = Number(ctx.from?.id);
+      if (!userId || !postId) return await ctx.answerCbQuery();
+
+      const res = await toggleLike(env, { post_id: postId, user_id: userId });
+      const liked = res.liked;
+      const likeCount = res.like_count || 0;
+
+      await ctx.answerCbQuery(liked ? '❤️ You liked this post!' : '🤍 Post unliked.');
+
+      // Update message reply markup in place
+      const currentMarkup = ctx.callbackQuery?.message?.reply_markup?.inline_keyboard;
+      if (currentMarkup && Array.isArray(currentMarkup)) {
+        const updatedMarkup = currentMarkup.map(row => {
+          return row.map(btn => {
+            if (btn.callback_data === `bot_like_${postId}`) {
+              return Markup.button.callback(
+                liked ? `❤️ Liked (${likeCount})` : `🤍 Like (${likeCount})`,
+                `bot_like_${postId}`
+              );
+            }
+            return btn;
+          });
+        });
+
+        await ctx.editMessageReplyMarkup({ inline_keyboard: updatedMarkup }).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('Like callback error:', e.message);
+      await ctx.answerCbQuery('Failed to update like');
+    }
+  });
+
+  // -------------------------------------------------------------
+  // In-Bot Post Delivery from Feed: bot_get_post_<postId>
+  // -------------------------------------------------------------
+  bot.action(/^bot_get_post_(\d+)$/, async (ctx) => {
+    const postId = ctx.match[1];
+    await ctx.answerCbQuery('Fetching file...');
+    try {
+      const isAdmin = await isAdminUser(env, ctx.from?.id);
+      const post = await getPostById(env, postId, ctx.from?.id, isAdmin);
+      if (!post) return await ctx.reply('⚠️ Post not found or has been removed.');
+
+      // Force Join Check
+      const fj = await checkForceJoin(ctx, env, ctx.from?.id);
+      if (!fj.passed) {
+        const buttons = fj.unjoined.map(ch => [Markup.button.url(`📢 Join ${ch.channel_title}`, ch.invite_link)]);
+        buttons.push([Markup.button.callback('🔄 I Have Joined (Check Again)', `check_force_post_${postId}`)]);
+        buttons.push([Markup.button.callback('🔙 Back to Feed', 'main_menu')]);
+
+        return await ctx.reply(
+          `🔒 *Channel Membership Required*\n\n` +
+          `To view this post and download its files, please join our official channels below:`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(buttons)
+          }
+        );
+      }
+
+      // Shortener & Points Locker Check
+      const locker = await checkLockerPass(ctx, env, ctx.from?.id, postId);
+      if (!locker.passed) {
+        const buttons = [
+          [Markup.button.url(`🔗 Complete Task (+${locker.rewardPoints} Pts)`, locker.verifyUrl)],
+          [Markup.button.callback('🔄 Regenerate Link', `regen_verify_${postId}`)],
+          [Markup.button.callback('🎁 Invite Friends', 'user_menu_invite')],
+          [Markup.button.callback('🔙 Back to Feed', 'main_menu')]
+        ];
+
+        return await ctx.reply(
+          `🔐 *Points Required for Download*\n\n` +
+          `• *Post Title:* \`${escapeMarkdown(post.title)}\`\n` +
+          `• *Points Required:* \`${locker.requiredPoints} Points\` 🪙\n` +
+          `• *Your Current Balance:* \`${locker.currentPoints} Points\` 🪙\n\n` +
+          `Complete a quick shortener task to unlock access:`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(buttons)
+          }
+        );
+      }
+
+      return await sendPostToUser(ctx, env, post, postId);
+    } catch (err) {
+      console.error('Error in bot_get_post callback:', err);
+      return await ctx.reply('⚠️ Error retrieving post content. Please try again.');
+    }
+  });
 
   // -------------------------------------------------------------
   // Check Force Join Callback
