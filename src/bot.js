@@ -444,17 +444,20 @@ export function createBot(env) {
           await ctx.replyWithPhoto(post.preview_image, {
             caption,
             parse_mode: 'Markdown',
+            protect_content: true,
             ...Markup.inlineKeyboard(postKeyboard)
           });
         } catch (e) {
           await ctx.reply(caption, {
             parse_mode: 'Markdown',
+            protect_content: true,
             ...Markup.inlineKeyboard(postKeyboard)
           });
         }
       } else {
         await ctx.reply(caption, {
           parse_mode: 'Markdown',
+          protect_content: true,
           ...Markup.inlineKeyboard(postKeyboard)
         });
       }
