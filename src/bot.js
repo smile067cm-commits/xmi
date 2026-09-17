@@ -73,6 +73,27 @@ function cleanPostDisplayTitle(title, fallbackId = '') {
 }
 
 /**
+ * Formats a Date or ISO string into Indian Standard Time (IST, UTC+5:30)
+ */
+function formatIST(dateInput, includeTime = true) {
+  if (!dateInput) return '';
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    ...(includeTime ? {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    } : {})
+  }) + (includeTime ? ' IST' : '');
+}
+
+/**
  * Checks if a user has joined all required force-join channels
  */
 async function checkForceJoin(ctx, env, userId) {
@@ -2103,7 +2124,7 @@ export function createBot(env) {
       `Current Admins (${admins.length}):\n`;
 
     admins.forEach((adm, idx) => {
-      text += `${idx + 1}. \`${adm.user_id}\` — *${escapeMarkdown(adm.name || 'Admin')}* (Added: ${new Date(adm.created_at).toLocaleDateString()})\n`;
+      text += `${idx + 1}. \`${adm.user_id}\` — *${escapeMarkdown(adm.name || 'Admin')}* (Added: ${formatIST(adm.created_at, false)})\n`;
     });
 
     text += `\nAdmins have full access to create/edit posts, broadcast, manage storage, and configure hub rules.`;
@@ -2147,7 +2168,8 @@ export function createBot(env) {
         const topUsers = users.slice(0, 20);
         topUsers.forEach((u, i) => {
           const uName = u.username ? `[@${escapeMarkdown(u.username)}](https://t.me/${u.username})` : `[${escapeMarkdown(u.first_name || 'User')}](tg://user?id=${u.id})`;
-          text += `${i + 1}. ${uName} (\`#${u.id}\`) — 🪙 ${u.points || 0} pts • 🔄 ${u.interactions || 1} acts\n`;
+          const actStr = u.last_activity ? ` • 🕒 ${formatIST(u.last_activity)}` : '';
+          text += `${i + 1}. ${uName} (\`#${u.id}\`) — 🪙 ${u.points || 0} pts${actStr}\n`;
         });
         if (users.length > 20) {
           text += `\n_...and ${users.length - 20} more users (view and search all in Mini App Admin Hub)._`;
@@ -3150,7 +3172,7 @@ export function createBot(env) {
 
     return await ctx.reply(
       `📅 *Schedule Post*\n\n` +
-      `Please reply with the publish date and time in UTC.\n` +
+      `Please reply with the publish date and time in Indian Standard Time (IST).\n` +
       `*Format:* \`YYYY-MM-DD HH:MM\`\n` +
       `*Example:* \`2026-10-15 14:30\``,
       {
@@ -3725,18 +3747,28 @@ export function createBot(env) {
       }
     }
 
-    // Schedule Time
+    // Schedule Time (in IST)
     if (session.step === 'AWAITING_SCHEDULE_TIME') {
       if (!text) {
-        return await ctx.reply('⚠️ Please send a valid date string (e.g. `2026-10-15 14:30`) in UTC.');
+        return await ctx.reply('⚠️ Please send a valid date string (e.g. `2026-10-15 14:30`) in Indian Standard Time (IST).');
       }
 
-      const parsedDate = new Date(text.includes('T') ? text : text.replace(' ', 'T') + ':00Z');
+      let dateString = text.trim().replace(' ', 'T');
+      if (!dateString.includes('+') && !dateString.endsWith('Z')) {
+        if (dateString.length === 16) {
+          dateString += ':00+05:30';
+        } else if (dateString.length === 19) {
+          dateString += '+05:30';
+        } else {
+          dateString += '+05:30';
+        }
+      }
+      const parsedDate = new Date(dateString);
 
       if (isNaN(parsedDate.getTime()) || parsedDate.getTime() <= Date.now()) {
         return await ctx.reply(
           '⚠️ Invalid date or the date is in the past.\n' +
-          'Please provide a future date in UTC format: `YYYY-MM-DD HH:MM` (e.g. `2026-10-15 14:30`)'
+          'Please provide a future date in IST format: `YYYY-MM-DD HH:MM` (e.g. `2026-10-15 14:30`)'
         );
       }
 
@@ -3769,7 +3801,7 @@ export function createBot(env) {
         return await ctx.reply(
           `📅 *Post Successfully Scheduled!*\n\n` +
           `• *Title:* ${escapeMarkdown(session.title)}\n` +
-          `• *Publish Date (UTC):* ${parsedDate.toUTCString()}\n\n` +
+          `• *Publish Date (IST):* ${formatIST(parsedDate)}\n\n` +
           `The Cloudflare Cron Trigger will automatically publish this post when the scheduled time arrives.`,
           {
             parse_mode: 'Markdown',

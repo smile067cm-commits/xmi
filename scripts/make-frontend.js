@@ -1502,7 +1502,7 @@ const rawHtml = `<!DOCTYPE html>
               </select>
             </div>
             <div id="createScheduledGroup" style="display: none;">
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Publish Date (UTC)</label>
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Publish Date (IST)</label>
               <input type="datetime-local" id="createPostScheduledAt" class="form-input" />
             </div>
           </div>
@@ -1562,7 +1562,7 @@ const rawHtml = `<!DOCTYPE html>
               </select>
             </div>
             <div id="editScheduledGroup" style="display: none;">
-              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Publish Date (UTC)</label>
+              <label style="font-size: 0.75rem; font-weight: 600; color: var(--text-muted);">Publish Date (IST)</label>
               <input type="datetime-local" id="editPostScheduledAt" class="form-input" />
             </div>
           </div>
@@ -1745,6 +1745,48 @@ const rawHtml = `<!DOCTYPE html>
       toast.textContent = msg;
       toast.classList.add('show');
       setTimeout(() => toast.classList.remove('show'), 2500);
+    }
+
+    // Indian Standard Time (IST, UTC+5:30) Formatting Helpers
+    function formatISTDateTime(isoString) {
+      if (!isoString) return '';
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      }) + ' IST';
+    }
+
+    function formatISTTime(isoString) {
+      if (!isoString) return '';
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      }) + ' IST';
+    }
+
+    function formatISTDate(isoString) {
+      if (!isoString) return '';
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleDateString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      });
     }
 
     function showAdminElements() {
@@ -1953,7 +1995,7 @@ const rawHtml = `<!DOCTYPE html>
         card.innerHTML = '<div class="post-image-container">' + imgHtml + (promotedBadge ? '<div class="post-badges-top">' + promotedBadge + '</div>' : '') + '</div>' +
           '<div class="post-body">' +
           '<h3 class="post-title">' + escapeHtml(post.title) + '</h3>' +
-          '<div class="post-meta"><span>📅 ' + new Date(post.created_at).toLocaleDateString() + '</span>' + (post.tags ? '<span>• ' + escapeHtml(post.tags) + '</span>' : '') + (shortenerOn ? '<span style="color: #fbbf24; font-weight: 700;">• 🪙 ' + pointsRequired + ' pt' + (pointsRequired > 1 ? 's' : '') + '</span>' : '') + '</div>' +
+          '<div class="post-meta"><span>📅 ' + formatISTDate(post.created_at) + '</span>' + (post.tags ? '<span>• ' + escapeHtml(post.tags) + '</span>' : '') + (shortenerOn ? '<span style="color: #fbbf24; font-weight: 700;">• 🪙 ' + pointsRequired + ' pt' + (pointsRequired > 1 ? 's' : '') + '</span>' : '') + '</div>' +
           '<div class="post-actions-row">' +
           '<div class="social-counters">' +
           '<button class="action-btn ' + (post.is_liked ? 'liked' : '') + '" data-act="like" data-id="' + post.id + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>' + (post.like_count || 0) + '</span></button>' +
@@ -2157,7 +2199,7 @@ const rawHtml = `<!DOCTYPE html>
       if (diffHr < 24) return diffHr + 'h ago';
       const diffDays = Math.floor(diffHr / 24);
       if (diffDays < 30) return diffDays + 'd ago';
-      return new Date(isoString).toLocaleDateString();
+      return formatISTDate(isoString);
     }
 
     // Render Registered Users Directory in Admin Hub
@@ -2324,7 +2366,7 @@ const rawHtml = `<!DOCTYPE html>
 
       filtered.forEach(c => {
         const isHidden = Boolean(c.is_hidden);
-        const dateStr = c.created_at ? new Date(c.created_at).toLocaleString() : '';
+        const dateStr = c.created_at ? formatISTDateTime(c.created_at) : '';
         const postTitle = c.posts?.title ? escapeHtml(c.posts.title) : ('Post #' + c.post_id);
         const userDisplay = c.username ? ('@' + escapeHtml(c.username)) : ('User #' + c.user_id);
 
@@ -2417,7 +2459,7 @@ const rawHtml = `<!DOCTYPE html>
           const row = document.createElement('div');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
           const uName = item.username ? ('@' + escapeHtml(item.username)) : (item.first_name ? escapeHtml(item.first_name) : ('User #' + item.user_id));
-          const timeStr = item.accessed_at ? new Date(item.accessed_at).toLocaleString() : '';
+          const timeStr = item.accessed_at ? formatISTDateTime(item.accessed_at) : '';
           row.innerHTML = '<div>' +
             '<div><strong style="color: #ffffff;">' + escapeHtml(item.item_name || 'Resource') + '</strong></div>' +
             '<div style="font-size: 0.7rem; color: var(--text-muted);">' + uName + ' • ID: <code>' + item.user_id + '</code></div>' +
@@ -2435,7 +2477,7 @@ const rawHtml = `<!DOCTYPE html>
           const row = document.createElement('div');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
           const uName = item.username ? ('@' + escapeHtml(item.username)) : (item.first_name ? escapeHtml(item.first_name) : ('User #' + item.user_id));
-          const timeStr = item.viewed_at ? new Date(item.viewed_at).toLocaleString() : '';
+          const timeStr = item.viewed_at ? formatISTDateTime(item.viewed_at) : '';
           row.innerHTML = '<div>' +
             '<div><strong style="color: #ffffff;">👁️ ' + uName + '</strong></div>' +
             '<div style="font-size: 0.7rem; color: var(--text-muted);">ID: <code>' + item.user_id + '</code></div>' +
@@ -2453,7 +2495,7 @@ const rawHtml = `<!DOCTYPE html>
           const row = document.createElement('div');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
           const uName = item.username ? ('@' + escapeHtml(item.username)) : (item.first_name ? escapeHtml(item.first_name) : ('User #' + item.user_id));
-          const timeStr = item.created_at ? new Date(item.created_at).toLocaleString() : '';
+          const timeStr = item.created_at ? formatISTDateTime(item.created_at) : '';
           row.innerHTML = '<div>' +
             '<div><strong style="color: #f43f5e;">❤️ ' + uName + '</strong></div>' +
             '<div style="font-size: 0.7rem; color: var(--text-muted);">ID: <code>' + item.user_id + '</code></div>' +
@@ -2488,8 +2530,7 @@ const rawHtml = `<!DOCTYPE html>
           currentUserActivityData = data;
           const u = data.user || {};
           const isBlocked = Boolean(u.is_blocked);
-          const isOnline = Boolean(data.is_online);
-          const lastSeenText = isOnline ? '🟢 ACTIVE IN MINI APP NOW' : (u.last_activity ? ('Last active: ' + formatRelativeTime(u.last_activity)) : ('Joined: ' + formatRelativeTime(u.first_seen || u.created_at)));
+          const lastSeenText = isOnline ? '🟢 ACTIVE IN MINI APP NOW' : (u.last_activity ? ('Last active: ' + formatRelativeTime(u.last_activity) + ' (' + formatISTTime(u.last_activity) + ')') : ('Joined: ' + (u.first_seen ? formatISTDate(u.first_seen) : (u.created_at ? formatISTDate(u.created_at) : ''))));
 
           let blockBannerHtml = '';
           if (isBlocked) {
@@ -2632,7 +2673,7 @@ const rawHtml = `<!DOCTYPE html>
           const borderClr = isBlock ? 'rgba(239, 68, 68, 0.5)' : (isTrigger ? 'rgba(245, 158, 11, 0.5)' : 'var(--card-border)');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid ' + borderClr + '; border-radius: 8px; padding: 9px 12px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px;';
           
-          const timeStr = item.date ? formatRelativeTime(item.date) + ' (' + new Date(item.date).toLocaleTimeString() + ')' : '';
+          const timeStr = item.date ? formatRelativeTime(item.date) + ' (' + formatISTTime(item.date) + ')' : '';
           const sourceBadge = isApp
             ? '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">📱 Mini App</span>'
             : '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">🤖 Telegram Bot</span>';
@@ -2661,7 +2702,7 @@ const rawHtml = `<!DOCTYPE html>
         allMsgs.forEach(m => {
           const row = document.createElement('div');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px;';
-          const timeStr = m.date ? formatRelativeTime(m.date) + ' (' + new Date(m.date).toLocaleTimeString() + ')' : '';
+          const timeStr = m.date ? formatRelativeTime(m.date) + ' (' + formatISTTime(m.date) + ')' : '';
           const isApp = m.source === 'app' || m.type === 'app';
           const sourceBadge = isApp
             ? '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">📱 Mini App</span>'
@@ -2687,7 +2728,7 @@ const rawHtml = `<!DOCTYPE html>
         allDownloads.forEach(d => {
           const row = document.createElement('div');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;';
-          const timeStr = d.accessed_at ? formatRelativeTime(d.accessed_at) : '';
+          const timeStr = d.accessed_at ? formatRelativeTime(d.accessed_at) + ' (' + formatISTTime(d.accessed_at) + ')' : '';
           const postTitle = formatActivityActionTitle(d.posts?.title ? escapeHtml(d.posts.title) : ('Post #' + d.post_id));
           const itemName = formatActivityActionTitle(d.item_name || 'Resource');
 
@@ -2709,7 +2750,7 @@ const rawHtml = `<!DOCTYPE html>
         allViews.forEach(v => {
           const row = document.createElement('div');
           row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;';
-          const timeStr = v.viewed_at ? formatRelativeTime(v.viewed_at) : '';
+          const timeStr = v.viewed_at ? formatRelativeTime(v.viewed_at) + ' (' + formatISTTime(v.viewed_at) + ')' : '';
           const postTitle = formatActivityActionTitle(v.posts?.title ? escapeHtml(v.posts.title) : ('Post #' + v.post_id));
 
           row.innerHTML = '<div>' +
@@ -3632,7 +3673,7 @@ const rawHtml = `<!DOCTYPE html>
             }
 
             item.innerHTML = '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">' +
-              '<div style="display: flex; align-items: center; gap: 6px;"><strong style="font-size: 0.82rem; color: var(--primary);">' + escapeHtml(c.username || 'User') + '</strong><span style="font-size: 0.68rem; color: var(--text-muted);">' + new Date(c.created_at).toLocaleDateString() + '</span></div>' +
+              '<div style="display: flex; align-items: center; gap: 6px;"><strong style="font-size: 0.82rem; color: var(--primary);">' + escapeHtml(c.username || 'User') + '</strong><span style="font-size: 0.68rem; color: var(--text-muted);">' + formatISTDateTime(c.created_at) + '</span></div>' +
               adminControlsHtml +
               '</div>' +
               '<div style="font-size: 0.85rem; color: ' + (c.is_hidden ? '#94a3b8; font-style: italic;' : '#e2e8f0;') + ' word-break: break-word;">' + escapeHtml(c.text) + '</div>';
