@@ -172,15 +172,8 @@ async function checkLockerPass(ctx, env, userId, postId) {
  * Delivers post details, files, and links (as buttons) to user with auto-deletion timer & content protection
  */
 async function sendPostToUser(ctx, env, post, postId) {
-  // Record view count & file access / download
+  // Record file access / download (user requested download/file delivery)
   if (postId && ctx.from?.id) {
-    recordPostView(env, {
-      post_id: Number(postId),
-      user_id: Number(ctx.from.id),
-      username: ctx.from.username || null,
-      first_name: ctx.from.first_name || ''
-    }).catch(e => console.warn('Record view warning in bot:', e.message));
-
     recordFileAccess(env, {
       post_id: Number(postId),
       item_name: post.title || `Post #${postId}`,
@@ -450,13 +443,29 @@ export function createBot(env) {
       const likeCount = post.like_count || 0;
       const cleanTitle = cleanPostDisplayTitle(post.title, post.id);
 
+      // Record View event for this post card
+      if (post.id && userId) {
+        recordPostView(env, {
+          post_id: Number(post.id),
+          user_id: Number(userId),
+          username: ctx.from?.username || null,
+          first_name: ctx.from?.first_name || ''
+        }).catch(() => {});
+      }
+
       let caption = `📌 *${escapeMarkdown(cleanTitle)}*\n`;
       if (post.category && post.category !== 'All') caption += `📁 *Category:* \`${escapeMarkdown(post.category)}\`\n`;
+
+      const botUser = env.BOT_USERNAME || 'xminty_bot';
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(`https://t.me/${botUser}?start=post_${post.id}`)}&text=${encodeURIComponent(`🔥 Check out: ${cleanTitle}`)}`;
 
       const postKeyboard = [
         [
           Markup.button.callback('📥 Get File / Download', `bot_get_post_${post.id}`),
           Markup.button.callback(isLiked ? `❤️ Liked (${likeCount})` : `🤍 Like (${likeCount})`, `bot_like_${post.id}`)
+        ],
+        [
+          Markup.button.url('📤 Share Post to Friends / Groups', shareUrl)
         ]
       ];
 
@@ -716,6 +725,13 @@ export function createBot(env) {
             }
           );
         }
+
+        recordPostView(env, {
+          post_id: Number(postId),
+          user_id: Number(ctx.from.id),
+          username: ctx.from.username || null,
+          first_name: ctx.from.first_name || ''
+        }).catch(() => {});
 
         return await sendPostToUser(ctx, env, post, postId);
 

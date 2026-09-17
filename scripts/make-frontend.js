@@ -1654,18 +1654,22 @@ const rawHtml = `<!DOCTYPE html>
       </div>
       <div class="modal-body" style="padding: 16px;">
         <!-- Metrics Counters -->
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; text-align: center;">
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 14px; text-align: center;">
           <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
-            <div style="font-size: 1.2rem; font-weight: 800; color: #38bdf8;" id="postStatViewsCnt">0</div>
-            <div style="font-size: 0.7rem; color: var(--text-muted);">👁️ Views</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #38bdf8;" id="postStatViewsCnt">0</div>
+            <div style="font-size: 0.68rem; color: var(--text-muted);">👁️ Views</div>
           </div>
           <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
-            <div style="font-size: 1.2rem; font-weight: 800; color: #4ade80;" id="postStatAccessCnt">0</div>
-            <div style="font-size: 0.7rem; color: var(--text-muted);">📥 Downloads</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #4ade80;" id="postStatAccessCnt">0</div>
+            <div style="font-size: 0.68rem; color: var(--text-muted);">📥 Downloads</div>
           </div>
           <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
-            <div style="font-size: 1.2rem; font-weight: 800; color: #f43f5e;" id="postStatLikesCnt">0</div>
-            <div style="font-size: 0.7rem; color: var(--text-muted);">❤️ Likes</div>
+            <div style="font-size: 1.15rem; font-weight: 800; color: #fbbf24;" id="postStatConversionCnt">0%</div>
+            <div style="font-size: 0.68rem; color: var(--text-muted);">📊 D/L Rate</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 10px; padding: 8px 4px;">
+            <div style="font-size: 1.15rem; font-weight: 800; color: #f43f5e;" id="postStatLikesCnt">0</div>
+            <div style="font-size: 0.68rem; color: var(--text-muted);">❤️ Likes</div>
           </div>
         </div>
 
@@ -1709,6 +1713,23 @@ const rawHtml = `<!DOCTYPE html>
           <div style="text-align: center; color: var(--text-muted); padding: 16px;">Loading user activity...</div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- 7. Fullscreen Image Lightbox with Zoom Modal -->
+  <div class="modal-overlay" id="imageLightboxModal" style="background: rgba(0, 0, 0, 0.95); z-index: 100000; padding: 0; backdrop-filter: blur(12px);">
+    <div style="position: fixed; top: 12px; left: 14px; right: 14px; display: flex; align-items: center; justify-content: space-between; z-index: 100002; pointer-events: auto;">
+      <div id="lightboxTitle" style="color: #ffffff; font-weight: 700; font-size: 0.92rem; text-shadow: 0 2px 6px rgba(0,0,0,0.9); max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">🖼️ Preview Image</div>
+      <div style="display: flex; align-items: center; gap: 6px;">
+        <button type="button" id="btnLightboxZoomOut" style="background: rgba(255,255,255,0.16); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; cursor: pointer; user-select: none;">−</button>
+        <span id="lightboxZoomLevel" style="color: #fff; font-size: 0.74rem; font-weight: 700; min-width: 36px; text-align: center; text-shadow: 0 1px 4px rgba(0,0,0,0.8);">100%</span>
+        <button type="button" id="btnLightboxZoomIn" style="background: rgba(255,255,255,0.16); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; cursor: pointer; user-select: none;">+</button>
+        <button type="button" id="btnLightboxReset" style="background: rgba(255,255,255,0.16); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; cursor: pointer; user-select: none;" title="Reset Zoom">↺</button>
+        <button type="button" id="btnLightboxClose" style="background: rgba(239,68,68,0.4); color: #fff; border: 1px solid rgba(239,68,68,0.7); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; margin-left: 4px;" title="Close">✕</button>
+      </div>
+    </div>
+    <div id="lightboxBackdrop" style="width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 60px 14px 20px 14px; cursor: pointer; -webkit-overflow-scrolling: touch;">
+      <img id="lightboxImg" src="" alt="Preview" style="max-width: 95vw; max-height: 85vh; object-fit: contain; border-radius: 8px; transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1); cursor: zoom-in; box-shadow: 0 12px 48px rgba(0,0,0,0.9); user-select: none;" />
     </div>
   </div>
 
@@ -1787,6 +1808,104 @@ const rawHtml = `<!DOCTYPE html>
         month: 'short',
         year: 'numeric'
       });
+    }
+
+    // ==========================================
+    // Analytics: Post View & Download Tracking
+    // ==========================================
+    const trackedViewPostIds = new Set();
+
+    function trackPostView(postId) {
+      if (!postId || !currentUserId || isAdmin) return;
+      const pid = Number(postId);
+      if (trackedViewPostIds.has(pid)) return;
+      trackedViewPostIds.add(pid);
+
+      fetch('/api/posts/' + pid + '/view', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: currentUserId,
+          username: currentUserName || null,
+          first_name: tg?.initDataUnsafe?.user?.first_name || ''
+        })
+      }).catch(() => {});
+    }
+
+    function trackPostDownload(postId, itemName) {
+      if (!postId || !currentUserId || isAdmin) return;
+      fetch('/api/posts/' + postId + '/access-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: currentUserId,
+          username: currentUserName || null,
+          first_name: tg?.initDataUnsafe?.user?.first_name || '',
+          item_name: itemName || ('Post #' + postId)
+        })
+      }).catch(() => {});
+    }
+
+    // ==========================================
+    // Fullscreen Image Lightbox with Pinch & Zoom
+    // ==========================================
+    let lightboxScale = 1.0;
+    let isLightboxOpen = false;
+
+    function openImageLightbox(imageUrl, title) {
+      if (!imageUrl) return;
+      const modal = document.getElementById('imageLightboxModal');
+      const img = document.getElementById('lightboxImg');
+      const titleEl = document.getElementById('lightboxTitle');
+      if (!modal || !img) return;
+
+      img.src = imageUrl;
+      if (titleEl) titleEl.textContent = '🖼️ ' + (title || 'Preview Image');
+      setLightboxZoom(1.0);
+      modal.classList.add('active');
+      isLightboxOpen = true;
+
+      // Enable Telegram Native Back Button or browser back button
+      if (tg?.BackButton) {
+        tg.BackButton.show();
+        tg.BackButton.onClick(closeImageLightbox);
+      }
+      try {
+        window.history.pushState({ modal: 'lightbox' }, '');
+      } catch (e) {}
+    }
+
+    function closeImageLightbox() {
+      const modal = document.getElementById('imageLightboxModal');
+      if (!modal || !isLightboxOpen) return;
+      modal.classList.remove('active');
+      isLightboxOpen = false;
+      setLightboxZoom(1.0);
+
+      // Hide Telegram Native Back Button
+      if (tg?.BackButton) {
+        tg.BackButton.offClick(closeImageLightbox);
+        tg.BackButton.hide();
+      }
+
+      try {
+        if (window.history.state?.modal === 'lightbox') {
+          window.history.back();
+        }
+      } catch (e) {}
+    }
+
+    function setLightboxZoom(scale) {
+      lightboxScale = Math.max(0.5, Math.min(3.5, scale));
+      const img = document.getElementById('lightboxImg');
+      const zoomText = document.getElementById('lightboxZoomLevel');
+      if (img) {
+        img.style.transform = 'scale(' + lightboxScale + ')';
+        img.style.cursor = lightboxScale > 1 ? 'grab' : 'zoom-in';
+      }
+      if (zoomText) {
+        zoomText.textContent = Math.round(lightboxScale * 100) + '%';
+      }
     }
 
     function showAdminElements() {
@@ -1991,8 +2110,9 @@ const rawHtml = `<!DOCTYPE html>
         }
 
         let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted" style="color: #fff; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);">⭐ Exclusive</span>' : '';
+        const zoomHint = post.preview_image ? '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 6px; pointer-events: none; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 3px;">🔍 Tap to Zoom</div>' : '';
 
-        card.innerHTML = '<div class="post-image-container">' + imgHtml + (promotedBadge ? '<div class="post-badges-top">' + promotedBadge + '</div>' : '') + '</div>' +
+        card.innerHTML = '<div class="post-image-container" style="cursor: pointer;" data-act="preview-image" data-img="' + escapeHtml(post.preview_image || '') + '" data-title="' + escapeHtml(post.title) + '">' + imgHtml + zoomHint + (promotedBadge ? '<div class="post-badges-top">' + promotedBadge + '</div>' : '') + '</div>' +
           '<div class="post-body">' +
           '<h3 class="post-title">' + escapeHtml(post.title) + '</h3>' +
           '<div class="post-meta"><span>📅 ' + formatISTDate(post.created_at) + '</span>' + (post.tags ? '<span>• ' + escapeHtml(post.tags) + '</span>' : '') + (shortenerOn ? '<span style="color: #fbbf24; font-weight: 700;">• 🪙 ' + pointsRequired + ' pt' + (pointsRequired > 1 ? 's' : '') + '</span>' : '') + '</div>' +
@@ -2003,10 +2123,11 @@ const rawHtml = `<!DOCTYPE html>
           '<button class="action-btn ' + (isSaved ? 'saved' : '') + '" data-act="save" data-id="' + post.id + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="' + (isSaved ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>' +
           '</div>' +
           '</div>' +
-          '<button class="btn-open-bot-full" data-act="open-in-bot" data-id="' + post.id + '">🚀 Open in Bot</button>' +
+          '<button class="btn-open-bot-full" data-act="open-in-bot" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '">🚀 Open in Bot</button>' +
           '</div>';
 
         grid.appendChild(card);
+        trackPostView(post.id);
       });
     }
 
@@ -2030,8 +2151,10 @@ const rawHtml = `<!DOCTYPE html>
           posts.forEach(post => {
             const card = document.createElement('div');
             card.className = 'post-card';
-            card.innerHTML = '<div class="post-image-container" style="height: 140px;">' +
+            const zoomHintAdmin = post.preview_image ? '<div style="position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; pointer-events: none; backdrop-filter: blur(4px);">🔍 Zoom</div>' : '';
+            card.innerHTML = '<div class="post-image-container" style="height: 140px; cursor: pointer;" data-act="preview-image" data-img="' + escapeHtml(post.preview_image || '') + '" data-title="' + escapeHtml(post.title) + '">' +
               (post.preview_image ? '<div class="post-image-backdrop" style="background-image: url(&quot;' + escapeHtml(post.preview_image) + '&quot;);"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />' : '<div class="post-image-placeholder">📄</div>') +
+              zoomHintAdmin +
               '<div class="post-badges-top"><span class="post-status-badge status-' + post.status + '">' + post.status + '</span>' +
               (post.is_promoted ? '<span class="post-status-badge status-promoted">⭐ Pin</span>' : '') + '</div></div>' +
               '<div class="post-body">' +
@@ -2417,10 +2540,16 @@ const rawHtml = `<!DOCTYPE html>
         const data = await res.json();
         if (data.success && data.analytics) {
           currentPostStatsData = data.analytics;
+          const viewsCnt = currentPostStatsData.views ? currentPostStatsData.views.length : 0;
+          const accessCnt = currentPostStatsData.accesses ? currentPostStatsData.accesses.length : 0;
+          const likesCnt = currentPostStatsData.likes ? currentPostStatsData.likes.length : 0;
+          const convRate = viewsCnt > 0 ? ((accessCnt / viewsCnt) * 100).toFixed(1) + '%' : '0%';
+
           document.getElementById('postStatsTitle').textContent = '📊 Stats: ' + (data.post_title || ('Post #' + postId));
-          document.getElementById('postStatViewsCnt').textContent = currentPostStatsData.views ? currentPostStatsData.views.length : 0;
-          document.getElementById('postStatAccessCnt').textContent = currentPostStatsData.accesses ? currentPostStatsData.accesses.length : 0;
-          document.getElementById('postStatLikesCnt').textContent = currentPostStatsData.likes ? currentPostStatsData.likes.length : 0;
+          document.getElementById('postStatViewsCnt').textContent = viewsCnt;
+          document.getElementById('postStatAccessCnt').textContent = accessCnt;
+          document.getElementById('postStatConversionCnt').textContent = convRate;
+          document.getElementById('postStatLikesCnt').textContent = likesCnt;
           renderPostStatLogs(currentPostStatsActiveTab);
         } else {
           document.getElementById('postStatLogsList').innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Failed to load stats: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
@@ -2452,17 +2581,20 @@ const rawHtml = `<!DOCTYPE html>
       if (tab === 'downloads') {
         const logs = currentPostStatsData.accesses || [];
         if (logs.length === 0) {
-          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No downloads / accesses recorded yet.</div>';
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No downloads / file accesses recorded yet.</div>';
           return;
         }
         logs.forEach(item => {
           const row = document.createElement('div');
-          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid rgba(34, 197, 94, 0.35); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
           const uName = item.username ? ('@' + escapeHtml(item.username)) : (item.first_name ? escapeHtml(item.first_name) : ('User #' + item.user_id));
           const timeStr = item.accessed_at ? formatISTDateTime(item.accessed_at) : '';
           row.innerHTML = '<div>' +
-            '<div><strong style="color: #ffffff;">' + escapeHtml(item.item_name || 'Resource') + '</strong></div>' +
-            '<div style="font-size: 0.7rem; color: var(--text-muted);">' + uName + ' • ID: <code>' + item.user_id + '</code></div>' +
+            '<div style="display: flex; align-items: center; gap: 6px;">' +
+              '<strong style="color: #4ade80;">📥 ' + escapeHtml(item.item_name || 'Resource') + '</strong>' +
+              '<span style="font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: rgba(34, 197, 94, 0.2); color: #4ade80;">Downloaded</span>' +
+            '</div>' +
+            '<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">' + uName + ' • ID: <code>' + item.user_id + '</code></div>' +
           '</div>' +
           '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
           list.appendChild(row);
@@ -2470,17 +2602,26 @@ const rawHtml = `<!DOCTYPE html>
       } else if (tab === 'views') {
         const logs = currentPostStatsData.views || [];
         if (logs.length === 0) {
-          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No views recorded yet.</div>';
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No views recorded yet.</div>';
           return;
         }
+        const downloadedUserIds = new Set((currentPostStatsData.accesses || []).map(a => String(a.user_id)));
         logs.forEach(item => {
           const row = document.createElement('div');
-          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
+          const hasDownloaded = downloadedUserIds.has(String(item.user_id));
+          const actionBadge = hasDownloaded
+            ? '<span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);">✅ Downloaded</span>'
+            : '<span style="font-size: 0.65rem; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3);">👁️ Viewed Only</span>';
+
+          row.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid ' + (hasDownloaded ? 'rgba(34, 197, 94, 0.3)' : 'var(--card-border)') + '; border-radius: 8px; padding: 8px 10px; font-size: 0.78rem; display: flex; align-items: center; justify-content: space-between; gap: 8px;';
           const uName = item.username ? ('@' + escapeHtml(item.username)) : (item.first_name ? escapeHtml(item.first_name) : ('User #' + item.user_id));
           const timeStr = item.viewed_at ? formatISTDateTime(item.viewed_at) : '';
           row.innerHTML = '<div>' +
-            '<div><strong style="color: #ffffff;">👁️ ' + uName + '</strong></div>' +
-            '<div style="font-size: 0.7rem; color: var(--text-muted);">ID: <code>' + item.user_id + '</code></div>' +
+            '<div style="display: flex; align-items: center; gap: 6px;">' +
+              '<strong style="color: #ffffff;">👁️ ' + uName + '</strong>' +
+              actionBadge +
+            '</div>' +
+            '<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">ID: <code>' + item.user_id + '</code></div>' +
           '</div>' +
           '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
           list.appendChild(row);
@@ -2488,7 +2629,7 @@ const rawHtml = `<!DOCTYPE html>
       } else if (tab === 'likes') {
         const logs = currentPostStatsData.likes || [];
         if (logs.length === 0) {
-          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 16px;">No likes recorded yet.</div>';
+          list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No likes recorded yet.</div>';
           return;
         }
         logs.forEach(item => {
@@ -3353,6 +3494,8 @@ const rawHtml = `<!DOCTYPE html>
         const openBotBtn = e.target.closest('[data-act="open-in-bot"]');
         if (openBotBtn) {
           const postId = openBotBtn.dataset.id;
+          const postTitle = openBotBtn.dataset.title || ('Post #' + postId);
+          trackPostDownload(postId, postTitle);
           const botUrl = 'https://t.me/' + botUsername + '?start=post_' + postId;
           if (tg && tg.openTelegramLink) {
             tg.openTelegramLink(botUrl);
@@ -3363,6 +3506,96 @@ const rawHtml = `<!DOCTYPE html>
             window.location.href = botUrl;
           }
           return;
+        }
+      });
+
+      // Lightbox Controls & Dismissal Listeners
+      document.getElementById('btnLightboxClose')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeImageLightbox();
+      });
+
+      document.getElementById('btnLightboxZoomIn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setLightboxZoom(lightboxScale + 0.3);
+      });
+
+      document.getElementById('btnLightboxZoomOut')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setLightboxZoom(lightboxScale - 0.3);
+      });
+
+      document.getElementById('btnLightboxReset')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setLightboxZoom(1.0);
+      });
+
+      // Tap outside image on blank space / backdrop to dismiss
+      document.getElementById('lightboxBackdrop')?.addEventListener('click', (e) => {
+        if (e.target.id === 'lightboxBackdrop') {
+          closeImageLightbox();
+        }
+      });
+      document.getElementById('imageLightboxModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'imageLightboxModal') {
+          closeImageLightbox();
+        }
+      });
+
+      // Double-click/tap to zoom and touch pinch support
+      const lbImg = document.getElementById('lightboxImg');
+      if (lbImg) {
+        lbImg.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          setLightboxZoom(lightboxScale > 1.2 ? 1.0 : 2.2);
+        });
+
+        let initialDistance = 0;
+        let startScale = 1.0;
+        lbImg.addEventListener('touchstart', (e) => {
+          if (e.touches.length === 2) {
+            initialDistance = Math.hypot(
+              e.touches[0].pageX - e.touches[1].pageX,
+              e.touches[0].pageY - e.touches[1].pageY
+            );
+            startScale = lightboxScale;
+          }
+        }, { passive: true });
+
+        lbImg.addEventListener('touchmove', (e) => {
+          if (e.touches.length === 2 && initialDistance > 0) {
+            const currentDistance = Math.hypot(
+              e.touches[0].pageX - e.touches[1].pageX,
+              e.touches[0].pageY - e.touches[1].pageY
+            );
+            const ratio = currentDistance / initialDistance;
+            setLightboxZoom(startScale * ratio);
+          }
+        }, { passive: true });
+
+        lbImg.addEventListener('touchend', (e) => {
+          if (e.touches.length < 2) {
+            initialDistance = 0;
+          }
+        });
+      }
+
+      // Universal listener for preview image clicks across feed & admin cards
+      document.addEventListener('click', (e) => {
+        const previewEl = e.target.closest('[data-act="preview-image"]');
+        if (previewEl) {
+          const img = previewEl.dataset.img;
+          const title = previewEl.dataset.title;
+          if (img) {
+            openImageLightbox(img, title);
+          }
+        }
+      });
+
+      // Device / Telegram back button popstate listener
+      window.addEventListener('popstate', () => {
+        if (isLightboxOpen) {
+          closeImageLightbox();
         }
       });
 
