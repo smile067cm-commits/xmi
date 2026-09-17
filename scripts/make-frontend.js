@@ -2654,6 +2654,7 @@ const rawHtml = `<!DOCTYPE html>
     async function openUserActivityModal(userId, displayName, username) {
       const modal = document.getElementById('userActivityModal');
       if (!modal) return;
+      currentUserActivityTab = 'timeline';
       document.getElementById('userActivityTitle').textContent = '🔍 Activity: ' + displayName;
       const headerCard = document.getElementById('userActivityHeaderCard');
       headerCard.innerHTML = '<div style="display: flex; align-items: center; justify-content: space-between;">' +
@@ -2671,6 +2672,7 @@ const rawHtml = `<!DOCTYPE html>
           currentUserActivityData = data;
           const u = data.user || {};
           const isBlocked = Boolean(u.is_blocked);
+          const isOnline = Boolean(u.is_online);
           const lastSeenText = isOnline ? '🟢 ACTIVE IN MINI APP NOW' : (u.last_activity ? ('Last active: ' + formatRelativeTime(u.last_activity) + ' (' + formatISTTime(u.last_activity) + ')') : ('Joined: ' + (u.first_seen ? formatISTDate(u.first_seen) : (u.created_at ? formatISTDate(u.created_at) : ''))));
 
           let blockBannerHtml = '';
@@ -2703,12 +2705,13 @@ const rawHtml = `<!DOCTYPE html>
             '</div>' +
           '</div>' + blockBannerHtml;
 
-          renderUserActivityContent(currentUserActivityTab);
+          renderUserActivityContent('timeline');
         } else {
           document.getElementById('userActivityContentList').innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Failed to load user activity: ' + escapeHtml(data.error || 'Unknown error') + '</div>';
         }
       } catch (err) {
-        document.getElementById('userActivityContentList').innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Network error loading user activity</div>';
+        console.error('Error in openUserActivityModal:', err);
+        document.getElementById('userActivityContentList').innerHTML = '<div style="color: #f87171; text-align: center; padding: 12px;">Failed to load user activity: ' + escapeHtml(err.message || 'Network error') + '</div>';
       }
     }
 
@@ -2786,6 +2789,19 @@ const rawHtml = `<!DOCTYPE html>
       const allDownloads = currentUserActivityData.downloads || [];
       const allViews = currentUserActivityData.views || [];
       const allMsgs = currentUserActivityData.messages || [];
+
+      // Update badge counts on modal subtabs dynamically
+      const tabTimeline = document.querySelector('[data-uact="timeline"]');
+      if (tabTimeline) tabTimeline.innerHTML = '📜 All Actions <span style="background: rgba(255,255,255,0.18); padding: 1px 6px; border-radius: 10px; font-size: 0.68rem; margin-left: 3px;">' + allTimeline.length + '</span>';
+
+      const tabDownloads = document.querySelector('[data-uact="downloads"]');
+      if (tabDownloads) tabDownloads.innerHTML = '📥 Files Got <span style="background: rgba(34,197,94,0.25); color: #4ade80; padding: 1px 6px; border-radius: 10px; font-size: 0.68rem; margin-left: 3px;">' + allDownloads.length + '</span>';
+
+      const tabViews = document.querySelector('[data-uact="views"]');
+      if (tabViews) tabViews.innerHTML = '👁️ Posts Watched <span style="background: rgba(56,189,248,0.25); color: #38bdf8; padding: 1px 6px; border-radius: 10px; font-size: 0.68rem; margin-left: 3px;">' + allViews.length + '</span>';
+
+      const tabMsgs = document.querySelector('[data-uact="messages"]');
+      if (tabMsgs) tabMsgs.innerHTML = '💬 Bot Messages <span style="background: rgba(192,132,252,0.25); color: #c084fc; padding: 1px 6px; border-radius: 10px; font-size: 0.68rem; margin-left: 3px;">' + allMsgs.length + '</span>';
 
       // Summary strip
       let summaryStrip = '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; font-size: 0.76rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">' +
