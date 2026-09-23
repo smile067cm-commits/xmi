@@ -537,6 +537,33 @@ export async function deleteFile(env, fileId) {
   return true;
 }
 
+export async function getFolderById(env, folderId) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const url = `${baseUrl}/folders?id=eq.${folderId}&select=*,files(*)`;
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: getSupabaseHeaders(env)
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export async function updateFolder(env, folderId, updates) {
+  const baseUrl = getSupabaseBaseUrl(env);
+  const url = `${baseUrl}/folders?id=eq.${folderId}`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { ...getSupabaseHeaders(env), 'Prefer': 'return=representation' },
+    body: JSON.stringify(updates)
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to update folder (${res.status}): ${await res.text()}`);
+  }
+  const data = await res.json();
+  return Array.isArray(data) ? data[0] : data;
+}
+
 export async function deleteFolder(env, folderId) {
   const baseUrl = getSupabaseBaseUrl(env);
   const headers = getSupabaseHeaders(env);

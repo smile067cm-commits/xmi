@@ -7,6 +7,8 @@ import {
   getSavedPosts,
   getPostFoldersWithFiles,
   getFolderFiles,
+  getFolderById,
+  updateFolder,
   createPost,
   updatePost,
   deletePost,
@@ -2441,65 +2443,42 @@ export function createBot(env) {
     });
   });
 
-  bot.action(/^admin_edit_files_(\d+)$/, async (ctx) => {
-    const userId = ctx.from.id;
-    if (!(await isAdminUser(env, userId))) return;
-
-    const postId = ctx.match[1];
-    const post = await getPostById(env, postId, userId, true);
-
-    await setSession(env, userId, {
-      step: 'AWAITING_FOLDERS',
-      postId: postId,
-      title: post?.title || '',
-      currentFiles: [],
-      foldersCount: post?.folders?.length || 0
-    });
-
-    await ctx.answerCbQuery();
-
-    // Deliver all current files & links of this post to the admin
-    let sentCount = 0;
-    if (post?.folders && post.folders.length > 0) {
-      await ctx.reply(`📁 *Sending current files for Post #${postId}...*`, { parse_mode: 'Markdown' });
-      for (const fld of post.folders) {
-        if (fld.files && fld.files.length > 0) {
-          for (const file of fld.files) {
-            try {
-              if (file.mime_type === 'link') {
-                await ctx.reply(`🔗 *[${escapeMarkdown(fld.name)}]* [${escapeMarkdown(file.file_name)}](${file.file_id})`, {
-                  parse_mode: 'Markdown',
-                  disable_web_page_preview: true
-                });
-                sentCount++;
-              } else if (file.channel_message_id && env.CHANNEL_ID) {
-                await ctx.telegram.copyMessage(ctx.chat.id, env.CHANNEL_ID, Number(file.channel_message_id), {
-                  caption: `📁 Folder: ${fld.name} | File: ${file.file_name}`
-                });
-                sentCount++;
-              } else if (file.file_id) {
-                await ctx.telegram.sendDocument(ctx.chat.id, file.file_id, {
-                  caption: `📁 Folder: ${fld.name} | File: ${file.file_name}`
-                });
-                sentCount++;
-              }
-            } catch (deliverErr) {
-              console.warn(`Failed to send current file ${file.id} to admin:`, deliverErr.message);
-            }
+  // Recalculates total post file size across all folders and updates post title if applicable
+  const recalculatePostSizeTitle = async (env, postId) => {
+    try {
+      const post = await getPostById(env, postId, 0, true);
+      if (!post) return;
+      const folders = post.folders || [];
+      let totalBytes = 0;
+      for (const fld of folders) {
+        if (fld.files) {
+          for (const f of fld.files) {
+            totalBytes += Number(f.size) || 0;
           }
         }
       }
+      if (totalBytes > 0) {
+        const formatted = formatBytes(totalBytes);
+        const m = post.title.match(/^(Post\s*#\d+)/i);
+        let newTitle = post.title;
+        if (m) {
+          newTitle = `${m[1]} (${formatted})`;
+        } else if (!post.title.includes('(')) {
+          newTitle = `${post.title} (${formatted})`;
+        } else {
+          newTitle = post.title.replace(/\([^\)]+\)$/, `(${formatted})`);
+        }
+        if (newTitle !== post.title) {
+          await updatePost(env, postId, { title: newTitle });
+        }
+      }
+    } catch (e) {
+      console.warn('Recalculate post size warning:', e.message);
     }
+  };
 
-    if (sentCount === 0 && (!post?.folders || post.folders.length === 0)) {
-      await ctx.reply('ℹ️ This post currently has no files or folders attached.');
-    }
-
-    return await sendStep3Prompt(ctx, { currentFiles: [], foldersCount: post?.folders?.length || 0, title: post?.title });
-  });
-
-  // Handler: Manage & Remove Files/Folders from Post
-  const handleManageFiles = async (ctx, postId) => {
+  // 1. Post Folders Hub: Shows all folders as buttons + Create Folder button
+  const showPostFoldersHub = async (ctx, postId, notice = '') => {
     const userId = ctx.from.id;
     if (!(await isAdminUser(env, userId))) return;
 
@@ -2508,82 +2487,309 @@ export function createBot(env) {
       return await ctx.reply('⚠️ Post not found.');
     }
 
-    let text = `🗂️ *Manage & Remove Attached Files*\n\n` +
-      `• *Post:* ${escapeMarkdown(post.title)}\n` +
-      `• *ID:* \`#${post.id}\`\n\n`;
+    const cleanTitle = cleanPostDisplayTitle(post.title, post.id);
+    const folders = post.folders || [];
+
+    let text = notice ? `${notice}\n\n` : '';
+    text += `📂 *Folders & Files Manager*\n\n` +
+      `• *Post:* ${escapeMarkdown(cleanTitle)}\n` +
+      `• *Post ID:* \`#${post.id}\`\n` +
+      `• *Folders:* ${folders.length}\n\n`;
+
+    if (folders.length > 0) {
+      text += `👇 *Select a folder below to view, add files, rename, or manage:*`;
+    } else {
+      text += `ℹ️ *No folders created yet.*\nTap **➕ Create New Folder** below to add your first folder!`;
+    }
 
     const buttons = [];
-    let fileCount = 0;
 
-    if (post.folders && post.folders.length > 0) {
-      for (const fld of post.folders) {
-        text += `📁 *Folder:* \`${escapeMarkdown(fld.name)}\`\n`;
-        if (fld.files && fld.files.length > 0) {
-          for (const f of fld.files) {
-            fileCount++;
-            const icon = f.mime_type === 'link' ? '🔗' : '📄';
-            const fName = (f.file_name || 'File').length > 25 ? (f.file_name || 'File').substring(0, 22) + '...' : (f.file_name || 'File');
-            text += `  └ ${icon} ${escapeMarkdown(f.file_name || 'File')}\n`;
-            buttons.push([
-              Markup.button.callback(`🗑️ Delete: ${fName}`, `admin_delfile_${f.id}_${postId}`)
-            ]);
-          }
-        } else {
-          text += `  └ _(No files in this folder)_\n`;
-        }
-        buttons.push([
-          Markup.button.callback(`🗑️ Delete Whole Folder: ${fld.name}`, `admin_delfolder_${fld.id}_${postId}`)
-        ]);
-        text += `\n`;
-      }
+    // Show each folder as a button with file count
+    for (const fld of folders) {
+      const fCount = fld.files ? fld.files.length : 0;
+      buttons.push([
+        Markup.button.callback(`📁 ${fld.name} (${fCount} ${fCount === 1 ? 'file' : 'files'})`, `admin_fld_view_${fld.id}_${postId}`)
+      ]);
     }
 
-    if (fileCount === 0 && (!post.folders || post.folders.length === 0)) {
-      text += `_No files or folders are currently attached to this post._\n`;
-    }
-
+    // Action buttons
+    buttons.push([Markup.button.callback('➕ Create New Folder', `admin_fld_new_${postId}`)]);
     buttons.push([
-      Markup.button.callback('➕ Add More Files/Folders', `admin_edit_files_${postId}`)
-    ]);
-    buttons.push([
+      Markup.button.callback(post.direct_link ? '🔗 Edit Direct Link' : '🔗 Add Direct Link', `admin_edit_link_${postId}`),
       Markup.button.callback('🔙 Return to Post', `admin_post_view_${postId}`)
     ]);
 
+    const keyboard = Markup.inlineKeyboard(buttons);
     if (ctx.callbackQuery) {
       try {
-        return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
+        return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
       } catch (e) {
-        return await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
+        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
       }
     } else {
-      return await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
+      return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
     }
   };
 
-  bot.action(/^admin_manage_files_(\d+)$/, async (ctx) => {
+  // 2. Folder View: Shows folder details, files list, edit name, add files, remove files
+  const showFolderView = async (ctx, folderId, postId, notice = '') => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const [folder, post] = await Promise.all([
+      getFolderById(env, folderId),
+      getPostById(env, postId, userId, true)
+    ]);
+
+    if (!folder) {
+      return await showPostFoldersHub(ctx, postId, '⚠️ Folder not found or deleted.');
+    }
+
+    const files = folder.files || [];
+    const totalBytes = files.reduce((acc, f) => acc + (Number(f.size) || 0), 0);
+    const sizeText = totalBytes > 0 ? ` (${formatBytes(totalBytes)})` : '';
+    const postTitle = cleanPostDisplayTitle(post?.title, postId);
+
+    let text = notice ? `${notice}\n\n` : '';
+    text += `📁 *Folder:* \`${escapeMarkdown(folder.name)}\`\n` +
+      `• *Post:* ${escapeMarkdown(postTitle)} (\`#${postId}\`)\n` +
+      `• *Files:* ${files.length} item(s)${sizeText}\n\n`;
+
+    if (files.length > 0) {
+      text += `📄 *Files in this folder:*\n`;
+      files.forEach((f, idx) => {
+        const icon = f.mime_type === 'link' ? '🔗' : '📄';
+        const fSize = f.size > 0 ? ` _(${formatBytes(f.size)})_` : '';
+        text += `${idx + 1}. ${icon} ${escapeMarkdown(f.file_name || 'File')}${fSize}\n`;
+      });
+    } else {
+      text += `_This folder is currently empty._\nTap **➕ Add Files / Links** below to upload!`;
+    }
+
+    const buttons = [
+      [
+        Markup.button.callback('➕ Add Files / Links', `admin_fld_add_${folder.id}_${postId}`),
+        Markup.button.callback('✏️ Edit Folder Name', `admin_fld_rename_${folder.id}_${postId}`)
+      ]
+    ];
+
+    if (files.length > 0) {
+      buttons.push([Markup.button.callback('🗑️ Remove Files', `admin_fld_remove_${folder.id}_${postId}`)]);
+    }
+
+    buttons.push([
+      Markup.button.callback('🗑️ Delete Whole Folder', `admin_fld_delconf_${folder.id}_${postId}`),
+      Markup.button.callback('🔙 Back to Folders List', `admin_folders_hub_${postId}`)
+    ]);
+
+    const keyboard = Markup.inlineKeyboard(buttons);
+    if (ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+      } catch (e) {
+        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+      }
+    } else {
+      return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+    }
+  };
+
+  // 3. Remove Files View: Tap any file to delete it
+  const showFolderRemoveFiles = async (ctx, folderId, postId, notice = '') => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const folder = await getFolderById(env, folderId);
+    if (!folder) {
+      return await showPostFoldersHub(ctx, postId, '⚠️ Folder not found.');
+    }
+
+    const files = folder.files || [];
+    let text = notice ? `${notice}\n\n` : '';
+    text += `🗑️ *Remove Files from: \`${escapeMarkdown(folder.name)}\`*\n\n`;
+
+    if (files.length === 0) {
+      text += `_No files remaining in this folder._\n`;
+    } else {
+      text += `Tap on any file below to delete it from this folder:\n`;
+    }
+
+    const buttons = [];
+    for (const f of files) {
+      const icon = f.mime_type === 'link' ? '🔗' : '📄';
+      const fName = (f.file_name || 'File').length > 25 ? (f.file_name || 'File').substring(0, 22) + '...' : (f.file_name || 'File');
+      buttons.push([
+        Markup.button.callback(`🗑️ Delete: ${icon} ${fName}`, `admin_fld_delfile_${f.id}_${folder.id}_${postId}`)
+      ]);
+    }
+
+    buttons.push([
+      Markup.button.callback('🔙 Back to Folder', `admin_fld_view_${folder.id}_${postId}`)
+    ]);
+
+    const keyboard = Markup.inlineKeyboard(buttons);
+    if (ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+      } catch (e) {
+        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+      }
+    } else {
+      return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+    }
+  };
+
+  // Callback Routes for Folders & Files
+  bot.action(/^admin_folders_hub_(\d+)$/, async (ctx) => {
     await ctx.answerCbQuery();
-    return await handleManageFiles(ctx, ctx.match[1]);
+    return await showPostFoldersHub(ctx, ctx.match[1]);
   });
 
-  bot.action(/^admin_delfile_(\d+)_(\d+)$/, async (ctx) => {
+  bot.action(/^admin_edit_files_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    return await showPostFoldersHub(ctx, ctx.match[1]);
+  });
+
+  bot.action(/^admin_manage_files_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    return await showPostFoldersHub(ctx, ctx.match[1]);
+  });
+
+  bot.action(/^admin_fld_view_(\d+)_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    return await showFolderView(ctx, ctx.match[1], ctx.match[2]);
+  });
+
+  bot.action(/^admin_fld_new_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const postId = ctx.match[1];
+    await setSession(env, userId, {
+      step: 'AWAITING_NEW_FOLDER_NAME',
+      postId: postId
+    });
+    await ctx.answerCbQuery();
+
+    const text = `📁 *Create New Folder*\n\nPlease type the name for this folder (e.g. \`Lecture Notes\`, \`PDF Documents\`, \`Audio Track\`):`;
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('❌ Cancel', `admin_folders_hub_${postId}`)]
+    ]);
+
+    return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+  });
+
+  bot.action(/^admin_fld_rename_(\d+)_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const folderId = ctx.match[1];
+    const postId = ctx.match[2];
+    const folder = await getFolderById(env, folderId);
+
+    await setSession(env, userId, {
+      step: 'AWAITING_RENAME_FOLDER',
+      folderId: folderId,
+      postId: postId
+    });
+    await ctx.answerCbQuery();
+
+    const text = `✏️ *Rename Folder*\n\nCurrent name: *${escapeMarkdown(folder?.name || 'Folder')}*\n\nPlease type the new name for this folder:`;
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('❌ Cancel', `admin_fld_view_${folderId}_${postId}`)]
+    ]);
+
+    return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+  });
+
+  bot.action(/^admin_fld_add_(\d+)_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const folderId = ctx.match[1];
+    const postId = ctx.match[2];
+    const folder = await getFolderById(env, folderId);
+
+    await setSession(env, userId, {
+      step: 'AWAITING_FOLDER_FILES',
+      activeFolderId: folderId,
+      activePostId: postId,
+      folderName: folder?.name || 'Folder'
+    });
+    await ctx.answerCbQuery();
+
+    const text = `📥 *Upload Mode: \`${escapeMarkdown(folder?.name || 'Folder')}\`*\n\n` +
+      `Send your files now:\n` +
+      `• 📄 Documents, PDFs, ZIPs, APKs\n` +
+      `• 📸 Photos & Images\n` +
+      `• 🎬 Videos\n` +
+      `• 🎵 Audio / Music\n` +
+      `• 🔗 Links (send URL starting with http:// or https://)\n\n` +
+      `💡 *Tip:* You can select and send multiple files at once!\n` +
+      `When finished, tap **✅ Done Uploading** below.`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('✅ Done Uploading', `admin_fld_view_${folderId}_${postId}`)],
+      [Markup.button.callback('🔙 Back to Folder', `admin_fld_view_${folderId}_${postId}`)]
+    ]);
+
+    return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+  });
+
+  bot.action(/^admin_fld_remove_(\d+)_(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery();
+    return await showFolderRemoveFiles(ctx, ctx.match[1], ctx.match[2]);
+  });
+
+  bot.action(/^admin_fld_delfile_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
     if (!(await isAdminUser(env, userId))) return;
 
     const fileId = ctx.match[1];
-    const postId = ctx.match[2];
+    const folderId = ctx.match[2];
+    const postId = ctx.match[3];
 
     try {
       await deleteFile(env, fileId);
-      await ctx.answerCbQuery('✅ File removed successfully');
+      recalculatePostSizeTitle(env, postId).catch(() => {});
+      await ctx.answerCbQuery('✅ File deleted');
     } catch (err) {
       console.error('Error deleting file:', err);
       await ctx.answerCbQuery('❌ Failed to delete file');
     }
 
-    return await handleManageFiles(ctx, postId);
+    return await showFolderRemoveFiles(ctx, folderId, postId);
   });
 
-  bot.action(/^admin_delfolder_(\d+)_(\d+)$/, async (ctx) => {
+  bot.action(/^admin_fld_delconf_(\d+)_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const folderId = ctx.match[1];
+    const postId = ctx.match[2];
+    const folder = await getFolderById(env, folderId);
+
+    await ctx.answerCbQuery();
+    const text = `⚠️ *Are you sure you want to delete folder "${escapeMarkdown(folder?.name || 'Folder')}"?*\n\n` +
+      `This will permanently remove this folder and all files inside it.`;
+
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('🗑️ Yes, Delete Folder', `admin_fld_delete_${folderId}_${postId}`)],
+      [Markup.button.callback('❌ Cancel', `admin_fld_view_${folderId}_${postId}`)]
+    ]);
+
+    if (ctx.callbackQuery) {
+      try {
+        return await ctx.editMessageText(text, { parse_mode: 'Markdown', ...keyboard });
+      } catch (e) {
+        return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+      }
+    } else {
+      return await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
+    }
+  });
+
+  bot.action(/^admin_fld_delete_(\d+)_(\d+)$/, async (ctx) => {
     const userId = ctx.from.id;
     if (!(await isAdminUser(env, userId))) return;
 
@@ -2592,13 +2798,14 @@ export function createBot(env) {
 
     try {
       await deleteFolder(env, folderId);
-      await ctx.answerCbQuery('✅ Folder removed successfully');
+      recalculatePostSizeTitle(env, postId).catch(() => {});
+      await ctx.answerCbQuery('✅ Folder deleted');
+      return await showPostFoldersHub(ctx, postId, '✅ Folder deleted successfully.');
     } catch (err) {
       console.error('Error deleting folder:', err);
       await ctx.answerCbQuery('❌ Failed to delete folder');
+      return await showFolderView(ctx, folderId, postId, '❌ Failed to delete folder.');
     }
-
-    return await handleManageFiles(ctx, postId);
   });
 
   // -------------------------------------------------------------
@@ -2935,44 +3142,41 @@ export function createBot(env) {
     const userId = ctx.from.id;
     if (!(await isAdminUser(env, userId))) return;
 
-    const session = await getSession(env, userId);
-    if (!session) return await ctx.answerCbQuery('Session expired');
+    let session = await getSession(env, userId);
+    if (!session || !session.title) {
+      return await ctx.answerCbQuery('Session expired');
+    }
 
-    session.step = 'AWAITING_FOLDERS';
-    session.currentFiles = [];
-    session.foldersCount = 0;
-    await setSession(env, userId, session);
+    if (!session.postId) {
+      const post = await createPost(env, {
+        title: session.title,
+        preview_image: session.preview_image || null,
+        direct_link: session.direct_link || null,
+        direct_link_title: session.direct_link_title || null,
+        status: 'draft',
+        created_by: userId
+      });
+      session.postId = post.id;
+      await setSession(env, userId, session);
+    }
+
     await ctx.answerCbQuery();
-
-    return await sendStep3Prompt(ctx, session);
+    return await showPostFoldersHub(ctx, session.postId);
   });
 
   async function sendStep3Prompt(ctx, session) {
-    const bufferCount = session.currentFiles?.length || 0;
-
-    let text = `📂 *Folder Upload Mode*\n\n`;
-    text += `1️⃣ **Send Files / Links:** (Documents, Videos, Photos, Audio, URLs)\n`;
-    text += `2️⃣ **Organize:** Type a Folder Name to group buffered items\n`;
-    text += `3️⃣ **Finish:** Tap Done when finished.\n\n`;
-
-    if (bufferCount > 0) {
-      text += `📥 *Current Buffer:* ${bufferCount} item(s) waiting for folder name.\n`;
+    if (session?.postId) {
+      return await showPostFoldersHub(ctx, session.postId);
     }
-
-    const buttons = [];
-    if (bufferCount > 0) {
-      buttons.push([Markup.button.callback('📁 Save Buffer into Folder', 'step_prompt_folder_name')]);
-    }
-    buttons.push([Markup.button.callback(session.direct_link ? '🔗 Change Direct Link' : '🔗 Add Direct Link', 'mode_direct_link')]);
-    buttons.push([
-      Markup.button.callback('✅ Done & Review Post', 'step_finish_folders'),
-      Markup.button.callback('❌ Cancel', 'step_cancel')
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('📂 Open Folders Manager', 'mode_folders')],
+      [Markup.button.callback('🔗 Add Direct Link', 'mode_direct_link')],
+      [Markup.button.callback('❌ Cancel', 'step_cancel')]
     ]);
-
-    return await ctx.reply(text, {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard(buttons)
-    });
+    return await ctx.reply(
+      '📂 *Folder & File Manager*\n\nTap below to open your folders and start uploading files:',
+      { parse_mode: 'Markdown', ...keyboard }
+    );
   }
 
   bot.action('step_prompt_folder_name', async (ctx) => {
@@ -3592,8 +3796,78 @@ export function createBot(env) {
       );
     }
 
-    // Folders and Files Mode
-    if (session.step === 'AWAITING_FOLDERS') {
+    // 1. Create New Folder Name Step
+    if (session.step === 'AWAITING_NEW_FOLDER_NAME') {
+      if (!text || text.startsWith('/')) return;
+      const folderName = text.trim();
+      const postId = session.postId;
+
+      try {
+        const folder = await createFolder(env, {
+          post_id: Number(postId),
+          name: folderName
+        });
+        session.step = null;
+        await setSession(env, userId, session);
+        return await showFolderView(ctx, folder.id, postId, `✅ Folder "*${escapeMarkdown(folderName)}*" created!`);
+      } catch (err) {
+        console.error('Error creating folder:', err);
+        return await ctx.reply(`⚠️ Failed to create folder: ${err.message}`, {
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🔙 Back to Folders', `admin_folders_hub_${postId}`)]
+          ])
+        });
+      }
+    }
+
+    // 2. Rename Folder Step
+    if (session.step === 'AWAITING_RENAME_FOLDER') {
+      if (!text || text.startsWith('/')) return;
+      const newName = text.trim();
+      const folderId = session.folderId;
+      const postId = session.postId;
+
+      try {
+        await updateFolder(env, folderId, { name: newName });
+        session.step = null;
+        await setSession(env, userId, session);
+        return await showFolderView(ctx, folderId, postId, `✅ Folder renamed to "*${escapeMarkdown(newName)}*"!`);
+      } catch (err) {
+        console.error('Error renaming folder:', err);
+        return await ctx.reply(`⚠️ Failed to rename folder: ${err.message}`, {
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🔙 Back to Folder', `admin_fld_view_${folderId}_${postId}`)]
+          ])
+        });
+      }
+    }
+
+    // 3. Folders and Files Upload Mode
+    if (session.step === 'AWAITING_FOLDER_FILES' || session.step === 'AWAITING_FOLDERS') {
+      let folderId = session.activeFolderId;
+      let postId = session.activePostId || session.postId;
+
+      // If active folder is not specified but postId is known, find or auto-create a folder
+      if (!folderId && postId) {
+        const existingFolders = await getPostFoldersWithFiles(env, postId);
+        if (existingFolders && existingFolders.length > 0) {
+          folderId = existingFolders[0].id;
+          session.activeFolderId = folderId;
+        } else {
+          const newFld = await createFolder(env, { post_id: Number(postId), name: 'General Resources' });
+          folderId = newFld.id;
+          session.activeFolderId = folderId;
+        }
+      }
+
+      if (!folderId) {
+        return await ctx.reply('⚠️ Please create or select a folder first before uploading files.', {
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📂 Open Folders Manager', postId ? `admin_folders_hub_${postId}` : 'admin_post_list')]
+          ])
+        });
+      }
+
       const msg = ctx.message;
       let itemMeta = null;
 
@@ -3618,7 +3892,7 @@ export function createBot(env) {
           const photo = msg.photo[msg.photo.length - 1];
           itemMeta = {
             file_id: photo.file_id,
-            file_name: 'Photo_' + (session.currentFiles.length + 1) + '.jpg',
+            file_name: 'Photo_' + Date.now().toString().slice(-4) + '.jpg',
             mime_type: 'image/jpeg',
             size: photo.file_size || 0
           };
@@ -3632,14 +3906,14 @@ export function createBot(env) {
         } else if (msg.video) {
           itemMeta = {
             file_id: msg.video.file_id,
-            file_name: msg.video.file_name || 'Video_' + (session.currentFiles.length + 1) + '.mp4',
+            file_name: msg.video.file_name || 'Video_' + Date.now().toString().slice(-4) + '.mp4',
             mime_type: msg.video.mime_type || 'video/mp4',
             size: msg.video.file_size || 0
           };
         } else if (msg.audio) {
           itemMeta = {
             file_id: msg.audio.file_id,
-            file_name: msg.audio.file_name || msg.audio.title || 'Audio_' + (session.currentFiles.length + 1) + '.mp3',
+            file_name: msg.audio.file_name || msg.audio.title || 'Audio_' + Date.now().toString().slice(-4) + '.mp3',
             mime_type: msg.audio.mime_type || 'audio/mpeg',
             size: msg.audio.file_size || 0
           };
@@ -3647,119 +3921,51 @@ export function createBot(env) {
       }
 
       if (itemMeta) {
-        if (itemMeta.mime_type !== 'link') {
+        let channelMessageId = null;
+        if (itemMeta.mime_type !== 'link' && env.CHANNEL_ID) {
           try {
-            if (!env.CHANNEL_ID) {
-              return await ctx.reply('⚠️ CHANNEL_ID is not configured in Worker environment.');
-            }
-
             const copied = await ctx.telegram.copyMessage(env.CHANNEL_ID, ctx.chat.id, msg.message_id, {
               caption: ''
             });
-            itemMeta.channel_message_id = copied.message_id;
+            channelMessageId = copied.message_id;
           } catch (copyErr) {
-            console.error('Error forwarding file to storage channel:', copyErr);
-            return await ctx.reply(`⚠️ Failed to store file in channel: ${copyErr.message}. Make sure the bot is an admin in your storage channel.`);
+            console.warn('Channel copy warning:', copyErr.message);
           }
         }
 
-        session.currentFiles.push(itemMeta);
-        const totalBytes = session.currentFiles.reduce((sum, f) => sum + (Number(f.size) || 0), 0);
-        if (totalBytes > 0) {
-          const formatted = formatBytes(totalBytes);
-          const m = session.title.match(/^(Post\s*#\d+)/i);
-          if (m) {
-            session.title = `${m[1]} (${formatted})`;
-          } else if (!session.title.includes('(')) {
-            session.title = `${session.title} (${formatted})`;
-          }
-        }
-        await setSession(env, userId, session);
+        try {
+          await createFiles(env, [{
+            folder_id: Number(folderId),
+            file_id: itemMeta.file_id,
+            channel_message_id: channelMessageId,
+            file_name: itemMeta.file_name,
+            mime_type: itemMeta.mime_type,
+            size: itemMeta.size || 0
+          }]);
 
-        const keyboard = Markup.inlineKeyboard([
-          [Markup.button.callback('📁 Name & Save Folder', 'step_prompt_folder_name')],
-          [
-            Markup.button.callback('✅ Done & Review', 'step_finish_folders'),
-            Markup.button.callback('❌ Cancel', 'step_cancel')
-          ]
-        ]);
+          if (postId) {
+            recalculatePostSizeTitle(env, postId).catch(() => {});
+          }
+        } catch (dbErr) {
+          console.error('Error saving file to folder:', dbErr);
+          return await ctx.reply(`⚠️ Failed to save file to folder: ${dbErr.message}`);
+        }
 
         const icon = itemMeta.mime_type === 'link' ? '🔗' : '📥';
+        const fSize = itemMeta.size > 0 ? ` (${formatBytes(itemMeta.size)})` : '';
+        const keyboard = Markup.inlineKeyboard([
+          [Markup.button.callback('✅ Done Uploading', `admin_fld_view_${folderId}_${postId}`)],
+          [Markup.button.callback('📂 View All Folders', `admin_folders_hub_${postId}`)]
+        ]);
+
         return await ctx.reply(
-          `${icon} *Buffered item:* ${escapeMarkdown(itemMeta.file_name)}\n` +
-          `_${session.currentFiles.length} item(s) in buffer ready to be saved into a folder._\n\n` +
-          `Send more files/links, or type a **Folder Name** below:`,
+          `${icon} *Added to folder:* \`${escapeMarkdown(itemMeta.file_name)}\`${fSize}\n\n` +
+          `_Send more files or links, or tap Done below:_`,
           {
             parse_mode: 'Markdown',
             ...keyboard
           }
         );
-      }
-
-      if (text && !text.startsWith('/')) {
-        if (!session.currentFiles || session.currentFiles.length === 0) {
-          const keyboard = Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Done & Review', 'step_finish_folders')],
-            [Markup.button.callback('❌ Cancel', 'step_cancel')]
-          ]);
-          return await ctx.reply(
-            '⚠️ No files or links buffered yet. Please send some files or links first, then type the folder name.',
-            keyboard
-          );
-        }
-
-        try {
-          if (!session.postId) {
-            const post = await createPost(env, {
-              title: session.title,
-              preview_image: session.preview_image || null,
-              direct_link: session.direct_link || null,
-              direct_link_title: session.direct_link_title || null,
-              status: 'draft',
-              created_by: userId
-            });
-            session.postId = post.id;
-          }
-
-          const folder = await createFolder(env, {
-            post_id: session.postId,
-            name: text
-          });
-
-          const filesToInsert = session.currentFiles.map(f => ({
-            folder_id: folder.id,
-            file_id: f.file_id,
-            channel_message_id: f.channel_message_id || null,
-            file_name: f.file_name,
-            mime_type: f.mime_type,
-            size: f.size
-          }));
-
-          await createFiles(env, filesToInsert);
-
-          const savedCount = session.currentFiles.length;
-          session.foldersCount = (session.foldersCount || 0) + 1;
-          session.currentFiles = [];
-          await setSession(env, userId, session);
-
-          const keyboard = Markup.inlineKeyboard([
-            [Markup.button.callback('➕ Add Next Folder', 'step_prompt_folder_name')],
-            [Markup.button.callback('🚀 Finish & Review Post', 'step_finish_folders')]
-          ]);
-
-          return await ctx.reply(
-            `✅ Saved folder *"${escapeMarkdown(text)}"* with ${savedCount} item(s)!\n\n` +
-            `• Send more files/links for another folder, or\n` +
-            `• Tap **Finish & Review Post** below:`,
-            {
-              parse_mode: 'Markdown',
-              ...keyboard
-            }
-          );
-        } catch (dbErr) {
-          console.error('Error saving folder/files:', dbErr);
-          return await ctx.reply(`⚠️ Failed to save folder: ${dbErr.message}`);
-        }
       }
     }
 
