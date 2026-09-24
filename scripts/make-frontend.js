@@ -8,7 +8,7 @@ const rawHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>xmi - Telegram Content Hub</title>
   
   <!-- Telegram WebApp SDK -->
@@ -53,6 +53,9 @@ const rawHtml = `<!DOCTYPE html>
       overflow-x: hidden;
       margin: 0;
       padding: 0;
+      overscroll-behavior: none;
+      overscroll-behavior-y: none;
+      -webkit-overflow-scrolling: touch;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg-gradient);
       background-attachment: fixed;
@@ -1904,13 +1907,64 @@ const rawHtml = `<!DOCTYPE html>
 
   <!-- Client-Side JavaScript Logic -->
   <script>
+    // Global safety error handlers to protect Mini App lifecycle
+    window.addEventListener('error', function(e) {
+      console.warn('Mini App caught error:', e?.message || e);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      console.warn('Mini App caught unhandled rejection:', e?.reason || e);
+    });
+
     const tg = window.Telegram?.WebApp;
     if (tg) {
-      tg.ready();
-      tg.expand();
+      try {
+        tg.ready();
+        tg.expand();
+        // Prevent accidental closing on swipe down or pull drag on mobile
+        if (typeof tg.disableVerticalSwipes === 'function') {
+          tg.disableVerticalSwipes();
+        }
+        // Enable closing confirmation to prevent instant dismissal on Telegram backgrounding/reopening
+        if (typeof tg.enableClosingConfirmation === 'function') {
+          tg.enableClosingConfirmation();
+        }
+      } catch (err) {
+        console.warn('Telegram WebApp setup error:', err);
+      }
+
+      // Handle Telegram viewport changes, restore expanded mode, and enforce swipe protection across app resume
+      try {
+        if (typeof tg.onEvent === 'function') {
+          tg.onEvent('viewportChanged', function() {
+            try {
+              if (tg && !tg.isExpanded && typeof tg.expand === 'function') {
+                tg.expand();
+              }
+              if (typeof tg.disableVerticalSwipes === 'function' && tg.isVerticalSwipesEnabled !== false) {
+                tg.disableVerticalSwipes();
+              }
+            } catch (_) {}
+          });
+          tg.onEvent('activated', function() {
+            try {
+              if (tg && typeof tg.expand === 'function') tg.expand();
+              if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+              if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation();
+            } catch (_) {}
+          });
+        }
+      } catch (_) {}
     }
 
-    const currentUserId = tg?.initDataUnsafe?.user?.id || (new URLSearchParams(window.location.search)).get('user_id') || 0;
+    let currentUserId = tg?.initDataUnsafe?.user?.id || (new URLSearchParams(window.location.search)).get('user_id') || 0;
+    try {
+      if (currentUserId) {
+        localStorage.setItem('xmi_user_id', String(currentUserId));
+      } else {
+        currentUserId = Number(localStorage.getItem('xmi_user_id')) || 0;
+      }
+    } catch (_) {}
+
     const currentUserName = tg?.initDataUnsafe?.user?.first_name || (tg?.initDataUnsafe?.user?.username || 'User');
     const adminId = "__ADMIN_ID__";
     const botUsername = "__BOT_USERNAME__";
@@ -2214,7 +2268,9 @@ const rawHtml = `<!DOCTYPE html>
           targetPostId = urlParams.get('post') || urlParams.get('post_id');
         }
         if (!targetPostId) {
-          try { targetPostId = sessionStorage.getItem('active_post_id'); } catch (_) {}
+          try {
+            targetPostId = sessionStorage.getItem('active_post_id') || localStorage.getItem('active_post_id');
+          } catch (_) {}
         }
         if (targetPostId) {
           openPostDetailPage(targetPostId);
@@ -2232,6 +2288,47 @@ const rawHtml = `<!DOCTYPE html>
       } else if (!hash || hash === '#home' || hash === '#feed') {
         goBackToFeed();
       }
+    });
+
+    // Handle App Re-opening / Resuming after Telegram minimization or closing
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        try {
+          if (tg) {
+            if (!tg.isExpanded && typeof tg.expand === 'function') tg.expand();
+            if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+            if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation();
+          }
+          sendAppHeartbeat();
+          checkInitialPostRoute();
+        } catch (_) {}
+      } else {
+        // App is being minimized / backgrounded: safely pause active video to avoid browser errors
+        try {
+          const player = document.getElementById('postActiveVideoPlayer');
+          if (player && !player.paused) {
+            player.pause();
+          }
+        } catch (_) {}
+      }
+    });
+
+    window.addEventListener('pageshow', () => {
+      try {
+        if (tg) {
+          if (!tg.isExpanded && typeof tg.expand === 'function') tg.expand();
+          if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+        }
+        checkInitialPostRoute();
+      } catch (_) {}
+    });
+
+    window.addEventListener('focus', () => {
+      try {
+        if (tg && !tg.isExpanded && typeof tg.expand === 'function') {
+          tg.expand();
+        }
+      } catch (_) {}
     });
 
     // Generate Destination Link for Admin to Shorten
@@ -3984,6 +4081,7 @@ const rawHtml = `<!DOCTYPE html>
         if (viewFeed) viewFeed.style.display = 'block';
 
         if (tg?.BackButton) {
+          try { tg.BackButton.offClick(goBackToFeed); } catch (_) {}
           tg.BackButton.hide();
         }
 
@@ -3992,6 +4090,7 @@ const rawHtml = `<!DOCTYPE html>
             history.replaceState(null, '', window.location.pathname + (window.location.search || ''));
           }
           sessionStorage.removeItem('active_post_id');
+          localStorage.removeItem('active_post_id');
         } catch (_) {}
       }
 
@@ -4265,9 +4364,12 @@ const rawHtml = `<!DOCTYPE html>
         try {
           history.replaceState(null, '', '#post=' + postId);
           sessionStorage.setItem('active_post_id', String(postId));
+          localStorage.setItem('active_post_id', String(postId));
+          localStorage.setItem('last_active_time', String(Date.now()));
         } catch (_) {}
 
         if (tg?.BackButton) {
+          try { tg.BackButton.offClick(goBackToFeed); } catch (_) {}
           tg.BackButton.show();
           tg.BackButton.onClick(goBackToFeed);
         }
