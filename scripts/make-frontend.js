@@ -1060,6 +1060,24 @@ const rawHtml = `<!DOCTYPE html>
     </div>
 
     <!-- ============================================== -->
+    <!-- 1B. DEDICATED POST DETAIL PAGE VIEW (IN PAGE, NOT POPUP) -->
+    <!-- ============================================== -->
+    <div id="viewPostDetail" style="display: none; padding-bottom: 40px;" oncontextmenu="return false;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px;">
+        <button type="button" class="btn btn-secondary" id="btnBackToFeed" style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 0.85rem; font-weight: 700; border-radius: 10px; cursor: pointer; background: rgba(255,255,255,0.08); border: 1px solid var(--card-border);">
+          <span>←</span> <span>Back to Posts</span>
+        </button>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnPostDetailSave" style="padding: 7px 12px; border-radius: 8px; font-weight: 600;">🔖 Save</button>
+        </div>
+      </div>
+
+      <div id="postDetailPageBody">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- ============================================== -->
     <!-- 2. ADMIN CONTROL HUB VIEW -->
     <!-- ============================================== -->
     <div id="viewAdminHub" style="display: none;">
@@ -1843,36 +1861,6 @@ const rawHtml = `<!DOCTYPE html>
     </div>
     <div id="lightboxBackdrop" style="width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 60px 14px 20px 14px; cursor: pointer; -webkit-overflow-scrolling: touch;">
       <img id="lightboxImg" src="" alt="Preview" style="max-width: 95vw; max-height: 85vh; object-fit: contain; border-radius: 8px; transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1); cursor: zoom-in; box-shadow: 0 12px 48px rgba(0,0,0,0.9); user-select: none;" />
-    </div>
-  </div>
-
-  <!-- 8. Post Detail View Modal (Pictures First, Video Streams Next, Mega Link, Bot Action) -->
-  <div class="modal-overlay" id="postDetailModal" oncontextmenu="return false;" style="background: rgba(4, 7, 18, 0.95); z-index: 99990; padding: 12px; backdrop-filter: blur(12px);">
-    <div class="modal-content" style="max-width: 680px; width: 100%; border: 1px solid rgba(56, 189, 248, 0.25); background: #0b1329; border-radius: 18px; overflow: hidden; padding: 0; box-shadow: 0 20px 60px rgba(0,0,0,0.85); display: flex; flex-direction: column; max-height: 90vh;">
-      <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(15,23,42,0.85); flex-shrink: 0;">
-        <div style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 82%; display: flex; align-items: center; gap: 6px;">
-          <span>📂</span> <span id="postDetailModalTitle">Post Details</span>
-        </div>
-        <button type="button" id="btnPostDetailClose" style="background: rgba(255,255,255,0.1); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
-      </div>
-      <div id="postDetailModalBody" style="padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; -webkit-overflow-scrolling: touch;">
-        <!-- Dynamic Content: Pics first, videos with permanent stream next, mega links, bot action -->
-      </div>
-    </div>
-  </div>
-
-  <!-- 9. All Images Popup Gallery Modal -->
-  <div class="modal-overlay" id="allImagesGalleryModal" oncontextmenu="return false;" style="background: rgba(3, 6, 15, 0.96); z-index: 99995; padding: 14px; backdrop-filter: blur(14px);">
-    <div class="modal-content" style="max-width: 720px; width: 100%; border: 1px solid rgba(255,255,255,0.15); background: #090e1f; border-radius: 18px; overflow: hidden; padding: 0; display: flex; flex-direction: column; max-height: 90vh;">
-      <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(15,23,42,0.85); flex-shrink: 0;">
-        <div style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-          <span>🖼️</span> <span id="galleryModalTitle">All Photos</span>
-        </div>
-        <button type="button" id="btnGalleryClose" style="background: rgba(255,255,255,0.1); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
-      </div>
-      <div id="galleryModalGrid" style="padding: 16px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; max-height: 75vh;">
-        <!-- Image cards injected dynamically -->
-      </div>
     </div>
   </div>
 
@@ -3785,11 +3773,11 @@ const rawHtml = `<!DOCTYPE html>
           return;
         }
 
-        // Open Post Detail Modal Click
+        // Open Post Detail Page Click (In-Page View)
         const openPostBtn = e.target.closest('[data-act="open-post"]');
         if (openPostBtn) {
           const postId = openPostBtn.dataset.id;
-          openPostDetailModal(postId);
+          openPostDetailPage(postId);
           return;
         }
 
@@ -3803,9 +3791,14 @@ const rawHtml = `<!DOCTYPE html>
         }
       });
 
-      // Post Detail Modal & Multi-media Handling
+      // =============================================================
+      // POST DETAIL PAGE (IN-PAGE VIEW, NOT POPUP)
+      // =============================================================
       let currentDetailPost = null;
-      let currentGalleryImages = [];
+      let currentPostPictures = [];
+      let currentPostVideos = [];
+      let activePhotoIndex = 0;
+      let activeVideoIndex = 0;
 
       async function triggerAdsgramAd(blockId) {
         if (!window.Adsgram || !blockId) return true;
@@ -3819,15 +3812,41 @@ const rawHtml = `<!DOCTYPE html>
         }
       }
 
-      async function openPostDetailModal(postId) {
-        const modal = document.getElementById('postDetailModal');
-        const titleEl = document.getElementById('postDetailModalTitle');
-        const bodyEl = document.getElementById('postDetailModalBody');
-        if (!modal || !bodyEl) return;
+      function goBackToFeed() {
+        const player = document.getElementById('postActiveVideoPlayer');
+        if (player) {
+          try {
+            player.pause();
+            player.removeAttribute('src');
+            player.load();
+          } catch (_) {}
+        }
+        const viewDetail = document.getElementById('viewPostDetail');
+        const viewFeed = document.getElementById('viewPublicFeed');
+        if (viewDetail) viewDetail.style.display = 'none';
+        if (viewFeed) viewFeed.style.display = 'block';
 
-        modal.classList.add('active');
-        if (titleEl) titleEl.textContent = 'Loading Post...';
-        bodyEl.innerHTML = '<div style="padding: 40px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 32px; margin-bottom: 10px;">⏳</div>Loading post content...</div>';
+        if (tg?.BackButton) {
+          tg.BackButton.hide();
+        }
+      }
+
+      async function openPostDetailPage(postId) {
+        const viewFeed = document.getElementById('viewPublicFeed');
+        const viewDetail = document.getElementById('viewPostDetail');
+        const bodyEl = document.getElementById('postDetailPageBody');
+        if (!viewDetail || !bodyEl) return;
+
+        if (viewFeed) viewFeed.style.display = 'none';
+        viewDetail.style.display = 'block';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+
+        if (tg?.BackButton) {
+          tg.BackButton.show();
+          tg.BackButton.onClick(goBackToFeed);
+        }
+
+        bodyEl.innerHTML = '<div style="padding: 50px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 36px; margin-bottom: 12px;">⏳</div>Loading post...</div>';
 
         // Check pre-roll ad if enabled
         if (globalSettings.adsgram_enabled && globalSettings.adsgram_preroll_enabled && globalSettings.adsgram_rewarded_block_id) {
@@ -3838,17 +3857,15 @@ const rawHtml = `<!DOCTYPE html>
           const res = await fetch('/api/posts/' + postId + '?user_id=' + currentUserId);
           const data = await res.json();
           if (!data.success || !data.post) {
-            bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to load post.</div>';
+            bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to load post. <button type="button" class="btn btn-secondary btn-sm" onclick="goBackToFeed()" style="margin-top:10px;">← Back to feed</button></div>';
             return;
           }
 
           const post = data.post;
           currentDetailPost = post;
-          if (titleEl) titleEl.textContent = post.title;
-
           const allFiles = (post.folders || []).flatMap(f => f.files || []);
 
-          // 1. Gather all pictures (cover preview image + folder photos)
+          // 1. Gather all pictures (Cover + Folder Images)
           const pictures = [];
           if (post.preview_image) {
             pictures.push({ url: post.preview_image, title: post.title + ' (Cover)' });
@@ -3857,12 +3874,13 @@ const rawHtml = `<!DOCTYPE html>
             const isImg = (f.mime_type && f.mime_type.startsWith('image/')) || (f.file_name && /\.(jpe?g|png|webp|gif)$/i.test(f.file_name));
             if (isImg && f.file_id) {
               pictures.push({
-                url: '/api/stream?file_id=' + encodeURIComponent(f.file_id),
+                url: '/api/stream?post_id=' + post.id + '&file_id=' + encodeURIComponent(f.file_id),
                 title: f.file_name || 'Photo'
               });
             }
           });
-          currentGalleryImages = pictures;
+          currentPostPictures = pictures;
+          activePhotoIndex = 0;
 
           // 2. Gather all videos
           const videos = allFiles.filter(f => {
@@ -3874,63 +3892,111 @@ const rawHtml = `<!DOCTYPE html>
               if (!isImg) videos.push(f);
             });
           }
+          currentPostVideos = videos;
+          activeVideoIndex = 0;
 
           let html = '';
 
+          // Post Header: Title, Tags, Stats
+          const dateStr = post.created_at ? new Date(post.created_at).toLocaleDateString() : '';
+          html += '<div style="margin-bottom: 16px;">' +
+            '<div style="font-size: 1.25rem; font-weight: 800; color: #f8fafc; line-height: 1.35; margin-bottom: 6px;">' + escapeHtml(post.title) + '</div>' +
+            '<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-muted);">' +
+            (post.is_promoted ? '<span style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; font-weight: 800; padding: 2px 7px; border-radius: 6px;">⭐ Exclusive</span>' : '') +
+            '<span style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 6px;">🏷️ ' + escapeHtml(post.category || 'All') + '</span>' +
+            (dateStr ? '<span>🕒 ' + dateStr + '</span>' : '') +
+            '<span>👁️ ' + (post.view_count || 0) + '</span>' +
+            '<span>❤️ ' + (post.like_count || 0) + '</span>' +
+            '</div>' +
+            '</div>';
+
           // SECTION 1: PICTURES CONTAINER (FIRST!)
           if (pictures.length > 0) {
-            const mainPic = pictures[0];
-            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; overflow: hidden;">' +
-              '<div style="padding: 10px 14px; font-weight: 700; font-size: 0.85rem; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">' +
+            const curPic = pictures[0];
+            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px;">' +
+              '<div style="padding: 12px 16px; font-weight: 700; font-size: 0.88rem; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">' +
               '<span>🖼️ Photos (' + pictures.length + ')</span>' +
-              '<span style="font-size: 0.72rem; color: var(--text-muted);">' + (pictures.length > 1 ? 'Tap to View All Photos' : 'Tap to Zoom') + '</span>' +
+              '<span style="font-size: 0.75rem; color: var(--text-muted);">Tap photo to Zoom</span>' +
               '</div>' +
-              '<div style="position: relative; cursor: pointer; max-height: 280px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #000;" id="postDetailPrimaryPic">' +
-              '<img src="' + escapeHtml(mainPic.url) + '" alt="" style="max-height: 280px; width: 100%; object-fit: contain;" />' +
-              '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 3px 8px; border-radius: 6px; backdrop-filter: blur(4px);">' +
-              (pictures.length > 1 ? ('🔍 View All Photos (' + pictures.length + ')') : '🔍 Tap to Zoom') +
+              '<div style="position: relative; cursor: pointer; max-height: 380px; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden;" id="postDetailMainPhotoWrap">' +
+              '<img id="postDetailMainPhoto" src="' + escapeHtml(curPic.url) + '" alt="" style="max-height: 380px; width: 100%; object-fit: contain;" />' +
+              '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 4px 10px; border-radius: 6px; backdrop-filter: blur(4px); pointer-events: none;">' +
+              '🔍 Tap to Zoom' +
+              '</div>' +
+              '</div>';
+
+            if (pictures.length > 1) {
+              html += '<div style="padding: 10px 14px; background: rgba(10, 16, 31, 0.9); display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;" id="postPhotoThumbnails">' +
+                pictures.map((pic, idx) => {
+                  return '<div class="photo-thumb-item" data-idx="' + idx + '" style="flex-shrink: 0; width: 62px; height: 62px; border-radius: 8px; overflow: hidden; cursor: pointer; border: 2px solid ' + (idx === 0 ? '#38bdf8' : 'rgba(255,255,255,0.12)') + '; background: #000;">' +
+                    '<img src="' + escapeHtml(pic.url) + '" alt="" style="width: 100%; height: 100%; object-fit: cover;" />' +
+                    '</div>';
+                }).join('') +
+                '</div>';
+            }
+
+            html += '</div>';
+          }
+
+          // SECTION 2: VIDEO STREAM PLAYER (NEXT - ONLY 1 LOADED AT STARTING!)
+          if (videos.length > 0) {
+            const firstVid = videos[0];
+            const firstSize = Number(firstVid.size) || 0;
+            const firstSizeMB = (firstSize / (1024 * 1024)).toFixed(1);
+            const isFirstLarge = firstSize > 100 * 1024 * 1024;
+            const firstTitle = firstVid.file_name || 'Video 1';
+            const firstStreamSrc = '/api/stream?post_id=' + post.id + (firstVid.file_id ? ('&file_id=' + encodeURIComponent(firstVid.file_id)) : '');
+
+            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px; padding: 14px;">' +
+              '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">' +
+              '<div style="font-weight: 700; font-size: 0.92rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72%;" id="postActiveVideoTitle">🎬 ' + escapeHtml(firstTitle) + '</div>' +
+              '<div style="font-size: 0.74rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 12px; font-weight: 700; flex-shrink: 0;" id="postActiveVideoSize">' + firstSizeMB + ' MB</div>' +
+              '</div>' +
+
+              // EXACTLY 1 VIDEO PLAYER IN THE DOM!
+              '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" oncontextmenu="return false;">' +
+              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture preload="metadata" poster="' + escapeHtml(post.preview_image || '') + '" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
+              '</div>' +
+
+              '<div id="postLargeFileNotice" style="display: ' + (isFirstLarge ? 'block' : 'none') + '; margin-top: 10px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 10px; padding: 10px; font-size: 0.78rem; color: #fbbf24; text-align: center;">⚡ Large File (&gt; 100 MB) — Fast native Telegram delivery recommended</div>' +
+
+              '<div style="margin-top: 10px;">' +
+              '<button type="button" class="btn btn-secondary btn-sm" id="btnActiveVideoBot" data-id="' + post.id + '" style="width: 100%; padding: 10px; font-weight: 600; font-size: 0.82rem; border-radius: 10px;">📥 Send This Video to Telegram Chat</button>' +
+              '</div>' +
+
+              // BOTTOM: ALL VIDEO FILES LIST (User clicks to switch video)
+              '<div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">' +
+              '<div style="font-weight: 700; font-size: 0.84rem; color: #94a3b8; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">' +
+              '<span>📁 All Video Files (' + videos.length + ') — Tap file to play</span>' +
+              '</div>' +
+              '<div style="display: flex; flex-direction: column; gap: 8px;" id="postVideoFilesList">' +
+              videos.map((vid, idx) => {
+                const vSize = Number(vid.size) || 0;
+                const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
+                const isLarge = vSize > 100 * 1024 * 1024;
+                const vName = vid.file_name || ('Video ' + (idx + 1));
+                const isActive = idx === 0;
+
+                return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.14)' : 'rgba(255,255,255,0.04)') + '; border: 1px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s ease;">' +
+                  '<div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 72%;">' +
+                  '<span class="vid-play-icon" style="font-size: 1rem;">' + (isActive ? '▶️' : '🎬') + '</span>' +
+                  '<span style="font-weight: 600; font-size: 0.82rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + escapeHtml(vName) + '</span>' +
+                  '</div>' +
+                  '<div style="display: flex; align-items: center; gap: 6px;">' +
+                  '<span style="font-size: 0.72rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 6px; font-weight: 600;">' + vSizeMB + ' MB</span>' +
+                  (isLarge ? '<span style="font-size: 0.68rem; color: #fbbf24; background: rgba(245, 158, 11, 0.15); padding: 2px 5px; border-radius: 6px;">TG</span>' : '') +
+                  '</div>' +
+                  '</div>';
+              }).join('') +
               '</div>' +
               '</div>' +
               '</div>';
           }
 
-          // SECTION 2: VIDEOS CONTAINER (NEXT!)
-          if (videos.length > 0) {
-            html += '<div style="display: flex; flex-direction: column; gap: 12px;">';
-            videos.forEach((vid, vIdx) => {
-              const vSize = Number(vid.size) || 0;
-              const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
-              const isLarge = vSize > 100 * 1024 * 1024;
-              const vTitle = vid.file_name || ('Video ' + (vIdx + 1));
-              const streamSrc = '/api/stream?post_id=' + post.id + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '');
-
-              html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; overflow: hidden; padding: 12px; display: flex; flex-direction: column; gap: 10px;">' +
-                '<div style="display: flex; align-items: center; justify-content: space-between;">' +
-                '<div style="font-weight: 700; font-size: 0.88rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%;">🎬 ' + escapeHtml(vTitle) + '</div>' +
-                '<div style="font-size: 0.74rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 12px; font-weight: 700;">' + vSizeMB + ' MB</div>' +
-                '</div>';
-
-              if (!isLarge) {
-                // Permanent Video Stream Player
-                html += '<div style="position: relative; width: 100%; border-radius: 10px; overflow: hidden; background: #000;" oncontextmenu="return false;">' +
-                  '<video playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture preload="metadata" poster="' + escapeHtml(post.preview_image || '') + '" src="' + streamSrc + '" style="width: 100%; max-height: 320px; outline: none; background: #000;"></video>' +
-                  '</div>' +
-                  '<button type="button" class="btn btn-secondary btn-sm" data-act="send-file-bot" data-id="' + post.id + '" style="width: 100%; padding: 9px; font-weight: 600; font-size: 0.8rem;">📥 Send Video to Telegram Chat</button>';
-              } else {
-                // Large File (> 100MB): High-speed Telegram button
-                html += '<div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 10px; padding: 10px; font-size: 0.78rem; color: #fbbf24; text-align: center;">⚡ Large File (' + vSizeMB + ' MB) — Fast native Telegram delivery</div>' +
-                  '<button type="button" class="btn btn-primary" data-act="send-file-bot" data-id="' + post.id + '" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; background: linear-gradient(135deg, #0284c7, #38bdf8);">📥 Get File in Telegram (' + vSizeMB + ' MB)</button>';
-              }
-
-              html += '</div>';
-            });
-            html += '</div>';
-          }
-
           // SECTION 3: MEGA LINK / DIRECT LINK
           if (post.direct_link) {
-            const linkTitle = post.direct_link_title || '☁️ Open Mega Link / Direct File';
-            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">' +
+            const linkTitle = post.direct_link_title || 'Open Mega Link / Direct File';
+            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 14px; padding: 12px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px;">' +
               '<div style="font-weight: 700; font-size: 0.82rem; color: #34d399;">🔗 External Cloud Link</div>' +
               '<a href="' + escapeHtml(post.direct_link) + '" target="_blank" rel="noopener noreferrer" class="btn" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; color: #fff; background: linear-gradient(135deg, #10b981, #059669); border-radius: 10px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">' +
               '☁️ ' + escapeHtml(linkTitle) + ' ↗️' +
@@ -3939,7 +4005,7 @@ const rawHtml = `<!DOCTYPE html>
           }
 
           // SECTION 4: PRIMARY BOT ACTION (OLD RELIABLE WAY)
-          html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">' +
+          html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 18px; display: flex; flex-direction: column; gap: 8px;">' +
             '<div style="font-size: 0.78rem; color: var(--text-muted); text-align: center;">Want files forwarded directly to your Telegram chat?</div>' +
             '<button type="button" class="btn btn-secondary" data-act="send-file-bot" data-id="' + post.id + '" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 10px;">' +
             '🚀 Open &amp; Deliver in Bot Chat' +
@@ -3951,44 +4017,6 @@ const rawHtml = `<!DOCTYPE html>
         } catch (e) {
           bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to load post details: ' + escapeHtml(e.message) + '</div>';
         }
-      }
-
-      function closePostDetailModal() {
-        const modal = document.getElementById('postDetailModal');
-        if (modal) {
-          modal.querySelectorAll('video').forEach(v => {
-            try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) {}
-          });
-          modal.classList.remove('active');
-        }
-      }
-
-      function openAllImagesGallery() {
-        const modal = document.getElementById('allImagesGalleryModal');
-        const grid = document.getElementById('galleryModalGrid');
-        const titleEl = document.getElementById('galleryModalTitle');
-        if (!modal || !grid) return;
-
-        if (titleEl) titleEl.textContent = '🖼️ All Photos (' + currentGalleryImages.length + ')';
-        grid.innerHTML = '';
-
-        currentGalleryImages.forEach((img, idx) => {
-          const item = document.createElement('div');
-          item.style.cssText = 'position: relative; border-radius: 10px; overflow: hidden; background: #000; aspect-ratio: 1; cursor: pointer; border: 1px solid rgba(255,255,255,0.1);';
-          item.innerHTML = '<img src="' + escapeHtml(img.url) + '" alt="" style="width: 100%; height: 100%; object-fit: cover;" />' +
-            '<div style="position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.65rem; padding: 2px 5px; border-radius: 4px;">🔍 Zoom</div>';
-          item.addEventListener('click', () => {
-            openImageLightbox(img.url, img.title || ('Photo ' + (idx + 1)));
-          });
-          grid.appendChild(item);
-        });
-
-        modal.classList.add('active');
-      }
-
-      function closeAllImagesGallery() {
-        const modal = document.getElementById('allImagesGalleryModal');
-        if (modal) modal.classList.remove('active');
       }
 
       function forwardToTelegram(postId) {
@@ -4003,24 +4031,108 @@ const rawHtml = `<!DOCTYPE html>
         }
       }
 
-      document.getElementById('btnPostDetailClose')?.addEventListener('click', closePostDetailModal);
-      document.getElementById('btnGalleryClose')?.addEventListener('click', closeAllImagesGallery);
+      // In-Page Back Button Listener
+      document.getElementById('btnBackToFeed')?.addEventListener('click', goBackToFeed);
 
-      document.getElementById('postDetailModalBody')?.addEventListener('click', (e) => {
-        const picContainer = e.target.closest('#postDetailPrimaryPic');
-        if (picContainer && currentGalleryImages.length > 0) {
-          if (currentGalleryImages.length === 1) {
-            openImageLightbox(currentGalleryImages[0].url, currentGalleryImages[0].title);
-          } else {
-            openAllImagesGallery();
+      // Bookmark / Save button on Post Page
+      document.getElementById('btnPostDetailSave')?.addEventListener('click', async () => {
+        if (!currentDetailPost) return;
+        const postId = currentDetailPost.id;
+        try {
+          const res = await fetch('/api/saved?post_id=' + postId + '&user_id=' + currentUserId, {
+            method: 'POST'
+          });
+          const data = await res.json();
+          if (data.success) {
+            if (data.saved) {
+              savedPostIds.add(Number(postId));
+              showToast('🔖 Post saved to bookmarks');
+            } else {
+              savedPostIds.delete(Number(postId));
+              showToast('Removed from saved posts');
+            }
+            renderFeed();
+          }
+        } catch (err) {
+          console.warn('Save error:', err);
+        }
+      });
+
+      // Post Detail Dynamic Interactions (Photos & Videos Switching)
+      document.getElementById('postDetailPageBody')?.addEventListener('click', (e) => {
+        // 1. Photo thumbnail clicked -> switch main photo
+        const thumb = e.target.closest('.photo-thumb-item');
+        if (thumb) {
+          const idx = parseInt(thumb.dataset.idx, 10);
+          if (currentPostPictures[idx]) {
+            activePhotoIndex = idx;
+            const mainImg = document.getElementById('postDetailMainPhoto');
+            if (mainImg) mainImg.src = currentPostPictures[idx].url;
+            document.querySelectorAll('.photo-thumb-item').forEach(t => {
+              t.style.borderColor = 'rgba(255,255,255,0.12)';
+            });
+            thumb.style.borderColor = '#38bdf8';
           }
           return;
         }
 
-        const sendBotBtn = e.target.closest('[data-act="send-file-bot"]');
+        // 2. Main photo clicked -> zoom lightbox
+        const photoWrap = e.target.closest('#postDetailMainPhotoWrap');
+        if (photoWrap && currentPostPictures[activePhotoIndex]) {
+          openImageLightbox(currentPostPictures[activePhotoIndex].url, currentPostPictures[activePhotoIndex].title);
+          return;
+        }
+
+        // 3. Video card clicked -> switch active video (only 1 video plays at once!)
+        const vCard = e.target.closest('.video-file-card');
+        if (vCard) {
+          const vIdx = parseInt(vCard.dataset.vidx, 10);
+          const vid = currentPostVideos[vIdx];
+          if (vid && currentDetailPost) {
+            activeVideoIndex = vIdx;
+            const player = document.getElementById('postActiveVideoPlayer');
+            if (player) {
+              try { player.pause(); } catch (_) {}
+              const vSize = Number(vid.size) || 0;
+              const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
+              const isLarge = vSize > 100 * 1024 * 1024;
+              const vTitle = vid.file_name || ('Video ' + (vIdx + 1));
+              const streamSrc = '/api/stream?post_id=' + currentDetailPost.id + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '');
+
+              const titleEl = document.getElementById('postActiveVideoTitle');
+              if (titleEl) titleEl.textContent = '🎬 ' + vTitle;
+              const sizeEl = document.getElementById('postActiveVideoSize');
+              if (sizeEl) sizeEl.textContent = vSizeMB + ' MB';
+
+              const noticeEl = document.getElementById('postLargeFileNotice');
+              if (noticeEl) noticeEl.style.display = isLarge ? 'block' : 'none';
+
+              document.querySelectorAll('.video-file-card').forEach((c, idx) => {
+                const icon = c.querySelector('.vid-play-icon');
+                if (idx === vIdx) {
+                  c.style.background = 'rgba(56, 189, 248, 0.14)';
+                  c.style.borderColor = '#38bdf8';
+                  if (icon) icon.textContent = '▶️';
+                } else {
+                  c.style.background = 'rgba(255,255,255,0.04)';
+                  c.style.borderColor = 'rgba(255,255,255,0.08)';
+                  if (icon) icon.textContent = '🎬';
+                }
+              });
+
+              player.src = streamSrc;
+              player.load();
+              player.play().catch(e => console.log('Autoplay notice:', e));
+            }
+          }
+          return;
+        }
+
+        // 4. Send video or post to bot
+        const sendBotBtn = e.target.closest('[data-act="send-file-bot"]') || e.target.closest('#btnActiveVideoBot');
         if (sendBotBtn) {
-          const postId = sendBotBtn.dataset.id;
-          forwardToTelegram(postId);
+          const postId = sendBotBtn.dataset.id || (currentDetailPost ? currentDetailPost.id : null);
+          if (postId) forwardToTelegram(postId);
           return;
         }
       });

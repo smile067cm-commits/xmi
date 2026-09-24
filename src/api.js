@@ -117,7 +117,7 @@ export function createRouter() {
   }));
 
   // -------------------------------------------------------------
-  // GET /api/stream - Secure Video Stream Proxy (No external URLs exposed)
+  // GET /api/stream - Secure Video & Media Stream Proxy (No external URLs exposed)
   // -------------------------------------------------------------
   const handleStream = async (request, env) => {
     try {
@@ -125,9 +125,10 @@ export function createRouter() {
       const postId = url.searchParams.get('post_id') || url.searchParams.get('id');
       let fileId = url.searchParams.get('file_id');
       let channelMsgId = url.searchParams.get('msg_id');
-      let detectedMime = 'video/mp4';
+      let detectedMime = null;
+      let fileSize = 0;
 
-      // If post_id is provided, resolve file details from database securely
+      // 1. Resolve file info if post_id is provided
       if (postId) {
         const post = await getPostById(env, postId);
         if (post && post.folders) {
@@ -142,8 +143,18 @@ export function createRouter() {
           if (targetFile) {
             fileId = targetFile.file_id;
             channelMsgId = targetFile.channel_message_id;
-            if (targetFile.mime_type && targetFile.mime_type.startsWith('video/')) {
+            fileSize = Number(targetFile.size) || 0;
+            if (targetFile.mime_type) {
               detectedMime = targetFile.mime_type;
+            } else if (targetFile.file_name) {
+              const fn = targetFile.file_name.toLowerCase();
+              if (fn.endsWith('.jpg') || fn.endsWith('.jpeg')) detectedMime = 'image/jpeg';
+              else if (fn.endsWith('.png')) detectedMime = 'image/png';
+              else if (fn.endsWith('.webp')) detectedMime = 'image/webp';
+              else if (fn.endsWith('.gif')) detectedMime = 'image/gif';
+              else if (fn.endsWith('.mp4')) detectedMime = 'video/mp4';
+              else if (fn.endsWith('.webm')) detectedMime = 'video/webm';
+              else if (fn.endsWith('.mkv')) detectedMime = 'video/mp4';
             }
           }
         }
@@ -163,7 +174,65 @@ export function createRouter() {
         forwardHeaders['Range'] = rangeHeader;
       }
 
-      // Priority 1: Proxy via Render MTProto Stream Server if channel message ID is available
+      const isImage = Boolean(detectedMime && detectedMime.startsWith('image/'));
+
+      // TIER 1: Use Telegram Bot API getFile for files <= 20MB or any Image
+      // Blazingly fast CDN-backed delivery directly on Telegram's global edge network
+      if (fileId && (isImage || fileSize <= 20 * 1024 * 1024)) {
+        try {
+          const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
+          const tgData = await tgRes.json();
+
+          if (tgData.ok && tgData.result?.file_path) {
+            const filePath = tgData.result.file_path;
+            const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`;
+
+            // Auto-detect mime from Telegram file path if not already known
+            if (!detectedMime) {
+              const fpLower = filePath.toLowerCase();
+              if (fpLower.endsWith('.jpg') || fpLower.endsWith('.jpeg')) detectedMime = 'image/jpeg';
+              else if (fpLower.endsWith('.png')) detectedMime = 'image/png';
+              else if (fpLower.endsWith('.webp')) detectedMime = 'image/webp';
+              else if (fpLower.endsWith('.gif')) detectedMime = 'image/gif';
+              else if (fpLower.endsWith('.mp4')) detectedMime = 'video/mp4';
+              else if (fpLower.endsWith('.webm')) detectedMime = 'video/webm';
+              else if (fpLower.endsWith('.mkv')) detectedMime = 'video/mp4';
+              else detectedMime = 'video/mp4';
+            }
+
+            const upstreamRes = await fetch(downloadUrl, { headers: forwardHeaders });
+
+            if (upstreamRes.ok || upstreamRes.status === 206) {
+              const responseHeaders = new Headers(corsHeaders);
+              responseHeaders.set('Accept-Ranges', 'bytes');
+              responseHeaders.set('Content-Type', detectedMime);
+              responseHeaders.set('Content-Disposition', 'inline');
+
+              if (detectedMime.startsWith('image/')) {
+                responseHeaders.set('Cache-Control', 'public, max-age=604800, immutable');
+              } else {
+                responseHeaders.set('Cache-Control', 'no-cache');
+              }
+
+              if (upstreamRes.headers.get('content-range')) {
+                responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
+              }
+              if (upstreamRes.headers.get('content-length')) {
+                responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
+              }
+
+              return new Response(upstreamRes.body, {
+                status: upstreamRes.status,
+                headers: responseHeaders
+              });
+            }
+          }
+        } catch (tgErr) {
+          console.warn('Telegram Bot API proxy failed, attempting fallback:', tgErr.message);
+        }
+      }
+
+      // TIER 2: Proxy via Render MTProto Stream Server (for files > 20MB up to 100MB, or fallback)
       if (renderUrl && channelMsgId) {
         try {
           const renderStreamTarget = `${renderUrl}/stream?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(channelMsgId)}`;
@@ -172,8 +241,10 @@ export function createRouter() {
           if (upstreamRes.ok || upstreamRes.status === 206) {
             const responseHeaders = new Headers(corsHeaders);
             responseHeaders.set('Accept-Ranges', 'bytes');
-            responseHeaders.set('Content-Type', detectedMime);
+            responseHeaders.set('Content-Type', detectedMime || 'video/mp4');
+            responseHeaders.set('Content-Disposition', 'inline');
             responseHeaders.set('Cache-Control', 'no-cache');
+
             if (upstreamRes.headers.get('content-range')) {
               responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
             }
@@ -187,39 +258,30 @@ export function createRouter() {
             });
           }
         } catch (renderErr) {
-          console.warn('Render stream failed, falling back to Bot API:', renderErr.message);
+          console.warn('Render stream failed:', renderErr.message);
         }
       }
 
-      // Priority 2: Proxy via Telegram Bot API with guaranteed video/mp4 Content-Type
+      // TIER 3 Fallback: If Render didn't respond and fileId exists, try Telegram Bot API
       if (fileId) {
-        const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
-        const tgData = await tgRes.json();
-
-        if (tgData.ok && tgData.result?.file_path) {
-          const filePath = tgData.result.file_path;
-          const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`;
-
-          const upstreamRes = await fetch(downloadUrl, { headers: forwardHeaders });
-
-          const responseHeaders = new Headers(corsHeaders);
-          responseHeaders.set('Accept-Ranges', 'bytes');
-          // Enforce video/mp4 instead of application/octet-stream so player decodes video immediately
-          responseHeaders.set('Content-Type', detectedMime);
-          responseHeaders.set('Cache-Control', 'no-cache');
-
-          if (upstreamRes.headers.get('content-range')) {
-            responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
+        try {
+          const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
+          const tgData = await tgRes.json();
+          if (tgData.ok && tgData.result?.file_path) {
+            const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${tgData.result.file_path}`;
+            const upstreamRes = await fetch(downloadUrl, { headers: forwardHeaders });
+            if (upstreamRes.ok || upstreamRes.status === 206) {
+              const responseHeaders = new Headers(corsHeaders);
+              responseHeaders.set('Accept-Ranges', 'bytes');
+              responseHeaders.set('Content-Type', detectedMime || 'video/mp4');
+              responseHeaders.set('Content-Disposition', 'inline');
+              responseHeaders.set('Cache-Control', 'no-cache');
+              if (upstreamRes.headers.get('content-range')) responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
+              if (upstreamRes.headers.get('content-length')) responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
+              return new Response(upstreamRes.body, { status: upstreamRes.status, headers: responseHeaders });
+            }
           }
-          if (upstreamRes.headers.get('content-length')) {
-            responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
-          }
-
-          return new Response(upstreamRes.body, {
-            status: upstreamRes.status,
-            headers: responseHeaders
-          });
-        }
+        } catch (_) {}
       }
 
       return errorResponse('Stream media unavailable or file not accessible', 404);
