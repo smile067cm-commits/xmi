@@ -1847,7 +1847,7 @@ const rawHtml = `<!DOCTYPE html>
   </div>
 
   <!-- 8. In-App Video Streaming Player Modal -->
-  <div class="modal-overlay" id="videoPlayerModal" style="background: rgba(4, 7, 18, 0.95); z-index: 100000; padding: 12px; backdrop-filter: blur(12px);">
+  <div class="modal-overlay" id="videoPlayerModal" oncontextmenu="return false;" style="background: rgba(4, 7, 18, 0.95); z-index: 100000; padding: 12px; backdrop-filter: blur(12px); user-select: none; -webkit-user-select: none;">
     <div class="modal-content" style="max-width: 650px; width: 100%; border: 1px solid rgba(56, 189, 248, 0.25); background: #0b1329; border-radius: 18px; overflow: hidden; padding: 0; box-shadow: 0 20px 60px rgba(0,0,0,0.85);">
       <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(15,23,42,0.85);">
         <div style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80%; display: flex; align-items: center; gap: 6px;">
@@ -1855,8 +1855,8 @@ const rawHtml = `<!DOCTYPE html>
         </div>
         <button type="button" id="btnVideoPlayerClose" style="background: rgba(255,255,255,0.1); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
       </div>
-      <div style="position: relative; width: 100%; background: #000; display: flex; align-items: center; justify-content: center; min-height: 240px; max-height: 70vh;">
-        <video id="streamVideoTag" playsinline webkit-playsinline controls style="width: 100%; max-height: 70vh; background: #000; outline: none;"></video>
+      <div style="position: relative; width: 100%; background: #000; display: flex; align-items: center; justify-content: center; min-height: 240px; max-height: 70vh;" oncontextmenu="return false;">
+        <video id="streamVideoTag" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture style="width: 100%; max-height: 70vh; background: #000; outline: none;"></video>
         <div id="videoStreamLoading" style="position: absolute; display: none; flex-direction: column; align-items: center; gap: 8px; color: #38bdf8; font-weight: 600; font-size: 0.85rem; pointer-events: none; background: rgba(0,0,0,0.75); padding: 12px 18px; border-radius: 12px; backdrop-filter: blur(6px);">
           <div style="font-size: 26px;">⏳</div>
           <span id="videoStreamStatusText">Loading stream...</span>
@@ -1864,12 +1864,11 @@ const rawHtml = `<!DOCTYPE html>
       </div>
       <div style="padding: 14px 18px; background: rgba(15,23,42,0.6); display: flex; flex-direction: column; gap: 10px;">
         <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted);">
-          <div id="videoPlayerTierBadge" style="display: inline-flex; align-items: center; gap: 5px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 3px 9px; border-radius: 20px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3);">⚡ Cloudflare Stream (&lt;20MB)</div>
+          <div id="videoPlayerTierBadge" style="display: inline-flex; align-items: center; gap: 5px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 3px 9px; border-radius: 20px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3);">⚡ Protected Stream</div>
           <div id="videoPlayerSize">0 MB</div>
         </div>
-        <div style="display: flex; gap: 8px;">
-          <button type="button" class="btn btn-secondary btn-sm" id="btnVideoSendToBot" style="flex: 1; padding: 10px; font-size: 0.82rem; font-weight: 600;">📥 Forward File to Telegram Chat</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="btnVideoCopyStreamUrl" style="padding: 10px 14px; font-size: 0.82rem;">📋 Copy Link</button>
+        <div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btnVideoSendToBot" style="width: 100%; padding: 11px; font-size: 0.85rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px;">📥 Forward File to Telegram Chat</button>
         </div>
       </div>
     </div>
@@ -3868,43 +3867,19 @@ const rawHtml = `<!DOCTYPE html>
 
         let streamUrl = '';
 
-        // TIER 1: < 20 MB -> Stream via Cloudflare Worker
-        if (fileSize <= 20 * 1024 * 1024 && fileId) {
-          streamUrl = '/api/stream?file_id=' + encodeURIComponent(fileId);
+        // TIER 1 & TIER 2: Stream securely via internal endpoint (No external URLs or tokens exposed)
+        if (fileSize <= 100 * 1024 * 1024) {
+          streamUrl = '/api/stream?post_id=' + encodeURIComponent(postId);
           if (badgeEl) {
-            badgeEl.textContent = '⚡ Cloudflare Stream (<20MB)';
+            badgeEl.textContent = fileSize <= 20 * 1024 * 1024 ? '⚡ High-Speed Stream' : '🚀 Fast In-App Stream';
             badgeEl.style.color = '#38bdf8';
             badgeEl.style.borderColor = 'rgba(56, 189, 248, 0.4)';
-          }
-        }
-        // TIER 2: 20 MB - 100 MB -> Stream via Render Server
-        else if (fileSize <= 100 * 1024 * 1024 && msgId) {
-          const renderUrl = (globalSettings.render_stream_url || '').replace(/\/+$/, '');
-          if (renderUrl) {
-            streamUrl = renderUrl + '/stream?channel_id=-1004415998750&msg_id=' + msgId;
-            if (badgeEl) {
-              badgeEl.textContent = '🚀 Render Stream Server (20-100MB)';
-              badgeEl.style.color = '#a78bfa';
-              badgeEl.style.borderColor = 'rgba(167, 139, 250, 0.4)';
-            }
-          } else {
-            // Render URL not yet configured: fallback to Worker if fileId exists or forward to Telegram
-            if (fileId) {
-              streamUrl = '/api/stream?file_id=' + encodeURIComponent(fileId);
-              if (badgeEl) badgeEl.textContent = '⚡ Direct Telegram Stream';
-            } else {
-              if (badgeEl) badgeEl.textContent = '⚠️ Large Video — Opening Bot';
-              showToast('Forwarding video to your Telegram chat...');
-              forwardToTelegram(postId);
-              closeVideoPlayer();
-              return;
-            }
           }
         }
         // TIER 3: > 100 MB -> Forward directly to Telegram Chat
         else {
           if (badgeEl) badgeEl.textContent = '📦 Large Video (>100MB)';
-          showToast('Large file (>100MB) — Forwarding directly to Telegram chat!');
+          showToast('Large file (>100MB) — Forwarding to Telegram chat for best quality!');
           forwardToTelegram(postId);
           closeVideoPlayer();
           return;
@@ -3966,13 +3941,6 @@ const rawHtml = `<!DOCTYPE html>
         if (activeStreamPostId) {
           forwardToTelegram(activeStreamPostId);
           closeVideoPlayer();
-        }
-      });
-      document.getElementById('btnVideoCopyStreamUrl')?.addEventListener('click', () => {
-        if (currentPlayingStreamUrl) {
-          const fullUrl = currentPlayingStreamUrl.startsWith('http') ? currentPlayingStreamUrl : (window.location.origin + currentPlayingStreamUrl);
-          navigator.clipboard.writeText(fullUrl);
-          showToast('📋 Stream link copied to clipboard!');
         }
       });
 

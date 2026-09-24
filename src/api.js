@@ -117,26 +117,38 @@ export function createRouter() {
   }));
 
   // -------------------------------------------------------------
-  // GET /api/stream - Stream Telegram videos directly (< 20MB)
+  // GET /api/stream - Secure Video Stream Proxy (No external URLs exposed)
   // -------------------------------------------------------------
   const handleStream = async (request, env) => {
     try {
       const url = new URL(request.url);
-      const fileId = url.searchParams.get('file_id');
-      if (!fileId) {
-        return errorResponse('Missing file_id parameter', 400);
+      const postId = url.searchParams.get('post_id') || url.searchParams.get('id');
+      let fileId = url.searchParams.get('file_id');
+      let channelMsgId = url.searchParams.get('msg_id');
+      let fileSize = 0;
+
+      // If post_id is provided, resolve file details from database securely
+      if (postId) {
+        const post = await getPostById(env, postId);
+        if (post && post.folders) {
+          const files = (post.folders || []).flatMap(f => f.files || []);
+          const videoFile = files.find(f => (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name))) || files[0];
+          if (videoFile) {
+            fileId = videoFile.file_id;
+            channelMsgId = videoFile.channel_message_id;
+            fileSize = Number(videoFile.size) || 0;
+          }
+        }
       }
 
-      // Fetch file metadata from Telegram Bot API
-      const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
-      const tgData = await tgRes.json();
-
-      if (!tgData.ok || !tgData.result?.file_path) {
-        return errorResponse('Telegram file not found or expired', 404);
+      if (!fileId && !channelMsgId) {
+        return errorResponse('Missing media identifier', 400);
       }
 
-      const filePath = tgData.result.file_path;
-      const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`;
+      // Check if file is > 20MB and Render streaming service is configured
+      const settings = await getSettings(env);
+      const renderUrl = (settings?.render_stream_url || '').replace(/\/+$/, '');
+      const storageChannel = env.CHANNEL_ID || '-1004415998750';
 
       const forwardHeaders = {};
       const rangeHeader = request.headers.get('Range');
@@ -144,25 +156,69 @@ export function createRouter() {
         forwardHeaders['Range'] = rangeHeader;
       }
 
-      const upstreamRes = await fetch(downloadUrl, {
-        headers: forwardHeaders
-      });
+      // 1. TIER 2 (20MB-100MB): Proxy via Render MTProto Stream Server if available
+      if (fileSize > 20 * 1024 * 1024 && renderUrl && channelMsgId) {
+        const renderStreamTarget = `${renderUrl}/stream?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(channelMsgId)}`;
+        const upstreamRes = await fetch(renderStreamTarget, { headers: forwardHeaders });
 
-      const responseHeaders = new Headers(corsHeaders);
-      responseHeaders.set('Accept-Ranges', 'bytes');
-      responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || 'video/mp4');
+        const responseHeaders = new Headers(corsHeaders);
+        responseHeaders.set('Accept-Ranges', 'bytes');
+        responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || 'video/mp4');
+        if (upstreamRes.headers.get('content-range')) {
+          responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
+        }
+        if (upstreamRes.headers.get('content-length')) {
+          responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
+        }
 
-      if (upstreamRes.headers.get('content-range')) {
-        responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
+        return new Response(upstreamRes.body, {
+          status: upstreamRes.status,
+          headers: responseHeaders
+        });
       }
-      if (upstreamRes.headers.get('content-length')) {
-        responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
+
+      // 2. TIER 1 (< 20MB): Proxy via Telegram Bot API with Range support
+      if (fileId) {
+        const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
+        const tgData = await tgRes.json();
+
+        if (tgData.ok && tgData.result?.file_path) {
+          const filePath = tgData.result.file_path;
+          const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`;
+
+          const upstreamRes = await fetch(downloadUrl, { headers: forwardHeaders });
+
+          const responseHeaders = new Headers(corsHeaders);
+          responseHeaders.set('Accept-Ranges', 'bytes');
+          responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || 'video/mp4');
+
+          if (upstreamRes.headers.get('content-range')) {
+            responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
+          }
+          if (upstreamRes.headers.get('content-length')) {
+            responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
+          }
+
+          return new Response(upstreamRes.body, {
+            status: upstreamRes.status,
+            headers: responseHeaders
+          });
+        }
       }
 
-      return new Response(upstreamRes.body, {
-        status: upstreamRes.status,
-        headers: responseHeaders
-      });
+      // Fallback: If Render service is configured and channelMsgId exists
+      if (renderUrl && channelMsgId) {
+        const renderStreamTarget = `${renderUrl}/stream?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(channelMsgId)}`;
+        const upstreamRes = await fetch(renderStreamTarget, { headers: forwardHeaders });
+        const responseHeaders = new Headers(corsHeaders);
+        responseHeaders.set('Accept-Ranges', 'bytes');
+        responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || 'video/mp4');
+        if (upstreamRes.headers.get('content-range')) responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
+        if (upstreamRes.headers.get('content-length')) responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
+        return new Response(upstreamRes.body, { status: upstreamRes.status, headers: responseHeaders });
+      }
+
+      return errorResponse('Stream media unavailable or exceeds file limits', 404);
     } catch (err) {
       console.error('API /api/stream error:', err);
       return errorResponse(err.message, 500);
