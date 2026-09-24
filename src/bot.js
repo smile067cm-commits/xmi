@@ -341,6 +341,114 @@ async function sendPostToUser(ctx, env, post, postId) {
 }
 
 /**
+ * Sends a single requested file directly to the user in Telegram
+ */
+export async function sendSingleFileToUser(ctx, env, post, file) {
+  let settings = {};
+  try {
+    settings = await getBotSettings(env) || {};
+  } catch (e) {
+    settings = {};
+  }
+
+  let autoDeleteMinutes = 0;
+  if (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined) {
+    const parsed = Number(post.auto_delete_minutes);
+    if (!isNaN(parsed) && parsed >= 0) autoDeleteMinutes = parsed;
+  } else if (settings.auto_delete_minutes !== null && settings.auto_delete_minutes !== undefined) {
+    const parsed = Number(settings.auto_delete_minutes);
+    if (!isNaN(parsed) && parsed >= 0) autoDeleteMinutes = parsed;
+  }
+  const protectContent = Boolean(settings.protect_all_posts || post.protect_content);
+
+  const sentMessageIds = [];
+  const sizeMB = file.size ? (Number(file.size) / (1024 * 1024)).toFixed(1) : 'Unknown';
+  const fileName = file.file_name || 'File';
+
+  const captionText = `📁 *${escapeMarkdown(fileName)}*\n` +
+    `📦 *Size:* \`${sizeMB} MB\`\n` +
+    `📌 *From Post:* \`${escapeMarkdown(post.title)}\``;
+
+  try {
+    if (file.channel_message_id && env.CHANNEL_ID) {
+      const copied = await ctx.telegram.copyMessage(
+        ctx.chat.id,
+        env.CHANNEL_ID,
+        Number(file.channel_message_id),
+        { protect_content: protectContent, caption: captionText, parse_mode: 'Markdown' }
+      );
+      if (copied?.message_id) sentMessageIds.push(copied.message_id);
+    } else if (file.file_id) {
+      const isVideo = (file.mime_type && file.mime_type.startsWith('video/')) || /\.(mp4|mkv|mov|webm)$/i.test(fileName);
+      let sentMsg;
+      if (isVideo) {
+        sentMsg = await ctx.telegram.sendVideo(ctx.chat.id, file.file_id, {
+          caption: captionText,
+          parse_mode: 'Markdown',
+          protect_content: protectContent
+        }).catch(async () => {
+          return await ctx.telegram.sendDocument(ctx.chat.id, file.file_id, {
+            caption: captionText,
+            parse_mode: 'Markdown',
+            protect_content: protectContent
+          });
+        });
+      } else {
+        sentMsg = await ctx.telegram.sendDocument(ctx.chat.id, file.file_id, {
+          caption: captionText,
+          parse_mode: 'Markdown',
+          protect_content: protectContent
+        });
+      }
+      if (sentMsg?.message_id) sentMessageIds.push(sentMsg.message_id);
+    }
+  } catch (fileErr) {
+    console.warn(`Failed to deliver single file ${file.id}:`, fileErr.message);
+    await ctx.reply(`⚠️ Failed to deliver file: ${fileErr.message}`);
+  }
+
+  if (autoDeleteMinutes > 0) {
+    const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
+    const noticeText = `⏳ ⚠️ *Auto-Delete Notice:*\n\n` +
+      `This file will automatically delete in *${minuteUnit}* to protect content!\n\n` +
+      (protectContent
+        ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
+        : `👉 *Please forward or save to your Saved Messages now before it disappears.*`);
+
+    const appUrl = env.WEB_APP_URL || 'https://xmi.lakshminighty1.workers.dev';
+    const userAppUrl = appUrl ? (appUrl.includes('?') ? `${appUrl}&user_id=${ctx.from?.id}` : `${appUrl}?user_id=${ctx.from?.id}`) : appUrl;
+    const noticeButtons = [];
+    if (userAppUrl.startsWith('https://')) {
+      noticeButtons.push([Markup.button.webApp('🚀 Open Mini App', userAppUrl)]);
+    }
+
+    try {
+      const noticeMsg = await ctx.reply(noticeText, {
+        parse_mode: 'Markdown',
+        protect_content: protectContent,
+        ...(noticeButtons.length > 0 ? Markup.inlineKeyboard(noticeButtons) : {})
+      });
+      if (noticeMsg?.message_id) sentMessageIds.push(noticeMsg.message_id);
+    } catch (nErr) {
+      console.warn('Failed to send auto-delete notice:', nErr.message);
+    }
+
+    if (sentMessageIds.length > 0) {
+      const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
+      const records = sentMessageIds.map(mid => ({
+        chat_id: ctx.chat.id,
+        message_id: mid,
+        delete_at: deleteAt,
+        is_deleted: false
+      }));
+      await addEphemeralMessages(env, records).catch(e => console.warn('Ephemeral add error:', e.message));
+    }
+  }
+
+  processEphemeralDeletions(env).catch(e => console.warn('Ephemeral cleanup warning:', e.message));
+}
+
+/**
  * Creates and configures the Telegraf Bot instance
  */
 export function createBot(env) {
@@ -687,6 +795,84 @@ export function createBot(env) {
       }
     }
 
+    // 3a. Single File Deep Link: file_<post_id>_<file_id>
+    const singleFileMatch = payload.match(/^file_(\d+)_(\d+)$/);
+    if (singleFileMatch) {
+      const postId = singleFileMatch[1];
+      const targetFileId = Number(singleFileMatch[2]);
+
+      try {
+        const isAdmin = await isAdminUser(env, ctx.from?.id);
+        const post = await getPostById(env, postId, ctx.from?.id, isAdmin);
+
+        if (!post) {
+          return await ctx.reply('⚠️ Post or file not found.', {
+            ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+          });
+        }
+
+        if (post.status !== 'published' && !isAdmin) {
+          return await ctx.reply('🔒 This post is not yet published.', {
+            ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+          });
+        }
+
+        // Force Join Check
+        const fj = await checkForceJoin(ctx, env, ctx.from?.id);
+        if (!fj.passed) {
+          const buttons = fj.unjoined.map(ch => [Markup.button.url(`📢 Join ${ch.channel_title}`, ch.invite_link)]);
+          buttons.push([Markup.button.callback('🔄 I Have Joined (Check Again)', `check_force_file_${postId}_${targetFileId}`)]);
+          buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
+
+          return await ctx.reply(
+            `🔒 *Channel Membership Required*\n\nTo download this file, please join our official channels below:`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
+          );
+        }
+
+        // Shortener & Points Locker Check
+        const locker = await checkLockerPass(ctx, env, ctx.from?.id, postId);
+        if (!locker.passed) {
+          const buttons = [
+            [Markup.button.url(`🔗 Complete Task (+${locker.rewardPoints} Pts)`, locker.verifyUrl)],
+            [Markup.button.callback('🔄 Regenerate Link', `regen_verify_${postId}`)],
+            [Markup.button.callback('🎁 Invite Friends', 'user_menu_invite')],
+            [Markup.button.callback('🔙 Main Menu', 'main_menu')]
+          ];
+
+          return await ctx.reply(
+            `🔐 *Points Required for Download*\n\n` +
+            `• *Post Title:* \`${escapeMarkdown(post.title)}\`\n` +
+            `• *Points Required:* \`${locker.requiredPoints} Points\` 🪙\n` +
+            `• *Your Current Balance:* \`${locker.currentPoints} Points\` 🪙\n\n` +
+            `Complete a quick task (+${locker.rewardPoints} Points) or invite friends to unlock access:`,
+            { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) }
+          );
+        }
+
+        recordPostView(env, {
+          post_id: Number(postId),
+          user_id: Number(ctx.from.id),
+          username: ctx.from.username || null,
+          first_name: ctx.from.first_name || ''
+        }).catch(() => {});
+
+        const allFiles = (post.folders || []).flatMap(f => f.files || []);
+        const targetFile = allFiles.find(f => Number(f.id) === targetFileId || Number(f.channel_message_id) === targetFileId);
+
+        if (!targetFile) {
+          return await ctx.reply('⚠️ Requested file was not found in this post.', {
+            ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Main Menu', 'main_menu')]])
+          });
+        }
+
+        return await sendSingleFileToUser(ctx, env, post, targetFile);
+      } catch (err) {
+        console.error('Error handling /start file deep-link:', err);
+        return await ctx.reply('⚠️ Error loading file. Please try again.');
+      }
+    }
+
     // 3. Post Deep Link: post_<post_id> or post<post_id>
     const postMatch = payload.match(/^post_?(\d+)$/);
     if (postMatch) {
@@ -905,6 +1091,37 @@ export function createBot(env) {
     if (!post) return await ctx.reply('⚠️ Post not found.');
 
     return await sendPostToUser(ctx, env, post, postId);
+  });
+
+  bot.action(/^check_force_file_(\d+)_(\d+)$/, async (ctx) => {
+    const postId = ctx.match[1];
+    const targetFileId = Number(ctx.match[2]);
+    await ctx.answerCbQuery('Checking membership...');
+
+    const fj = await checkForceJoin(ctx, env, ctx.from?.id);
+    if (!fj.passed) {
+      const buttons = fj.unjoined.map(ch => [Markup.button.url(`📢 Join ${ch.channel_title}`, ch.invite_link)]);
+      buttons.push([Markup.button.callback('🔄 I Have Joined (Check Again)', `check_force_file_${postId}_${targetFileId}`)]);
+      buttons.push([Markup.button.callback('🔙 Main Menu', 'main_menu')]);
+
+      return await ctx.reply(
+        `⚠️ You have not joined all required channels yet. Please join them first:`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard(buttons)
+        }
+      );
+    }
+
+    const isAdmin = await isAdminUser(env, ctx.from?.id);
+    const post = await getPostById(env, postId, ctx.from?.id, isAdmin);
+    if (!post) return await ctx.reply('⚠️ Post not found.');
+
+    const allFiles = (post.folders || []).flatMap(f => f.files || []);
+    const targetFile = allFiles.find(f => Number(f.id) === targetFileId || Number(f.channel_message_id) === targetFileId);
+    if (!targetFile) return await ctx.reply('⚠️ Requested file was not found.');
+
+    return await sendSingleFileToUser(ctx, env, post, targetFile);
   });
 
   // -------------------------------------------------------------
