@@ -24,6 +24,7 @@ crons = ["* * * * *"]
 [vars]
 BOT_USERNAME = "Xminty_bot"
 WEB_APP_URL = "https://xmi.lakshminighty1.workers.dev"
+RENDER_STREAM_URL = "https://xmi-stream-bot.onrender.com"
 
 # -------------------------------------------------------------
 # Secrets to set via Cloudflare Dashboard or `npx wrangler secret put`:

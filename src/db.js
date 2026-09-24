@@ -1081,7 +1081,13 @@ export async function getSettings(env) {
     categories: (Array.isArray(map.categories) && map.categories.length > 0)
       ? map.categories
       : ['All', 'Movies', 'Series', 'Courses', 'Software', 'Music', 'Tutorials'],
-    shorteners: Array.isArray(map.shorteners) ? map.shorteners : []
+    shorteners: Array.isArray(map.shorteners) ? map.shorteners : [],
+    stream_enabled: map.stream_enabled !== false,
+    render_stream_url: map.render_stream_url || env.RENDER_STREAM_URL || 'https://xmi-stream-bot.onrender.com',
+    adsgram_enabled: Boolean(map.adsgram_enabled),
+    adsgram_rewarded_block_id: map.adsgram_rewarded_block_id || '',
+    adsgram_interstitial_block_id: map.adsgram_interstitial_block_id || '',
+    adsgram_preroll_enabled: Boolean(map.adsgram_preroll_enabled)
   };
 
   cachedSettings = parsed;
