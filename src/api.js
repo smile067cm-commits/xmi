@@ -104,7 +104,6 @@ export function createRouter() {
 
   router.head('/', serveHead);
   router.head('/app', serveHead);
-  router.head('*', serveHead);
 
   router.get('/', serveApp);
   router.get('/app', serveApp);
@@ -178,6 +177,8 @@ export function createRouter() {
 
       const isImage = Boolean(detectedMime && detectedMime.startsWith('image/'));
 
+      const isHead = request.method === 'HEAD';
+
       // Helper to fetch and cache Telegram file path
       const getTelegramFilePath = async (fid) => {
         const cached = tgFilePathCache.get(fid);
@@ -221,13 +222,17 @@ export function createRouter() {
             const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${fileInfo.filePath}`;
             const effectiveMime = fileInfo.detectedMime || detectedMime || 'video/mp4';
 
-            const upstreamRes = await fetch(downloadUrl, { headers: forwardHeaders });
+            const upstreamRes = await fetch(downloadUrl, {
+              method: isHead ? 'HEAD' : 'GET',
+              headers: forwardHeaders
+            });
 
             if (upstreamRes.ok || upstreamRes.status === 206) {
               const responseHeaders = new Headers(corsHeaders);
               responseHeaders.set('Accept-Ranges', 'bytes');
               responseHeaders.set('Content-Type', effectiveMime);
               responseHeaders.set('Content-Disposition', 'inline');
+              responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
 
               if (effectiveMime.startsWith('image/')) {
                 responseHeaders.set('Cache-Control', 'public, max-age=604800, immutable');
@@ -242,7 +247,7 @@ export function createRouter() {
                 responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
               }
 
-              return new Response(upstreamRes.body, {
+              return new Response(isHead ? null : upstreamRes.body, {
                 status: upstreamRes.status,
                 headers: responseHeaders
               });
@@ -257,14 +262,18 @@ export function createRouter() {
       if (renderUrl && channelMsgId) {
         try {
           const renderStreamTarget = `${renderUrl}/stream?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(channelMsgId)}`;
-          const upstreamRes = await fetch(renderStreamTarget, { headers: forwardHeaders });
+          const upstreamRes = await fetch(renderStreamTarget, {
+            method: isHead ? 'HEAD' : 'GET',
+            headers: forwardHeaders
+          });
 
           if (upstreamRes.ok || upstreamRes.status === 206) {
             const responseHeaders = new Headers(corsHeaders);
             responseHeaders.set('Accept-Ranges', 'bytes');
-            responseHeaders.set('Content-Type', detectedMime || 'video/mp4');
+            responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || detectedMime || 'video/mp4');
             responseHeaders.set('Content-Disposition', 'inline');
             responseHeaders.set('Cache-Control', 'no-cache');
+            responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
 
             if (upstreamRes.headers.get('content-range')) {
               responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
@@ -273,7 +282,7 @@ export function createRouter() {
               responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
             }
 
-            return new Response(upstreamRes.body, {
+            return new Response(isHead ? null : upstreamRes.body, {
               status: upstreamRes.status,
               headers: responseHeaders
             });
@@ -289,16 +298,20 @@ export function createRouter() {
           const fileInfo = await getTelegramFilePath(fileId);
           if (fileInfo && fileInfo.filePath) {
             const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${fileInfo.filePath}`;
-            const upstreamRes = await fetch(downloadUrl, { headers: forwardHeaders });
+            const upstreamRes = await fetch(downloadUrl, {
+              method: isHead ? 'HEAD' : 'GET',
+              headers: forwardHeaders
+            });
             if (upstreamRes.ok || upstreamRes.status === 206) {
               const responseHeaders = new Headers(corsHeaders);
               responseHeaders.set('Accept-Ranges', 'bytes');
               responseHeaders.set('Content-Type', fileInfo.detectedMime || detectedMime || 'video/mp4');
               responseHeaders.set('Content-Disposition', 'inline');
               responseHeaders.set('Cache-Control', 'no-cache');
+              responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
               if (upstreamRes.headers.get('content-range')) responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
               if (upstreamRes.headers.get('content-length')) responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
-              return new Response(upstreamRes.body, { status: upstreamRes.status, headers: responseHeaders });
+              return new Response(isHead ? null : upstreamRes.body, { status: upstreamRes.status, headers: responseHeaders });
             }
           }
         } catch (_) {}

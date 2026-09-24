@@ -580,6 +580,39 @@ const rawHtml = `<!DOCTYPE html>
       }
     }
 
+    /* Video Player Fullscreen Fallback for Mobile WebViews */
+    #postVideoPlayerWrap.fullscreen-fallback {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
+      bottom: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-height: 100vh !important;
+      z-index: 999999 !important;
+      background: #000 !important;
+      border-radius: 0 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    #postVideoPlayerWrap.fullscreen-fallback video {
+      max-height: 100vh !important;
+      height: 100% !important;
+      width: 100% !important;
+      object-fit: contain !important;
+      border-radius: 0 !important;
+    }
+    #postVideoPlayerWrap.fullscreen-fallback #btnVideoExitFullscreen {
+      display: flex !important;
+    }
+    #postVideoPlayerWrap.fullscreen-fallback #btnVideoFullscreen {
+      display: none !important;
+    }
+
     /* Post Card */
     .post-card {
       background: var(--card-bg);
@@ -4029,9 +4062,16 @@ const rawHtml = `<!DOCTYPE html>
               '<div style="font-size: 0.74rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 12px; font-weight: 700; flex-shrink: 0;" id="postActiveVideoSize">' + firstSizeMB + ' MB</div>' +
               '</div>' +
 
-              // EXACTLY 1 VIDEO PLAYER IN THE DOM
-              '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" oncontextmenu="return false;">' +
-              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture preload="auto" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
+              // EXACTLY 1 VIDEO PLAYER IN THE DOM WITH FULLSCREEN CAPABILITY
+              '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" id="postVideoPlayerWrap" oncontextmenu="return false;">' +
+              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" preload="metadata" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
+              '<button type="button" id="btnVideoFullscreen" style="position: absolute; top: 10px; right: 10px; z-index: 10; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; padding: 5px 10px; font-size: 0.76rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 5px; backdrop-filter: blur(4px);">⛶ Fullscreen</button>' +
+              '<button type="button" id="btnVideoExitFullscreen" style="display: none; position: absolute; top: 16px; right: 16px; z-index: 1000000; background: rgba(239,68,68,0.85); color: #fff; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.8);">✕</button>' +
+              '</div>' +
+
+              // Fullscreen bar below the player
+              '<div style="display: flex; gap: 8px; margin-top: 10px;">' +
+              '<button type="button" id="btnVideoFullscreenBar" class="btn btn-secondary btn-sm" style="flex: 1; padding: 10px; font-weight: 700; font-size: 0.82rem; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 6px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8;">⛶ Watch in Full Screen</button>' +
               '</div>';
 
             // Playlist for streamable videos (tapping any switches active video)
@@ -4112,6 +4152,24 @@ const rawHtml = `<!DOCTYPE html>
             '</div>';
 
           bodyEl.innerHTML = html;
+
+          // Attach error fallback for resilient video playback
+          const playerEl = document.getElementById('postActiveVideoPlayer');
+          if (playerEl && videosForPlayer.length > 0) {
+            const firstV = videosForPlayer[0];
+            playerEl.onerror = () => {
+              if (firstV && firstV.channel_message_id) {
+                const directUrl = 'https://xmi-stream-bot.onrender.com/stream?channel_id=-1004415998750&msg_id=' + encodeURIComponent(firstV.channel_message_id);
+                if (playerEl.src !== directUrl) {
+                  console.log('Proxy stream notice, retrying with direct Render stream:', directUrl);
+                  playerEl.src = directUrl;
+                  playerEl.load();
+                  playerEl.play().catch(() => {});
+                }
+              }
+            };
+          }
+
           if (typeof trackPostView === 'function' && post.id) {
             trackPostView(post.id);
           }
@@ -4307,16 +4365,45 @@ const rawHtml = `<!DOCTYPE html>
                 }
               });
 
-              player.preload = 'auto';
+              player.preload = 'metadata';
               player.src = streamSrc;
               player.load();
               player.play().catch(e => console.log('Autoplay notice:', e));
+
+              player.onerror = () => {
+                if (vid.channel_message_id) {
+                  const directUrl = 'https://xmi-stream-bot.onrender.com/stream?channel_id=-1004415998750&msg_id=' + encodeURIComponent(vid.channel_message_id);
+                  if (player.src !== directUrl) {
+                    console.log('Video error, switching to direct Render stream:', directUrl);
+                    player.src = directUrl;
+                    player.load();
+                    player.play().catch(() => {});
+                  }
+                }
+              };
             }
           }
           return;
         }
 
-        // 6. Send entire post / all files to bot
+        // 6. Fullscreen button clicked
+        const fsBtn = e.target.closest('#btnVideoFullscreen, #btnVideoFullscreenBar');
+        if (fsBtn) {
+          e.stopPropagation();
+          toggleVideoFullscreen();
+          return;
+        }
+
+        // 7. Fullscreen exit button clicked
+        const exitFsBtn = e.target.closest('#btnVideoExitFullscreen');
+        if (exitFsBtn) {
+          e.stopPropagation();
+          const wrap = document.getElementById('postVideoPlayerWrap');
+          if (wrap) wrap.classList.remove('fullscreen-fallback');
+          return;
+        }
+
+        // 8. Send entire post / all files to bot
         const sendBotBtn = e.target.closest('[data-act="send-file-bot"]');
         if (sendBotBtn) {
           const postId = sendBotBtn.dataset.id || (currentDetailPost ? currentDetailPost.id : null);
@@ -4324,6 +4411,50 @@ const rawHtml = `<!DOCTYPE html>
           return;
         }
       });
+
+      // Double-click on video to toggle fullscreen
+      document.getElementById('postDetailPageBody')?.addEventListener('dblclick', (e) => {
+        if (e.target.id === 'postActiveVideoPlayer') {
+          toggleVideoFullscreen();
+        }
+      });
+
+      function toggleVideoFullscreen() {
+        const player = document.getElementById('postActiveVideoPlayer');
+        const wrap = document.getElementById('postVideoPlayerWrap');
+        if (!player) return;
+
+        // Exit fallback fullscreen if active
+        if (wrap && wrap.classList.contains('fullscreen-fallback')) {
+          wrap.classList.remove('fullscreen-fallback');
+          return;
+        }
+
+        // Exit native document fullscreen if active
+        if (document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement) {
+          const exitFs = document.exitFullscreen || document.webkitExitFullscreen || document.mozCancelFullScreen || document.msExitFullscreen;
+          if (exitFs) exitFs.call(document).catch(() => {});
+          return;
+        }
+
+        // 1. Try iOS / Safari WebKit native video fullscreen
+        if (typeof player.webkitEnterFullscreen === 'function') {
+          try {
+            player.webkitEnterFullscreen();
+            return;
+          } catch (_) {}
+        }
+
+        // 2. Try standard or webkit requestFullscreen
+        const reqFs = player.requestFullscreen || player.webkitRequestFullscreen || player.webkitRequestFullScreen || player.mozRequestFullScreen || player.msRequestFullscreen;
+        if (reqFs) {
+          reqFs.call(player).catch(() => {
+            if (wrap) wrap.classList.add('fullscreen-fallback');
+          });
+        } else if (wrap) {
+          wrap.classList.add('fullscreen-fallback');
+        }
+      }
 
       // Touch swipe gestures for main photos in post detail page
       let pSwipeStartX = 0;
