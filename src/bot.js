@@ -33,6 +33,9 @@ import {
   addEphemeralMessages,
   processEphemeralDeletions,
   getAllUserIds,
+  getAllRegisteredUserIds,
+  getActiveUserIds,
+  getBlockedUserIds,
   getAllUsers,
   getUser,
   isAdminUser,
@@ -1402,8 +1405,16 @@ export function createBot(env) {
       const timerLabel = (post.auto_delete_minutes !== null && post.auto_delete_minutes !== undefined)
         ? (post.auto_delete_minutes === 0 ? 'Disabled (0m)' : `${post.auto_delete_minutes}m`)
         : 'Default';
+      const botUsername = env.BOT_USERNAME || ctx.botInfo?.username || 'Xminty_bot';
+      const botPostUrl = `https://t.me/${botUsername}?start=post_${post.id}`;
+      const miniAppPostUrl = `https://t.me/${botUsername}/app?startapp=post_${post.id}`;
+      const webUrl = env.WEB_APP_URL ? `${env.WEB_APP_URL.replace(/\/$/, '')}?post_id=${post.id}` : '';
 
       const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('🔗 📋 Get / Copy Links', `admin_post_links_${post.id}`),
+          Markup.button.callback('📢 Broadcast Post', `admin_bc_post_ask_${post.id}`)
+        ],
         [
           Markup.button.callback('✏️ Edit Title', `admin_edit_title_${post.id}`),
           Markup.button.callback('🖼️ Edit Image', `admin_edit_img_${post.id}`)
@@ -1430,9 +1441,6 @@ export function createBot(env) {
           )
         ],
         [
-          Markup.button.callback('📢 Broadcast Post to Users', `admin_bc_post_ask_${post.id}`)
-        ],
-        [
           Markup.button.callback('🗑️ Delete Post', `admin_post_del_ask_${post.id}`)
         ],
         [
@@ -1453,7 +1461,11 @@ export function createBot(env) {
         `• *Views:* ${post.view_count || 0}\n` +
         `• *Likes:* ${post.like_count}\n` +
         `• *Comments:* ${post.comment_count}\n` +
-        (post.direct_link ? `• *Direct Link:* ${escapeMarkdown(post.direct_link)}\n` : ''),
+        (post.direct_link ? `• *Direct Link:* ${escapeMarkdown(post.direct_link)}\n` : '') +
+        `\n🔗 *Direct Links (Tap to copy):*\n` +
+        `• 🤖 *Bot:* \`${botPostUrl}\`\n` +
+        `• 📱 *App:* \`${miniAppPostUrl}\`\n` +
+        (webUrl ? `• 🌐 *Web:* \`${webUrl}\`\n` : ''),
         {
           parse_mode: 'Markdown',
           ...keyboard
@@ -1462,6 +1474,62 @@ export function createBot(env) {
     } catch (err) {
       console.error('Error viewing admin post:', err);
       await ctx.answerCbQuery('Error loading post');
+    }
+  });
+
+  // Dedicated Post Links & Sharing Viewer
+  bot.action(/^admin_post_links_(\d+)$/, async (ctx) => {
+    const userId = ctx.from.id;
+    if (!(await isAdminUser(env, userId))) return;
+
+    const postId = ctx.match[1];
+    try {
+      const post = await getPostById(env, postId, userId, true);
+      if (!post) {
+        await ctx.answerCbQuery('Post not found');
+        return;
+      }
+      await ctx.answerCbQuery();
+      const botUsername = env.BOT_USERNAME || ctx.botInfo?.username || 'Xminty_bot';
+      const botPostUrl = `https://t.me/${botUsername}?start=post_${post.id}`;
+      const miniAppPostUrl = `https://t.me/${botUsername}/app?startapp=post_${post.id}`;
+      const webUrl = env.WEB_APP_URL ? `${env.WEB_APP_URL.replace(/\/$/, '')}?post_id=${post.id}` : '';
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(botPostUrl)}&text=${encodeURIComponent(`Check out "${post.title}"!`)}`;
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.url('🤖 Open Bot Link', botPostUrl),
+          Markup.button.url('📱 Open Mini App', miniAppPostUrl)
+        ],
+        [
+          Markup.button.url('📤 Share Link to Telegram', shareUrl),
+          Markup.button.callback('📢 Broadcast Post', `admin_bc_post_ask_${post.id}`)
+        ],
+        [
+          Markup.button.callback('🔙 Return to Post', `admin_post_view_${post.id}`)
+        ]
+      ]);
+
+      let msg = `🔗 *Direct Links for Post #${post.id}*\n\n` +
+        `📌 *Title:* *${escapeMarkdown(post.title)}*\n\n` +
+        `🤖 *Telegram Bot Deep Link:*\n` +
+        `\`${botPostUrl}\`\n_(Tap to copy • Opens this post directly in the bot)_\n\n` +
+        `📱 *Telegram Mini App Link:*\n` +
+        `\`${miniAppPostUrl}\`\n_(Tap to copy • Opens this post inside the Mini App)_\n\n`;
+
+      if (webUrl) {
+        msg += `🌐 *Direct Web Link:*\n\`${webUrl}\`\n_(Tap to copy)_\n\n`;
+      }
+
+      msg += `💡 *Tip:* Send either link to users or channels; tapping it immediately loads this exact post!`;
+
+      return await ctx.reply(msg, {
+        parse_mode: 'Markdown',
+        ...keyboard
+      });
+    } catch (e) {
+      console.error('Error showing post links:', e);
+      await ctx.answerCbQuery('Error loading links');
     }
   });
 
@@ -1774,27 +1842,37 @@ export function createBot(env) {
     const postId = ctx.match[1];
     try {
       const post = await getPostById(env, postId, userId, true);
+      if (!post) {
+        await ctx.answerCbQuery('Post not found');
+        return;
+      }
       await ctx.answerCbQuery();
 
-      const userIds = await getAllRegisteredUserIds(env);
+      const allUserIds = await getAllUserIds(env);
+      const blockedSet = await getBlockedUserIds(env);
+      const activeUserIds = allUserIds.filter(id => !blockedSet.has(String(id)));
+
       const keyboard = Markup.inlineKeyboard([
-        [Markup.button.callback('📢 Yes, Broadcast to All Users', `admin_bc_post_confirm_${postId}`)],
+        [Markup.button.callback(`📢 Yes, Broadcast to ${activeUserIds.length} Users`, `admin_bc_post_confirm_${postId}`)],
         [Markup.button.callback('❌ Cancel', `admin_post_view_${postId}`)]
       ]);
 
       return await ctx.reply(
         `📢 *Broadcast Post Confirmation*\n\n` +
-        `• *Post:* *"${escapeMarkdown(post?.title || 'Post #' + postId)}"*\n` +
-        `• *Target Audience:* ${userIds.length} registered users\n` +
-        `• *Protection:* ${post?.protect_content ? '🔒 Enabled' : '🔓 Disabled'}\n\n` +
-        `Are you sure you want to broadcast this post to all users now?`,
+        `• *Post:* *"${escapeMarkdown(post.title || 'Post #' + postId)}"*\n` +
+        `• *Active Target Audience:* \`${activeUserIds.length}\` users\n` +
+        `• *Blocked/Excluded:* \`${blockedSet.size}\` users\n` +
+        `• *Total Registered:* \`${allUserIds.length}\` users\n` +
+        `• *Protection:* ${post.protect_content ? '🔒 Enabled (No Forward/Save)' : '🔓 Disabled'}\n\n` +
+        `Are you sure you want to broadcast this post to all active users now?`,
         {
           parse_mode: 'Markdown',
           ...keyboard
         }
       );
     } catch (e) {
-      await ctx.answerCbQuery('Error');
+      console.error('Error in admin_bc_post_ask:', e);
+      await ctx.answerCbQuery('Error loading broadcast details');
     }
   });
 
@@ -1810,8 +1888,12 @@ export function createBot(env) {
         return await ctx.reply('⚠️ Post not found.');
       }
       await ctx.answerCbQuery('Starting broadcast...');
-      const userIds = await getAllRegisteredUserIds(env);
-      await ctx.reply(`📡 Broadcasting post *"${escapeMarkdown(post.title)}"* to ${userIds.length} users in background...`, { parse_mode: 'Markdown' });
+
+      const allUserIds = await getAllUserIds(env);
+      const blockedSet = await getBlockedUserIds(env);
+      const targetUserIds = allUserIds.filter(id => !blockedSet.has(String(id)));
+
+      await ctx.reply(`📡 Broadcasting post *"${escapeMarkdown(post.title)}"* to \`${targetUserIds.length}\` active users in background...`, { parse_mode: 'Markdown' });
 
       const settings = await getSettings(env);
       const hubTimer = parseInt(settings.auto_delete_minutes || 0, 10);
@@ -1820,16 +1902,30 @@ export function createBot(env) {
         : hubTimer;
       const protectContent = !!(post.protect_content ?? (settings.protect_content === 'true' || settings.protect_content === true));
 
-      const miniAppUrl = env.APP_URL || 'https://telegram.org';
-      const webAppUrl = `${miniAppUrl.replace(/\/$/, '')}?post_id=${post.id}`;
+      const botUsername = env.BOT_USERNAME || ctx.botInfo?.username || 'Xminty_bot';
+      const appUrl = `https://t.me/${botUsername}/app?startapp=post_${post.id}`;
+      const botPostUrl = `https://t.me/${botUsername}?start=post_${post.id}`;
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(botPostUrl)}&text=${encodeURIComponent(`Check out "${post.title}"!`)}`;
+
+      // Construct Buttons
       const inlineButtons = [];
       if (post.direct_link) {
-        inlineButtons.push([Markup.button.url(post.link_name || '🔗 Access Link', post.direct_link)]);
+        inlineButtons.push([
+          Markup.button.callback('📥 Get File / Download', `bot_get_post_${post.id}`),
+          Markup.button.url(post.direct_link_title || '🔗 Access Link', post.direct_link)
+        ]);
+      } else {
+        inlineButtons.push([
+          Markup.button.callback('📥 Get File / Download', `bot_get_post_${post.id}`)
+        ]);
       }
-      inlineButtons.push([Markup.button.webApp('🚀 Open in App', webAppUrl)]);
+      inlineButtons.push([
+        Markup.button.url('🚀 Open in Mini App', appUrl),
+        Markup.button.url('📤 Share Post', shareUrl)
+      ]);
 
       const captionText = `📌 *${escapeMarkdown(post.title)}*\n\n` +
-        (post.category ? `🏷️ *Category:* ${escapeMarkdown(post.category)}\n` : '') +
+        (post.category && post.category !== 'All' ? `🏷️ *Category:* ${escapeMarkdown(post.category)}\n` : '') +
         (post.tags ? `🔖 *Tags:* ${escapeMarkdown(post.tags)}\n\n` : '\n') +
         `👇 Tap below to view details and access files!`;
 
@@ -1838,12 +1934,13 @@ export function createBot(env) {
       const failedDetails = [];
       const ephemeralRecords = [];
 
-      for (const targetId of userIds) {
+      for (const targetId of targetUserIds) {
         try {
           let sentMid = null;
-          if (post.preview_image_url) {
+          const previewImg = post.preview_image;
+          if (previewImg && (previewImg.startsWith('http://') || previewImg.startsWith('https://'))) {
             try {
-              const res = await ctx.telegram.sendPhoto(targetId, post.preview_image_url, {
+              const res = await ctx.telegram.sendPhoto(targetId, previewImg, {
                 caption: captionText,
                 parse_mode: 'Markdown',
                 protect_content: protectContent,
@@ -1851,7 +1948,7 @@ export function createBot(env) {
               });
               sentMid = res.message_id;
               sentCount++;
-            } catch {
+            } catch (pErr) {
               const res = await ctx.telegram.sendMessage(targetId, captionText, {
                 parse_mode: 'Markdown',
                 protect_content: protectContent,
@@ -1910,7 +2007,11 @@ export function createBot(env) {
           }
         } catch (targetErr) {
           failedCount++;
-          failedDetails.push({ user_id: targetId, reason: targetErr.message || 'Error' });
+          const errMsg = targetErr.message || String(targetErr);
+          failedDetails.push({ user_id: targetId, reason: errMsg });
+          if (/blocked|deactivated|chat not found|user is deactivated/i.test(errMsg)) {
+            await updateUserBlockedStatus(env, targetId, true);
+          }
         }
       }
 

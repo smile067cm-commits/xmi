@@ -30,6 +30,8 @@ import {
   verifyTokenAndGrantPass,
   checkAndDeductPostAccess,
   getAllUserIds,
+  getActiveUserIds,
+  getBlockedUserIds,
   getAllUsers,
   saveOrUpdateUser,
   getUser,
@@ -1305,10 +1307,12 @@ export function createRouter() {
       }
 
       let userIds = [];
+      const blockedSet = await getBlockedUserIds(env);
       if (Array.isArray(body.target_user_ids) && body.target_user_ids.length > 0) {
-        userIds = body.target_user_ids.map(Number).filter(id => !isNaN(id) && id > 0);
+        userIds = body.target_user_ids.map(Number).filter(id => !isNaN(id) && id > 0 && !blockedSet.has(String(id)));
       } else {
-        userIds = await getAllUserIds(env);
+        const allUsers = await getAllUserIds(env);
+        userIds = allUsers.filter(id => !blockedSet.has(String(id)));
       }
 
       if (!userIds || userIds.length === 0) {
@@ -1332,12 +1336,28 @@ export function createRouter() {
       }
       const protectContent = Boolean(settings.protect_all_posts || post.protect_content);
 
+      const botUsername = env.BOT_USERNAME || 'Xminty_bot';
+      const botPostUrl = `https://t.me/${botUsername}?start=post_${post.id}`;
+      const appUrl = `https://t.me/${botUsername}/app?startapp=post_${post.id}`;
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(botPostUrl)}&text=${encodeURIComponent(`Check out "${post.title}"!`)}`;
+
       // Construct Buttons
       const inlineButtons = [];
       if (post.direct_link) {
-        const linkLabel = post.direct_link_title || 'Open / Download Link';
-        inlineButtons.push([{ text: `📥 ${linkLabel}`, url: post.direct_link }]);
+        const linkLabel = post.direct_link_title || 'Access Link';
+        inlineButtons.push([
+          { text: '📥 Get Files in Bot', url: botPostUrl },
+          { text: `🔗 ${linkLabel}`, url: post.direct_link }
+        ]);
+      } else {
+        inlineButtons.push([
+          { text: '📥 Get Files in Bot', url: botPostUrl }
+        ]);
       }
+      inlineButtons.push([
+        { text: '🚀 Open in Mini App', url: appUrl },
+        { text: '📤 Share Post', url: shareUrl }
+      ]);
       if (folders && folders.length > 0) {
         for (const folder of folders) {
           for (const file of folder.files || []) {
@@ -1478,13 +1498,20 @@ export function createRouter() {
               user_id: targetId,
               reason: sendError || 'Delivery failed'
             });
+            if (/blocked|deactivated|chat not found/i.test(sendError)) {
+              await updateUserBlockedStatus(env, targetId, true);
+            }
           }
         } catch (uErr) {
           failedCount++;
+          const errText = uErr.message || 'Network exception';
           failedDetails.push({
             user_id: targetId,
-            reason: uErr.message || 'Network exception'
+            reason: errText
           });
+          if (/blocked|deactivated|chat not found/i.test(errText)) {
+            await updateUserBlockedStatus(env, targetId, true);
+          }
         }
       }
 

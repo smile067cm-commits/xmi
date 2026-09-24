@@ -1575,9 +1575,68 @@ const rawHtml = `<!DOCTYPE html>
           </div>
           <div style="display: flex; gap: 8px; margin-top: 8px;">
             <button type="submit" class="btn btn-primary" style="flex: 1;">💾 Save</button>
-            <button type="button" class="btn btn-ghost" style="color: #f87171;" id="btnDeleteFromEdit">🗑️ Delete</button>
+            <button type="button" class="btn btn-ghost" style="color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);" id="btnLinksFromEdit">🔗 Links</button>
+            <button type="button" class="btn btn-ghost" style="color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3);" id="btnBroadcastFromEdit">📢 Broadcast</button>
+            <button type="button" class="btn btn-ghost" style="color: #f87171;" id="btnDeleteFromEdit">🗑️</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2D. Post Links Modal (Direct Bot and Mini App Links with 1-Tap Copy) -->
+  <div class="modal-overlay" id="postLinksModal">
+    <div class="modal-content" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="postLinksModalTitle">🔗 Post Direct Links</h3>
+        <button class="modal-close" id="btnPostLinksClose">&times;</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="font-size: 0.8rem; color: var(--text-muted);" id="postLinksDesc">
+          Share these links in channels, groups, or messages. Tapping either link opens this exact post directly.
+        </div>
+
+        <!-- Bot Link Section -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <span style="font-size: 0.82rem; font-weight: 700; color: #38bdf8;">🤖 Telegram Bot Link</span>
+            <span style="font-size: 0.7rem; color: var(--text-muted);">Opens in bot chat</span>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <input type="text" id="postLinkBotInput" class="form-input" readonly style="font-size: 0.78rem; font-family: monospace; background: rgba(0,0,0,0.3);" />
+            <button type="button" class="btn btn-sm btn-primary" id="btnCopyBotLink" style="white-space: nowrap;">📋 Copy</button>
+          </div>
+        </div>
+
+        <!-- Mini App Link Section -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <span style="font-size: 0.82rem; font-weight: 700; color: #a78bfa;">📱 Mini App Direct Link</span>
+            <span style="font-size: 0.7rem; color: var(--text-muted);">Opens inside Mini App</span>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <input type="text" id="postLinkAppInput" class="form-input" readonly style="font-size: 0.78rem; font-family: monospace; background: rgba(0,0,0,0.3);" />
+            <button type="button" class="btn btn-sm btn-primary" id="btnCopyAppLink" style="white-space: nowrap;">📋 Copy</button>
+          </div>
+        </div>
+
+        <!-- Web Direct Link Section -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); border-radius: 12px; padding: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <span style="font-size: 0.82rem; font-weight: 700; color: #10b981;">🌐 Web Browser Link</span>
+            <span style="font-size: 0.7rem; color: var(--text-muted);">Opens in browser</span>
+          </div>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <input type="text" id="postLinkWebInput" class="form-input" readonly style="font-size: 0.78rem; font-family: monospace; background: rgba(0,0,0,0.3);" />
+            <button type="button" class="btn btn-sm btn-primary" id="btnCopyWebLink" style="white-space: nowrap;">📋 Copy</button>
+          </div>
+        </div>
+
+        <!-- Action Row -->
+        <div style="display: flex; gap: 8px; margin-top: 4px;">
+          <button type="button" class="btn btn-secondary" style="flex: 1;" id="btnShareTelegramFromModal">📤 Share Link</button>
+          <button type="button" class="btn btn-ghost" style="color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3);" id="btnBroadcastFromLinksModal">📢 Broadcast Post</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2162,6 +2221,7 @@ const rawHtml = `<!DOCTYPE html>
               '<div style="font-size: 0.74rem; color: var(--text-muted); margin-bottom: 10px;">👁️ ' + (post.view_count || 0) + ' views • ❤️ ' + (post.like_count || 0) + ' likes • 📥 ' + (post.access_count || 0) + ' accesses</div>' +
               '<div style="display: flex; gap: 6px; margin-top: auto;">' +
               '<button class="btn btn-sm btn-secondary" style="flex: 1;" data-aact="edit" data-id="' + post.id + '">✏️ Edit</button>' +
+              '<button class="btn btn-sm btn-ghost" style="color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);" data-aact="links" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '" title="Get Bot & App Links">🔗 Links</button>' +
               '<button class="btn btn-sm btn-ghost" style="color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);" data-aact="stats" data-id="' + post.id + '" title="View Stats">📊</button>' +
               '<button class="btn btn-sm btn-ghost" style="color: #f87171;" data-aact="del" data-id="' + post.id + '">🗑️</button>' +
               '</div></div>';
@@ -3287,6 +3347,14 @@ const rawHtml = `<!DOCTYPE html>
           return;
         }
 
+        const linksBtn = e.target.closest('[data-aact="links"]');
+        if (linksBtn) {
+          const postId = linksBtn.dataset.id;
+          const postTitle = linksBtn.dataset.title || ('Post #' + postId);
+          openPostLinksModal(postId, postTitle);
+          return;
+        }
+
         const statsBtn = e.target.closest('[data-aact="stats"]');
         if (statsBtn) {
           const postId = statsBtn.dataset.id;
@@ -3396,6 +3464,123 @@ const rawHtml = `<!DOCTYPE html>
           }
         } catch (err) {
           showToast('Error deleting post');
+        }
+      });
+
+      // Open Post Links Modal Helper
+      function openPostLinksModal(postId, postTitle = '') {
+        const botUrl = 'https://t.me/' + botUsername + '?start=post_' + postId;
+        const appUrl = 'https://t.me/' + botUsername + '/app?startapp=post_' + postId;
+        const webUrl = window.location.origin + '?post_id=' + postId;
+
+        const titleEl = document.getElementById('postLinksModalTitle');
+        if (titleEl) titleEl.textContent = '🔗 Links: ' + (postTitle || ('Post #' + postId));
+
+        const botInput = document.getElementById('postLinkBotInput');
+        if (botInput) botInput.value = botUrl;
+
+        const appInput = document.getElementById('postLinkAppInput');
+        if (appInput) appInput.value = appUrl;
+
+        const webInput = document.getElementById('postLinkWebInput');
+        if (webInput) webInput.value = webUrl;
+
+        const modal = document.getElementById('postLinksModal');
+        if (modal) {
+          modal.dataset.currentPostId = postId;
+          modal.dataset.currentPostTitle = postTitle || ('Post #' + postId);
+          modal.classList.add('active');
+        }
+      }
+
+      // Trigger Post Broadcast Helper
+      async function triggerPostBroadcast(postId, postTitle = '') {
+        if (!confirm('📢 Broadcast post "' + (postTitle || '#' + postId) + '" to all active bot users now?')) return;
+        showToast('📡 Broadcasting post to all users...');
+        try {
+          const res = await fetch('/api/admin/posts/' + postId + '/broadcast?user_id=' + currentUserId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ admin_id: currentUserId })
+          });
+          const data = await res.json();
+          if (data.success) {
+            showToast('✅ Broadcast sent! Success: ' + data.sent_count + ', Failed: ' + data.failed_count);
+          } else {
+            showToast('❌ Broadcast error: ' + (data.error || 'Failed'));
+          }
+        } catch (err) {
+          showToast('❌ Broadcast network error');
+        }
+      }
+
+      // Close Post Links Modal
+      document.getElementById('btnPostLinksClose')?.addEventListener('click', () => {
+        document.getElementById('postLinksModal')?.classList.remove('active');
+      });
+
+      // Copy Bot Link
+      document.getElementById('btnCopyBotLink')?.addEventListener('click', () => {
+        const input = document.getElementById('postLinkBotInput');
+        if (input && input.value) {
+          navigator.clipboard.writeText(input.value);
+          showToast('🤖 Bot link copied to clipboard!');
+        }
+      });
+
+      // Copy App Link
+      document.getElementById('btnCopyAppLink')?.addEventListener('click', () => {
+        const input = document.getElementById('postLinkAppInput');
+        if (input && input.value) {
+          navigator.clipboard.writeText(input.value);
+          showToast('📱 Mini App link copied to clipboard!');
+        }
+      });
+
+      // Copy Web Link
+      document.getElementById('btnCopyWebLink')?.addEventListener('click', () => {
+        const input = document.getElementById('postLinkWebInput');
+        if (input && input.value) {
+          navigator.clipboard.writeText(input.value);
+          showToast('🌐 Web link copied to clipboard!');
+        }
+      });
+
+      // Share Link from Modal to Telegram
+      document.getElementById('btnShareTelegramFromModal')?.addEventListener('click', () => {
+        const modal = document.getElementById('postLinksModal');
+        const postId = modal?.dataset.currentPostId;
+        const postTitle = modal?.dataset.currentPostTitle || 'Post';
+        const botUrl = 'https://t.me/' + botUsername + '?start=post_' + postId;
+        const shareUrl = 'https://t.me/share/url?url=' + encodeURIComponent(botUrl) + '&text=' + encodeURIComponent('Check out "' + postTitle + '" on @' + botUsername + '!');
+        window.open(shareUrl, '_blank');
+      });
+
+      // Broadcast from Post Links Modal
+      document.getElementById('btnBroadcastFromLinksModal')?.addEventListener('click', () => {
+        const modal = document.getElementById('postLinksModal');
+        const postId = modal?.dataset.currentPostId;
+        const postTitle = modal?.dataset.currentPostTitle;
+        if (postId) {
+          triggerPostBroadcast(postId, postTitle);
+        }
+      });
+
+      // Links Button inside Edit Modal
+      document.getElementById('btnLinksFromEdit')?.addEventListener('click', () => {
+        const postId = document.getElementById('editPostId').value;
+        const postTitle = document.getElementById('editPostTitle').value;
+        if (postId) {
+          openPostLinksModal(postId, postTitle);
+        }
+      });
+
+      // Broadcast Button inside Edit Modal
+      document.getElementById('btnBroadcastFromEdit')?.addEventListener('click', () => {
+        const postId = document.getElementById('editPostId').value;
+        const postTitle = document.getElementById('editPostTitle').value;
+        if (postId) {
+          triggerPostBroadcast(postId, postTitle);
         }
       });
 

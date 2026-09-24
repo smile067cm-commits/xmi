@@ -1824,6 +1824,18 @@ export async function getAllUserIds(env) {
 
 export const getAllRegisteredUserIds = getAllUserIds;
 
+export async function getActiveUserIds(env) {
+  if (!env.SUPABASE_URL) return [];
+  try {
+    const all = await getAllUserIds(env);
+    const blockedSet = await getBlockedUserIds(env);
+    return all.filter(id => !blockedSet.has(String(id)));
+  } catch (e) {
+    console.warn('Error fetching active user IDs:', e);
+    return [];
+  }
+}
+
 // ------------------------------------------
 // 14. MULTI-ADMIN MANAGEMENT (With in-memory caching)
 // ------------------------------------------
