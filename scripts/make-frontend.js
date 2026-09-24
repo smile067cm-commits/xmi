@@ -1846,30 +1846,32 @@ const rawHtml = `<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- 8. In-App Video Streaming Player Modal -->
-  <div class="modal-overlay" id="videoPlayerModal" oncontextmenu="return false;" style="background: rgba(4, 7, 18, 0.95); z-index: 100000; padding: 12px; backdrop-filter: blur(12px); user-select: none; -webkit-user-select: none;">
-    <div class="modal-content" style="max-width: 650px; width: 100%; border: 1px solid rgba(56, 189, 248, 0.25); background: #0b1329; border-radius: 18px; overflow: hidden; padding: 0; box-shadow: 0 20px 60px rgba(0,0,0,0.85);">
-      <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(15,23,42,0.85);">
-        <div style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80%; display: flex; align-items: center; gap: 6px;">
-          <span>🎬</span> <span id="videoPlayerTitle">Video Stream</span>
+  <!-- 8. Post Detail View Modal (Pictures First, Video Streams Next, Mega Link, Bot Action) -->
+  <div class="modal-overlay" id="postDetailModal" oncontextmenu="return false;" style="background: rgba(4, 7, 18, 0.95); z-index: 99990; padding: 12px; backdrop-filter: blur(12px);">
+    <div class="modal-content" style="max-width: 680px; width: 100%; border: 1px solid rgba(56, 189, 248, 0.25); background: #0b1329; border-radius: 18px; overflow: hidden; padding: 0; box-shadow: 0 20px 60px rgba(0,0,0,0.85); display: flex; flex-direction: column; max-height: 90vh;">
+      <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(15,23,42,0.85); flex-shrink: 0;">
+        <div style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 82%; display: flex; align-items: center; gap: 6px;">
+          <span>📂</span> <span id="postDetailModalTitle">Post Details</span>
         </div>
-        <button type="button" id="btnVideoPlayerClose" style="background: rgba(255,255,255,0.1); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
+        <button type="button" id="btnPostDetailClose" style="background: rgba(255,255,255,0.1); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
       </div>
-      <div style="position: relative; width: 100%; background: #000; display: flex; align-items: center; justify-content: center; min-height: 240px; max-height: 70vh;" oncontextmenu="return false;">
-        <video id="streamVideoTag" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture style="width: 100%; max-height: 70vh; background: #000; outline: none;"></video>
-        <div id="videoStreamLoading" style="position: absolute; display: none; flex-direction: column; align-items: center; gap: 8px; color: #38bdf8; font-weight: 600; font-size: 0.85rem; pointer-events: none; background: rgba(0,0,0,0.75); padding: 12px 18px; border-radius: 12px; backdrop-filter: blur(6px);">
-          <div style="font-size: 26px;">⏳</div>
-          <span id="videoStreamStatusText">Loading stream...</span>
-        </div>
+      <div id="postDetailModalBody" style="padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; -webkit-overflow-scrolling: touch;">
+        <!-- Dynamic Content: Pics first, videos with permanent stream next, mega links, bot action -->
       </div>
-      <div style="padding: 14px 18px; background: rgba(15,23,42,0.6); display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted);">
-          <div id="videoPlayerTierBadge" style="display: inline-flex; align-items: center; gap: 5px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 3px 9px; border-radius: 20px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3);">⚡ Protected Stream</div>
-          <div id="videoPlayerSize">0 MB</div>
+    </div>
+  </div>
+
+  <!-- 9. All Images Popup Gallery Modal -->
+  <div class="modal-overlay" id="allImagesGalleryModal" oncontextmenu="return false;" style="background: rgba(3, 6, 15, 0.96); z-index: 99995; padding: 14px; backdrop-filter: blur(14px);">
+    <div class="modal-content" style="max-width: 720px; width: 100%; border: 1px solid rgba(255,255,255,0.15); background: #090e1f; border-radius: 18px; overflow: hidden; padding: 0; display: flex; flex-direction: column; max-height: 90vh;">
+      <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(15,23,42,0.85); flex-shrink: 0;">
+        <div style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+          <span>🖼️</span> <span id="galleryModalTitle">All Photos</span>
         </div>
-        <div>
-          <button type="button" class="btn btn-secondary btn-sm" id="btnVideoSendToBot" style="width: 100%; padding: 11px; font-size: 0.85rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 6px;">📥 Forward File to Telegram Chat</button>
-        </div>
+        <button type="button" id="btnGalleryClose" style="background: rgba(255,255,255,0.1); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
+      </div>
+      <div id="galleryModalGrid" style="padding: 16px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; max-height: 75vh;">
+        <!-- Image cards injected dynamically -->
       </div>
     </div>
   </div>
@@ -2253,17 +2255,9 @@ const rawHtml = `<!DOCTYPE html>
         let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted" style="color: #fff; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);">⭐ Exclusive</span>' : '';
         const zoomHint = post.preview_image ? '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 6px; pointer-events: none; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 3px;">🔍 Tap to Zoom</div>' : '';
 
-        let actionButtonsHtml = '';
-        if (post.video_file && globalSettings.stream_enabled !== false) {
-          actionButtonsHtml = '<div style="display: flex; gap: 8px; margin-top: 6px;">' +
-            '<button class="btn" data-act="stream-video" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '" data-fileid="' + escapeHtml(post.video_file.file_id || '') + '" data-msgid="' + (post.video_file.channel_message_id || '') + '" data-size="' + (post.video_file.size || 0) + '" style="flex: 1.4; background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; font-weight: 700; padding: 10px; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35);">▶️ Watch Video</button>' +
-            '<button class="btn btn-secondary" data-act="open-in-bot" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '" style="flex: 1; padding: 10px; font-weight: 600; border-radius: 10px; font-size: 0.8rem;">📥 Bot Chat</button>' +
-            '</div>';
-        } else {
-          actionButtonsHtml = '<button class="btn-open-bot-full" data-act="open-in-bot" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '">🚀 Open in Bot</button>';
-        }
+        const actionButtonHtml = '<button class="btn-open-bot-full" data-act="open-post" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; font-weight: 700; box-shadow: 0 4px 14px rgba(56, 189, 248, 0.25);">📂 Open Post</button>';
 
-        card.innerHTML = '<div class="post-image-container" style="cursor: pointer;" data-act="preview-image" data-img="' + escapeHtml(post.preview_image || '') + '" data-title="' + escapeHtml(post.title) + '">' + imgHtml + zoomHint + (promotedBadge ? '<div class="post-badges-top">' + promotedBadge + '</div>' : '') + '</div>' +
+        card.innerHTML = '<div class="post-image-container" style="cursor: pointer;" data-act="open-post" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '">' + imgHtml + zoomHint + (promotedBadge ? '<div class="post-badges-top">' + promotedBadge + '</div>' : '') + '</div>' +
           '<div class="post-body">' +
           '<h3 class="post-title">' + escapeHtml(post.title) + '</h3>' +
           '<div class="post-meta"><span>📅 ' + formatISTDate(post.created_at) + '</span>' + (post.tags ? '<span>• ' + escapeHtml(post.tags) + '</span>' : '') + (shortenerOn ? '<span style="color: #fbbf24; font-weight: 700;">• 🪙 ' + pointsRequired + ' pt' + (pointsRequired > 1 ? 's' : '') + '</span>' : '') + '</div>' +
@@ -2274,7 +2268,7 @@ const rawHtml = `<!DOCTYPE html>
           '<button class="action-btn ' + (isSaved ? 'saved' : '') + '" data-act="save" data-id="' + post.id + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="' + (isSaved ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>' +
           '</div>' +
           '</div>' +
-          actionButtonsHtml +
+          actionButtonHtml +
           '</div>';
 
         grid.appendChild(card);
@@ -3791,22 +3785,11 @@ const rawHtml = `<!DOCTYPE html>
           return;
         }
 
-        // In-App Video Streaming Click
-        const streamBtn = e.target.closest('[data-act="stream-video"]');
-        if (streamBtn) {
-          const postId = streamBtn.dataset.id;
-          const postTitle = streamBtn.dataset.title || ('Video #' + postId);
-          const fileId = streamBtn.dataset.fileid;
-          const msgId = streamBtn.dataset.msgid;
-          const fileSize = Number(streamBtn.dataset.size) || 0;
-
-          openVideoPlayerModal({
-            postId,
-            postTitle,
-            fileId,
-            msgId,
-            fileSize
-          });
+        // Open Post Detail Modal Click
+        const openPostBtn = e.target.closest('[data-act="open-post"]');
+        if (openPostBtn) {
+          const postId = openPostBtn.dataset.id;
+          openPostDetailModal(postId);
           return;
         }
 
@@ -3814,16 +3797,15 @@ const rawHtml = `<!DOCTYPE html>
         const openBotBtn = e.target.closest('[data-act="open-in-bot"]');
         if (openBotBtn) {
           const postId = openBotBtn.dataset.id;
-          const postTitle = openBotBtn.dataset.title || ('Post #' + postId);
-          trackPostDownload(postId, postTitle);
+          trackPostDownload(postId, openBotBtn.dataset.title || ('Post #' + postId));
           forwardToTelegram(postId);
           return;
         }
       });
 
-      // Video Player State & Controls
-      let currentPlayingStreamUrl = '';
-      let activeStreamPostId = null;
+      // Post Detail Modal & Multi-media Handling
+      let currentDetailPost = null;
+      let currentGalleryImages = [];
 
       async function triggerAdsgramAd(blockId) {
         if (!window.Adsgram || !blockId) return true;
@@ -3837,91 +3819,176 @@ const rawHtml = `<!DOCTYPE html>
         }
       }
 
-      async function openVideoPlayerModal({ postId, postTitle, fileId, msgId, fileSize }) {
-        activeStreamPostId = postId;
-        const modal = document.getElementById('videoPlayerModal');
-        const video = document.getElementById('streamVideoTag');
-        const titleEl = document.getElementById('videoPlayerTitle');
-        const badgeEl = document.getElementById('videoPlayerTierBadge');
-        const sizeEl = document.getElementById('videoPlayerSize');
-        const loadingEl = document.getElementById('videoStreamLoading');
-        const statusText = document.getElementById('videoStreamStatusText');
+      async function openPostDetailModal(postId) {
+        const modal = document.getElementById('postDetailModal');
+        const titleEl = document.getElementById('postDetailModalTitle');
+        const bodyEl = document.getElementById('postDetailModalBody');
+        if (!modal || !bodyEl) return;
 
-        if (!modal || !video) return;
+        modal.classList.add('active');
+        if (titleEl) titleEl.textContent = 'Loading Post...';
+        bodyEl.innerHTML = '<div style="padding: 40px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 32px; margin-bottom: 10px;">⏳</div>Loading post content...</div>';
 
-        titleEl.textContent = postTitle;
-        const sizeMB = (fileSize / (1024 * 1024)).toFixed(1);
-        sizeEl.textContent = sizeMB > 0 ? (sizeMB + ' MB') : '';
-
-        // Check if pre-roll ad is enabled
+        // Check pre-roll ad if enabled
         if (globalSettings.adsgram_enabled && globalSettings.adsgram_preroll_enabled && globalSettings.adsgram_rewarded_block_id) {
-          showToast('📺 Playing short sponsor message...');
           await triggerAdsgramAd(globalSettings.adsgram_rewarded_block_id);
         }
 
-        modal.classList.add('active');
-        if (loadingEl) {
-          loadingEl.style.display = 'flex';
-          if (statusText) statusText.textContent = 'Connecting stream...';
-        }
-
-        let streamUrl = '';
-
-        // TIER 1 & TIER 2: Stream securely via internal endpoint (No external URLs or tokens exposed)
-        if (fileSize <= 100 * 1024 * 1024) {
-          streamUrl = '/api/stream?post_id=' + encodeURIComponent(postId);
-          if (badgeEl) {
-            badgeEl.textContent = fileSize <= 20 * 1024 * 1024 ? '⚡ High-Speed Stream' : '🚀 Fast In-App Stream';
-            badgeEl.style.color = '#38bdf8';
-            badgeEl.style.borderColor = 'rgba(56, 189, 248, 0.4)';
-          }
-        }
-        // TIER 3: > 100 MB -> Forward directly to Telegram Chat
-        else {
-          if (badgeEl) badgeEl.textContent = '📦 Large Video (>100MB)';
-          showToast('Large file (>100MB) — Forwarding to Telegram chat for best quality!');
-          forwardToTelegram(postId);
-          closeVideoPlayer();
-          return;
-        }
-
-        currentPlayingStreamUrl = streamUrl;
-        video.src = streamUrl;
-
-        video.onloadeddata = () => {
-          if (loadingEl) loadingEl.style.display = 'none';
-        };
-
-        video.onerror = () => {
-          if (loadingEl) loadingEl.style.display = 'none';
-          showToast('Failed to stream video. Opening in Telegram bot...');
-          setTimeout(() => {
-            forwardToTelegram(postId);
-            closeVideoPlayer();
-          }, 1200);
-        };
-
         try {
-          await video.play();
-        } catch (playErr) {
-          if (loadingEl) loadingEl.style.display = 'none';
-          console.warn('Auto-play was prevented by browser:', playErr);
-        }
+          const res = await fetch('/api/posts/' + postId + '?user_id=' + currentUserId);
+          const data = await res.json();
+          if (!data.success || !data.post) {
+            bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to load post.</div>';
+            return;
+          }
 
-        trackPostView(postId);
+          const post = data.post;
+          currentDetailPost = post;
+          if (titleEl) titleEl.textContent = post.title;
+
+          const allFiles = (post.folders || []).flatMap(f => f.files || []);
+
+          // 1. Gather all pictures (cover preview image + folder photos)
+          const pictures = [];
+          if (post.preview_image) {
+            pictures.push({ url: post.preview_image, title: post.title + ' (Cover)' });
+          }
+          allFiles.forEach(f => {
+            const isImg = (f.mime_type && f.mime_type.startsWith('image/')) || (f.file_name && /\.(jpe?g|png|webp|gif)$/i.test(f.file_name));
+            if (isImg && f.file_id) {
+              pictures.push({
+                url: '/api/stream?file_id=' + encodeURIComponent(f.file_id),
+                title: f.file_name || 'Photo'
+              });
+            }
+          });
+          currentGalleryImages = pictures;
+
+          // 2. Gather all videos
+          const videos = allFiles.filter(f => {
+            return (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name));
+          });
+          if (videos.length === 0) {
+            allFiles.forEach(f => {
+              const isImg = (f.mime_type && f.mime_type.startsWith('image/')) || (f.file_name && /\.(jpe?g|png|webp|gif)$/i.test(f.file_name));
+              if (!isImg) videos.push(f);
+            });
+          }
+
+          let html = '';
+
+          // SECTION 1: PICTURES CONTAINER (FIRST!)
+          if (pictures.length > 0) {
+            const mainPic = pictures[0];
+            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; overflow: hidden;">' +
+              '<div style="padding: 10px 14px; font-weight: 700; font-size: 0.85rem; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">' +
+              '<span>🖼️ Photos (' + pictures.length + ')</span>' +
+              '<span style="font-size: 0.72rem; color: var(--text-muted);">' + (pictures.length > 1 ? 'Tap to View All Photos' : 'Tap to Zoom') + '</span>' +
+              '</div>' +
+              '<div style="position: relative; cursor: pointer; max-height: 280px; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #000;" id="postDetailPrimaryPic">' +
+              '<img src="' + escapeHtml(mainPic.url) + '" alt="" style="max-height: 280px; width: 100%; object-fit: contain;" />' +
+              '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 3px 8px; border-radius: 6px; backdrop-filter: blur(4px);">' +
+              (pictures.length > 1 ? ('🔍 View All Photos (' + pictures.length + ')') : '🔍 Tap to Zoom') +
+              '</div>' +
+              '</div>' +
+              '</div>';
+          }
+
+          // SECTION 2: VIDEOS CONTAINER (NEXT!)
+          if (videos.length > 0) {
+            html += '<div style="display: flex; flex-direction: column; gap: 12px;">';
+            videos.forEach((vid, vIdx) => {
+              const vSize = Number(vid.size) || 0;
+              const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
+              const isLarge = vSize > 100 * 1024 * 1024;
+              const vTitle = vid.file_name || ('Video ' + (vIdx + 1));
+              const streamSrc = '/api/stream?post_id=' + post.id + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '');
+
+              html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; overflow: hidden; padding: 12px; display: flex; flex-direction: column; gap: 10px;">' +
+                '<div style="display: flex; align-items: center; justify-content: space-between;">' +
+                '<div style="font-weight: 700; font-size: 0.88rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%;">🎬 ' + escapeHtml(vTitle) + '</div>' +
+                '<div style="font-size: 0.74rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 12px; font-weight: 700;">' + vSizeMB + ' MB</div>' +
+                '</div>';
+
+              if (!isLarge) {
+                // Permanent Video Stream Player
+                html += '<div style="position: relative; width: 100%; border-radius: 10px; overflow: hidden; background: #000;" oncontextmenu="return false;">' +
+                  '<video playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture preload="metadata" poster="' + escapeHtml(post.preview_image || '') + '" src="' + streamSrc + '" style="width: 100%; max-height: 320px; outline: none; background: #000;"></video>' +
+                  '</div>' +
+                  '<button type="button" class="btn btn-secondary btn-sm" data-act="send-file-bot" data-id="' + post.id + '" style="width: 100%; padding: 9px; font-weight: 600; font-size: 0.8rem;">📥 Send Video to Telegram Chat</button>';
+              } else {
+                // Large File (> 100MB): High-speed Telegram button
+                html += '<div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 10px; padding: 10px; font-size: 0.78rem; color: #fbbf24; text-align: center;">⚡ Large File (' + vSizeMB + ' MB) — Fast native Telegram delivery</div>' +
+                  '<button type="button" class="btn btn-primary" data-act="send-file-bot" data-id="' + post.id + '" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; background: linear-gradient(135deg, #0284c7, #38bdf8);">📥 Get File in Telegram (' + vSizeMB + ' MB)</button>';
+              }
+
+              html += '</div>';
+            });
+            html += '</div>';
+          }
+
+          // SECTION 3: MEGA LINK / DIRECT LINK
+          if (post.direct_link) {
+            const linkTitle = post.direct_link_title || '☁️ Open Mega Link / Direct File';
+            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">' +
+              '<div style="font-weight: 700; font-size: 0.82rem; color: #34d399;">🔗 External Cloud Link</div>' +
+              '<a href="' + escapeHtml(post.direct_link) + '" target="_blank" rel="noopener noreferrer" class="btn" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; color: #fff; background: linear-gradient(135deg, #10b981, #059669); border-radius: 10px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">' +
+              '☁️ ' + escapeHtml(linkTitle) + ' ↗️' +
+              '</a>' +
+              '</div>';
+          }
+
+          // SECTION 4: PRIMARY BOT ACTION (OLD RELIABLE WAY)
+          html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">' +
+            '<div style="font-size: 0.78rem; color: var(--text-muted); text-align: center;">Want files forwarded directly to your Telegram chat?</div>' +
+            '<button type="button" class="btn btn-secondary" data-act="send-file-bot" data-id="' + post.id + '" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 10px;">' +
+            '🚀 Open &amp; Deliver in Bot Chat' +
+            '</button>' +
+            '</div>';
+
+          bodyEl.innerHTML = html;
+          trackPostView(post.id);
+        } catch (e) {
+          bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to load post details: ' + escapeHtml(e.message) + '</div>';
+        }
       }
 
-      function closeVideoPlayer() {
-        const modal = document.getElementById('videoPlayerModal');
-        const video = document.getElementById('streamVideoTag');
-        if (video) {
-          video.pause();
-          video.removeAttribute('src');
-          video.load();
+      function closePostDetailModal() {
+        const modal = document.getElementById('postDetailModal');
+        if (modal) {
+          modal.querySelectorAll('video').forEach(v => {
+            try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) {}
+          });
+          modal.classList.remove('active');
         }
+      }
+
+      function openAllImagesGallery() {
+        const modal = document.getElementById('allImagesGalleryModal');
+        const grid = document.getElementById('galleryModalGrid');
+        const titleEl = document.getElementById('galleryModalTitle');
+        if (!modal || !grid) return;
+
+        if (titleEl) titleEl.textContent = '🖼️ All Photos (' + currentGalleryImages.length + ')';
+        grid.innerHTML = '';
+
+        currentGalleryImages.forEach((img, idx) => {
+          const item = document.createElement('div');
+          item.style.cssText = 'position: relative; border-radius: 10px; overflow: hidden; background: #000; aspect-ratio: 1; cursor: pointer; border: 1px solid rgba(255,255,255,0.1);';
+          item.innerHTML = '<img src="' + escapeHtml(img.url) + '" alt="" style="width: 100%; height: 100%; object-fit: cover;" />' +
+            '<div style="position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.65rem; padding: 2px 5px; border-radius: 4px;">🔍 Zoom</div>';
+          item.addEventListener('click', () => {
+            openImageLightbox(img.url, img.title || ('Photo ' + (idx + 1)));
+          });
+          grid.appendChild(item);
+        });
+
+        modal.classList.add('active');
+      }
+
+      function closeAllImagesGallery() {
+        const modal = document.getElementById('allImagesGalleryModal');
         if (modal) modal.classList.remove('active');
-        const loadingEl = document.getElementById('videoStreamLoading');
-        if (loadingEl) loadingEl.style.display = 'none';
       }
 
       function forwardToTelegram(postId) {
@@ -3936,11 +4003,25 @@ const rawHtml = `<!DOCTYPE html>
         }
       }
 
-      document.getElementById('btnVideoPlayerClose')?.addEventListener('click', closeVideoPlayer);
-      document.getElementById('btnVideoSendToBot')?.addEventListener('click', () => {
-        if (activeStreamPostId) {
-          forwardToTelegram(activeStreamPostId);
-          closeVideoPlayer();
+      document.getElementById('btnPostDetailClose')?.addEventListener('click', closePostDetailModal);
+      document.getElementById('btnGalleryClose')?.addEventListener('click', closeAllImagesGallery);
+
+      document.getElementById('postDetailModalBody')?.addEventListener('click', (e) => {
+        const picContainer = e.target.closest('#postDetailPrimaryPic');
+        if (picContainer && currentGalleryImages.length > 0) {
+          if (currentGalleryImages.length === 1) {
+            openImageLightbox(currentGalleryImages[0].url, currentGalleryImages[0].title);
+          } else {
+            openAllImagesGallery();
+          }
+          return;
+        }
+
+        const sendBotBtn = e.target.closest('[data-act="send-file-bot"]');
+        if (sendBotBtn) {
+          const postId = sendBotBtn.dataset.id;
+          forwardToTelegram(postId);
+          return;
         }
       });
 

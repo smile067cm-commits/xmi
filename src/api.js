@@ -125,18 +125,26 @@ export function createRouter() {
       const postId = url.searchParams.get('post_id') || url.searchParams.get('id');
       let fileId = url.searchParams.get('file_id');
       let channelMsgId = url.searchParams.get('msg_id');
-      let fileSize = 0;
+      let detectedMime = 'video/mp4';
 
       // If post_id is provided, resolve file details from database securely
       if (postId) {
         const post = await getPostById(env, postId);
         if (post && post.folders) {
           const files = (post.folders || []).flatMap(f => f.files || []);
-          const videoFile = files.find(f => (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name))) || files[0];
-          if (videoFile) {
-            fileId = videoFile.file_id;
-            channelMsgId = videoFile.channel_message_id;
-            fileSize = Number(videoFile.size) || 0;
+          let targetFile = null;
+          if (fileId) {
+            targetFile = files.find(f => String(f.file_id) === String(fileId) || String(f.id) === String(fileId));
+          }
+          if (!targetFile) {
+            targetFile = files.find(f => (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name))) || files[0];
+          }
+          if (targetFile) {
+            fileId = targetFile.file_id;
+            channelMsgId = targetFile.channel_message_id;
+            if (targetFile.mime_type && targetFile.mime_type.startsWith('video/')) {
+              detectedMime = targetFile.mime_type;
+            }
           }
         }
       }
@@ -145,9 +153,8 @@ export function createRouter() {
         return errorResponse('Missing media identifier', 400);
       }
 
-      // Check if file is > 20MB and Render streaming service is configured
       const settings = await getSettings(env);
-      const renderUrl = (settings?.render_stream_url || '').replace(/\/+$/, '');
+      const renderUrl = (settings?.render_stream_url || env.RENDER_STREAM_URL || 'https://xmi-stream-bot.onrender.com').replace(/\/+$/, '');
       const storageChannel = env.CHANNEL_ID || '-1004415998750';
 
       const forwardHeaders = {};
@@ -156,28 +163,35 @@ export function createRouter() {
         forwardHeaders['Range'] = rangeHeader;
       }
 
-      // 1. TIER 2 (20MB-100MB): Proxy via Render MTProto Stream Server if available
-      if (fileSize > 20 * 1024 * 1024 && renderUrl && channelMsgId) {
-        const renderStreamTarget = `${renderUrl}/stream?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(channelMsgId)}`;
-        const upstreamRes = await fetch(renderStreamTarget, { headers: forwardHeaders });
+      // Priority 1: Proxy via Render MTProto Stream Server if channel message ID is available
+      if (renderUrl && channelMsgId) {
+        try {
+          const renderStreamTarget = `${renderUrl}/stream?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(channelMsgId)}`;
+          const upstreamRes = await fetch(renderStreamTarget, { headers: forwardHeaders });
 
-        const responseHeaders = new Headers(corsHeaders);
-        responseHeaders.set('Accept-Ranges', 'bytes');
-        responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || 'video/mp4');
-        if (upstreamRes.headers.get('content-range')) {
-          responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
-        }
-        if (upstreamRes.headers.get('content-length')) {
-          responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
-        }
+          if (upstreamRes.ok || upstreamRes.status === 206) {
+            const responseHeaders = new Headers(corsHeaders);
+            responseHeaders.set('Accept-Ranges', 'bytes');
+            responseHeaders.set('Content-Type', detectedMime);
+            responseHeaders.set('Cache-Control', 'no-cache');
+            if (upstreamRes.headers.get('content-range')) {
+              responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
+            }
+            if (upstreamRes.headers.get('content-length')) {
+              responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
+            }
 
-        return new Response(upstreamRes.body, {
-          status: upstreamRes.status,
-          headers: responseHeaders
-        });
+            return new Response(upstreamRes.body, {
+              status: upstreamRes.status,
+              headers: responseHeaders
+            });
+          }
+        } catch (renderErr) {
+          console.warn('Render stream failed, falling back to Bot API:', renderErr.message);
+        }
       }
 
-      // 2. TIER 1 (< 20MB): Proxy via Telegram Bot API with Range support
+      // Priority 2: Proxy via Telegram Bot API with guaranteed video/mp4 Content-Type
       if (fileId) {
         const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
         const tgData = await tgRes.json();
@@ -190,7 +204,9 @@ export function createRouter() {
 
           const responseHeaders = new Headers(corsHeaders);
           responseHeaders.set('Accept-Ranges', 'bytes');
-          responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || 'video/mp4');
+          // Enforce video/mp4 instead of application/octet-stream so player decodes video immediately
+          responseHeaders.set('Content-Type', detectedMime);
+          responseHeaders.set('Cache-Control', 'no-cache');
 
           if (upstreamRes.headers.get('content-range')) {
             responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
@@ -206,19 +222,7 @@ export function createRouter() {
         }
       }
 
-      // Fallback: If Render service is configured and channelMsgId exists
-      if (renderUrl && channelMsgId) {
-        const renderStreamTarget = `${renderUrl}/stream?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(channelMsgId)}`;
-        const upstreamRes = await fetch(renderStreamTarget, { headers: forwardHeaders });
-        const responseHeaders = new Headers(corsHeaders);
-        responseHeaders.set('Accept-Ranges', 'bytes');
-        responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || 'video/mp4');
-        if (upstreamRes.headers.get('content-range')) responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
-        if (upstreamRes.headers.get('content-length')) responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
-        return new Response(upstreamRes.body, { status: upstreamRes.status, headers: responseHeaders });
-      }
-
-      return errorResponse('Stream media unavailable or exceeds file limits', 404);
+      return errorResponse('Stream media unavailable or file not accessible', 404);
     } catch (err) {
       console.error('API /api/stream error:', err);
       return errorResponse(err.message, 500);
