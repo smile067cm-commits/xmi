@@ -3833,145 +3833,183 @@ const rawHtml = `<!DOCTYPE html>
       }
 
       function renderPostDetailPage(post) {
-        const bodyEl = document.getElementById('postDetailPageBody');
-        if (!bodyEl) return;
-        currentDetailPost = post;
+        try {
+          const bodyEl = document.getElementById('postDetailPageBody');
+          if (!bodyEl) return;
+          currentDetailPost = post;
 
-        const allFiles = (post.folders || []).flatMap(f => f.files || []);
+          const allFiles = (post.folders || []).flatMap(f => f.files || []);
 
-        // 1. Gather all pictures (Cover + Image files)
-        const pictures = [];
-        if (post.preview_image) {
-          pictures.push({ url: post.preview_image, title: post.title + ' (Cover)' });
-        }
-        allFiles.forEach(f => {
-          const isImg = (f.mime_type && f.mime_type.startsWith('image/')) || (f.file_name && /\.(jpe?g|png|webp|gif)$/i.test(f.file_name));
-          if (isImg && f.file_id) {
-            pictures.push({
-              url: '/api/stream?post_id=' + post.id + '&file_id=' + encodeURIComponent(f.file_id),
-              title: f.file_name || 'Photo'
-            });
+          // 1. Gather all pictures (Cover + Image files)
+          const pictures = [];
+          if (post.preview_image) {
+            pictures.push({ url: post.preview_image, title: post.title + ' (Cover)' });
           }
-        });
-        currentPostPictures = pictures;
-        activePhotoIndex = 0;
+          allFiles.forEach(f => {
+            const isImg = (f.mime_type && f.mime_type.startsWith('image/')) || (f.file_name && /\.(jpe?g|png|webp|gif)$/i.test(f.file_name));
+            if (isImg && f.file_id) {
+              pictures.push({
+                url: '/api/stream?post_id=' + post.id + '&file_id=' + encodeURIComponent(f.file_id),
+                title: f.file_name || 'Photo'
+              });
+            }
+          });
+          currentPostPictures = pictures;
+          activePhotoIndex = 0;
 
-        // 2. Separate into streamable videos and large files
-        const nonImageFiles = allFiles.filter(f => {
-          const isImg = (f.mime_type && f.mime_type.startsWith('image/')) || (f.file_name && /\.(jpe?g|png|webp|gif)$/i.test(f.file_name));
-          return !isImg;
-        });
+          // 2. Separate into streamable videos and large files
+          const nonImageFiles = allFiles.filter(f => {
+            const isImg = (f.mime_type && f.mime_type.startsWith('image/')) || (f.file_name && /\.(jpe?g|png|webp|gif)$/i.test(f.file_name));
+            return !isImg;
+          });
 
-        const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024; // 100 MB
+          const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024; // 100 MB
 
-        // All video files
-        const allVideoFiles = nonImageFiles.filter(f => {
-          return (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name));
-        });
+          // All video files
+          const allVideoFiles = nonImageFiles.filter(f => {
+            return (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name));
+          });
 
-        // Streamable videos (<= 100MB, or if all are small)
-        const streamableVideos = allVideoFiles.filter(f => {
-          const sz = Number(f.size) || 0;
-          return sz <= LARGE_FILE_THRESHOLD || allVideoFiles.length === 1;
-        });
+          // Large files (> 100MB)
+          const largeFiles = nonImageFiles.filter(f => {
+            const sz = Number(f.size) || 0;
+            return sz > LARGE_FILE_THRESHOLD;
+          });
 
-        // Large files (> 100MB)
-        const largeFiles = nonImageFiles.filter(f => {
-          const sz = Number(f.size) || 0;
-          return sz > LARGE_FILE_THRESHOLD;
-        });
+          // Streamable videos (<= 100MB)
+          const streamableVideos = allVideoFiles.filter(f => {
+            const sz = Number(f.size) || 0;
+            return sz <= LARGE_FILE_THRESHOLD;
+          });
 
-        // Store all videos for player indexing
-        currentPostVideos = allVideoFiles.length > 0 ? allVideoFiles : nonImageFiles;
-        activeVideoIndex = 0;
+          // Video list for player: use streamable videos if available, otherwise all videos
+          const videosForPlayer = streamableVideos.length > 0 ? streamableVideos : allVideoFiles;
 
-        let html = '';
+          // Store all videos for player indexing
+          currentPostVideos = allVideoFiles.length > 0 ? allVideoFiles : nonImageFiles;
+          activeVideoIndex = 0;
 
-        // Post Header: Title, Tags, Stats
-        const dateStr = post.created_at ? new Date(post.created_at).toLocaleDateString() : '';
-        html += '<div style="margin-bottom: 16px;">' +
-          '<div style="font-size: 1.25rem; font-weight: 800; color: #f8fafc; line-height: 1.35; margin-bottom: 6px;">' + escapeHtml(post.title) + '</div>' +
-          '<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-muted);">' +
-          (post.is_promoted ? '<span style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; font-weight: 800; padding: 2px 7px; border-radius: 6px;">⭐ Exclusive</span>' : '') +
-          '<span style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 6px;">🏷️ ' + escapeHtml(post.category || 'All') + '</span>' +
-          (dateStr ? '<span>🕒 ' + dateStr + '</span>' : '') +
-          '<span>👁️ ' + (post.view_count || 0) + '</span>' +
-          '<span>❤️ ' + (post.like_count || 0) + '</span>' +
-          '</div>' +
-          '</div>';
+          let html = '';
 
-        // SECTION 1: PICTURES CONTAINER (FIRST!)
-        if (pictures.length > 0) {
-          const curPic = pictures[0];
-          html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px;">' +
-            '<div style="padding: 12px 16px; font-weight: 700; font-size: 0.88rem; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">' +
-            '<span>🖼️ Photos (' + pictures.length + ')</span>' +
-            '<span style="font-size: 0.75rem; color: var(--text-muted);">Tap photo to Zoom</span>' +
-            '</div>' +
-            '<div style="position: relative; cursor: pointer; max-height: 380px; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden;" id="postDetailMainPhotoWrap">' +
-            '<img id="postDetailMainPhoto" src="' + escapeHtml(curPic.url) + '" alt="" style="max-height: 380px; width: 100%; object-fit: contain;" />' +
-            '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 4px 10px; border-radius: 6px; backdrop-filter: blur(4px); pointer-events: none;">' +
-            '🔍 Tap to Zoom' +
+          // Post Header: Title, Tags, Stats
+          const dateStr = post.created_at ? new Date(post.created_at).toLocaleDateString() : '';
+          html += '<div style="margin-bottom: 16px;">' +
+            '<div style="font-size: 1.25rem; font-weight: 800; color: #f8fafc; line-height: 1.35; margin-bottom: 6px;">' + escapeHtml(post.title) + '</div>' +
+            '<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-muted);">' +
+            (post.is_promoted ? '<span style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; font-weight: 800; padding: 2px 7px; border-radius: 6px;">⭐ Exclusive</span>' : '') +
+            '<span style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 6px;">🏷️ ' + escapeHtml(post.category || 'All') + '</span>' +
+            (dateStr ? '<span>🕒 ' + dateStr + '</span>' : '') +
+            '<span>👁️ ' + (post.view_count || 0) + '</span>' +
+            '<span>❤️ ' + (post.like_count || 0) + '</span>' +
             '</div>' +
             '</div>';
 
-          if (pictures.length > 1) {
-            html += '<div style="padding: 10px 14px; background: rgba(10, 16, 31, 0.9); display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;" id="postPhotoThumbnails">' +
-              pictures.map((pic, idx) => {
-                return '<div class="photo-thumb-item" data-idx="' + idx + '" style="flex-shrink: 0; width: 62px; height: 62px; border-radius: 8px; overflow: hidden; cursor: pointer; border: 2px solid ' + (idx === 0 ? '#38bdf8' : 'rgba(255,255,255,0.12)') + '; background: #000;">' +
-                  '<img src="' + escapeHtml(pic.url) + '" alt="" style="width: 100%; height: 100%; object-fit: cover;" />' +
-                  '</div>';
-              }).join('') +
+          // SECTION 1: PICTURES CONTAINER (FIRST!)
+          if (pictures.length > 0) {
+            const curPic = pictures[0];
+            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px;">' +
+              '<div style="padding: 12px 16px; font-weight: 700; font-size: 0.88rem; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">' +
+              '<span>🖼️ Photos (' + pictures.length + ')</span>' +
+              '<span style="font-size: 0.75rem; color: var(--text-muted);">Tap photo to Zoom</span>' +
+              '</div>' +
+              '<div style="position: relative; cursor: pointer; max-height: 380px; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden;" id="postDetailMainPhotoWrap">' +
+              '<img id="postDetailMainPhoto" src="' + escapeHtml(curPic.url) + '" alt="" style="max-height: 380px; width: 100%; object-fit: contain;" />' +
+              '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 4px 10px; border-radius: 6px; backdrop-filter: blur(4px); pointer-events: none;">' +
+              '🔍 Tap to Zoom' +
+              '</div>' +
               '</div>';
+
+            if (pictures.length > 1) {
+              html += '<div style="padding: 10px 14px; background: rgba(10, 16, 31, 0.9); display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;" id="postPhotoThumbnails">' +
+                pictures.map((pic, idx) => {
+                  return '<div class="photo-thumb-item" data-idx="' + idx + '" style="flex-shrink: 0; width: 62px; height: 62px; border-radius: 8px; overflow: hidden; cursor: pointer; border: 2px solid ' + (idx === 0 ? '#38bdf8' : 'rgba(255,255,255,0.12)') + '; background: #000;">' +
+                    '<img src="' + escapeHtml(pic.url) + '" alt="" style="width: 100%; height: 100%; object-fit: cover;" />' +
+                    '</div>';
+                }).join('') +
+                '</div>';
+            }
+
+            html += '</div>';
           }
 
-          html += '</div>';
-        }
+          // SECTION 2: VIDEO STREAM PLAYER (NEXT - ONLY 1 LOADED AT STARTING!)
+          if (videosForPlayer.length > 0) {
+            const firstVid = videosForPlayer[0];
+            const firstSize = Number(firstVid.size) || 0;
+            const firstSizeMB = (firstSize / (1024 * 1024)).toFixed(1);
+            const firstTitle = firstVid.file_name || 'Video 1';
+            const firstStreamSrc = '/api/stream?post_id=' + post.id + (firstVid.file_id ? ('&file_id=' + encodeURIComponent(firstVid.file_id)) : '') + (firstVid.channel_message_id ? ('&msg_id=' + encodeURIComponent(firstVid.channel_message_id)) : '') + (firstVid.size ? ('&size=' + encodeURIComponent(firstVid.size)) : '');
+            const firstFileKey = firstVid.id || firstVid.channel_message_id || 0;
 
-        // SECTION 2: STREAMABLE VIDEOS (NEXT - EXACTLY 1 PLAYER ACTIVE)
-        if (streamableVideos.length > 0) {
-          const firstVid = streamableVideos[0];
-          const firstSize = Number(firstVid.size) || 0;
-          const firstSizeMB = (firstSize / (1024 * 1024)).toFixed(1);
-          const firstTitle = firstVid.file_name || 'Video 1';
-          const firstStreamSrc = '/api/stream?post_id=' + post.id + (firstVid.file_id ? ('&file_id=' + encodeURIComponent(firstVid.file_id)) : '') + (firstVid.channel_message_id ? ('&msg_id=' + encodeURIComponent(firstVid.channel_message_id)) : '') + (firstVid.size ? ('&size=' + encodeURIComponent(firstVid.size)) : '');
-          const firstFileKey = firstVid.id || firstVid.channel_message_id || 0;
+            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px; padding: 14px;">' +
+              '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">' +
+              '<div style="font-weight: 700; font-size: 0.92rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72%;" id="postActiveVideoTitle">🎬 ' + escapeHtml(firstTitle) + '</div>' +
+              '<div style="font-size: 0.74rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 12px; font-weight: 700; flex-shrink: 0;" id="postActiveVideoSize">' + firstSizeMB + ' MB</div>' +
+              '</div>' +
 
-          html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px; padding: 14px;">' +
-            '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">' +
-            '<div style="font-weight: 700; font-size: 0.92rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72%;" id="postActiveVideoTitle">🎬 ' + escapeHtml(firstTitle) + '</div>' +
-            '<div style="font-size: 0.74rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 12px; font-weight: 700; flex-shrink: 0;" id="postActiveVideoSize">' + firstSizeMB + ' MB</div>' +
-            '</div>' +
+              // EXACTLY 1 VIDEO PLAYER IN THE DOM
+              '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" oncontextmenu="return false;">' +
+              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture preload="auto" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
+              '</div>' +
 
-            // EXACTLY 1 VIDEO PLAYER IN THE DOM
-            '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" oncontextmenu="return false;">' +
-            '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture preload="auto" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
-            '</div>' +
+              '<div style="margin-top: 10px;">' +
+              '<button type="button" class="btn btn-secondary btn-sm" id="btnActiveVideoBot" data-pid="' + post.id + '" data-fid="' + firstFileKey + '" style="width: 100%; padding: 10px; font-weight: 600; font-size: 0.82rem; border-radius: 10px;">📥 Send This Video to Telegram Chat</button>' +
+              '</div>';
 
-            '<div style="margin-top: 10px;">' +
-            '<button type="button" class="btn btn-secondary btn-sm" id="btnActiveVideoBot" data-pid="' + post.id + '" data-fid="' + firstFileKey + '" style="width: 100%; padding: 10px; font-weight: 600; font-size: 0.82rem; border-radius: 10px;">📥 Send This Video to Telegram Chat</button>' +
-            '</div>';
+            // Playlist for videos
+            if (videosForPlayer.length > 1) {
+              html += '<div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">' +
+                '<div style="font-weight: 700; font-size: 0.84rem; color: #94a3b8; margin-bottom: 10px;">📁 Video Files (' + videosForPlayer.length + ') — Tap to play</div>' +
+                '<div style="display: flex; flex-direction: column; gap: 8px;" id="postVideoFilesList">' +
+                videosForPlayer.map((vid, idx) => {
+                  const vSize = Number(vid.size) || 0;
+                  const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
+                  const vName = vid.file_name || ('Video ' + (idx + 1));
+                  const isActive = idx === 0;
+                  const fKey = vid.id || vid.channel_message_id || 0;
 
-          // Playlist for streamable videos
-          if (streamableVideos.length > 1) {
-            html += '<div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">' +
-              '<div style="font-weight: 700; font-size: 0.84rem; color: #94a3b8; margin-bottom: 10px;">📁 Streamable Videos (' + streamableVideos.length + ') — Tap to play</div>' +
-              '<div style="display: flex; flex-direction: column; gap: 8px;" id="postVideoFilesList">' +
-              streamableVideos.map((vid, idx) => {
-                const vSize = Number(vid.size) || 0;
-                const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
-                const vName = vid.file_name || ('Video ' + (idx + 1));
-                const isActive = idx === 0;
-                const fKey = vid.id || vid.channel_message_id || 0;
+                  return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.14)' : 'rgba(255,255,255,0.04)') + '; border: 1px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s ease;">' +
+                    '<div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 65%;">' +
+                    '<span class="vid-play-icon" style="font-size: 1rem;">' + (isActive ? '▶️' : '🎬') + '</span>' +
+                    '<span style="font-weight: 600; font-size: 0.82rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + escapeHtml(vName) + '</span>' +
+                    '</div>' +
+                    '<div style="display: flex; align-items: center; gap: 6px;">' +
+                    '<span style="font-size: 0.72rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 6px; font-weight: 600;">' + vSizeMB + ' MB</span>' +
+                    '<button type="button" class="btn btn-secondary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="padding: 3px 8px; font-size: 0.72rem; border-radius: 6px; white-space: nowrap;">📥 Get</button>' +
+                    '</div>' +
+                    '</div>';
+                }).join('') +
+                '</div>' +
+                '</div>';
+            }
 
-                return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.14)' : 'rgba(255,255,255,0.04)') + '; border: 1px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s ease;">' +
-                  '<div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 65%;">' +
-                  '<span class="vid-play-icon" style="font-size: 1rem;">' + (isActive ? '▶️' : '🎬') + '</span>' +
-                  '<span style="font-weight: 600; font-size: 0.82rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + escapeHtml(vName) + '</span>' +
+            html += '</div>';
+          }
+
+          // SECTION 3: LARGE FILES (> 100 MB) — FAST DIRECT GET BUTTON FOR EACH
+          if (largeFiles.length > 0) {
+            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 16px; padding: 14px; margin-bottom: 18px;">' +
+              '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">' +
+              '<div style="font-weight: 700; font-size: 0.9rem; color: #fbbf24; display: flex; align-items: center; gap: 6px;">📦 Large Files (&gt; 100 MB)</div>' +
+              '<span style="font-size: 0.72rem; color: #fbbf24; background: rgba(245, 158, 11, 0.15); padding: 2px 8px; border-radius: 10px; font-weight: 700;">' + largeFiles.length + ' file(s)</span>' +
+              '</div>' +
+              '<div style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 12px;">Fast native Telegram delivery — tap below to get each file individually:</div>' +
+              '<div style="display: flex; flex-direction: column; gap: 10px;">' +
+              largeFiles.map((lf, lIdx) => {
+                const lfSize = Number(lf.size) || 0;
+                const lfSizeMB = (lfSize / (1024 * 1024)).toFixed(1);
+                const lfName = lf.file_name || ('Large File ' + (lIdx + 1));
+                const fKey = lf.id || lf.channel_message_id || 0;
+                const isVid = (lf.mime_type && lf.mime_type.startsWith('video/')) || /\.(mp4|mkv|mov|webm|avi)$/i.test(lfName);
+
+                return '<div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">' +
+                  '<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">' +
+                  '<div style="font-weight: 700; font-size: 0.85rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72%;">' + (isVid ? '🎬 ' : '📁 ') + escapeHtml(lfName) + '</div>' +
+                  '<div style="font-size: 0.74rem; background: rgba(245, 158, 11, 0.2); color: #fbbf24; padding: 2px 8px; border-radius: 8px; font-weight: 700; flex-shrink: 0;">' + lfSizeMB + ' MB</div>' +
                   '</div>' +
-                  '<div style="display: flex; align-items: center; gap: 6px;">' +
-                  '<span style="font-size: 0.72rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 6px; font-weight: 600;">' + vSizeMB + ' MB</span>' +
-                  '<button type="button" class="btn btn-secondary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="padding: 3px 8px; font-size: 0.72rem; border-radius: 6px; white-space: nowrap;">📥 Get</button>' +
+                  '<div style="display: flex; gap: 8px; align-items: center;">' +
+                  '<button type="button" class="btn btn-primary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="flex: 1; padding: 9px; font-weight: 700; font-size: 0.82rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 6px;">📥 Get This File (Telegram)</button>' +
+                  (isVid ? '<button type="button" class="btn btn-secondary btn-sm" data-act="stream-large-file" data-fileid="' + (lf.file_id || '') + '" data-msgid="' + (lf.channel_message_id || '') + '" data-size="' + lfSize + '" data-title="' + escapeHtml(lfName) + '" style="padding: 9px 12px; font-weight: 600; font-size: 0.78rem; border-radius: 8px; white-space: nowrap;">▶️ Stream</button>' : '') +
                   '</div>' +
                   '</div>';
               }).join('') +
@@ -3979,61 +4017,36 @@ const rawHtml = `<!DOCTYPE html>
               '</div>';
           }
 
-          html += '</div>';
-        }
+          // SECTION 4: MEGA LINK / DIRECT LINK
+          if (post.direct_link) {
+            const linkTitle = post.direct_link_title || 'Open Mega Link / Direct File';
+            html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 14px; padding: 12px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px;">' +
+              '<div style="font-weight: 700; font-size: 0.82rem; color: #34d399;">🔗 External Cloud Link</div>' +
+              '<a href="' + escapeHtml(post.direct_link) + '" target="_blank" rel="noopener noreferrer" class="btn" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; color: #fff; background: linear-gradient(135deg, #10b981, #059669); border-radius: 10px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">' +
+              '☁️ ' + escapeHtml(linkTitle) + ' ↗️' +
+              '</a>' +
+              '</div>';
+          }
 
-        // SECTION 3: LARGE FILES (> 100 MB) — FAST DIRECT GET BUTTON FOR EACH
-        if (largeFiles.length > 0) {
-          html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 16px; padding: 14px; margin-bottom: 18px;">' +
-            '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">' +
-            '<div style="font-weight: 700; font-size: 0.9rem; color: #fbbf24; display: flex; align-items: center; gap: 6px;">📦 Large Files (&gt; 100 MB)</div>' +
-            '<span style="font-size: 0.72rem; color: #fbbf24; background: rgba(245, 158, 11, 0.15); padding: 2px 8px; border-radius: 10px; font-weight: 700;">' + largeFiles.length + ' file(s)</span>' +
-            '</div>' +
-            '<div style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 12px;">Fast native Telegram delivery — tap below to get each file individually:</div>' +
-            '<div style="display: flex; flex-direction: column; gap: 10px;">' +
-            largeFiles.map((lf, lIdx) => {
-              const lfSize = Number(lf.size) || 0;
-              const lfSizeMB = (lfSize / (1024 * 1024)).toFixed(1);
-              const lfName = lf.file_name || ('Large File ' + (lIdx + 1));
-              const fKey = lf.id || lf.channel_message_id || 0;
-              const isVid = (lf.mime_type && lf.mime_type.startsWith('video/')) || /\.(mp4|mkv|mov|webm|avi)$/i.test(lfName);
-
-              return '<div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">' +
-                '<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">' +
-                '<div style="font-weight: 700; font-size: 0.85rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72%;">' + (isVid ? '🎬 ' : '📁 ') + escapeHtml(lfName) + '</div>' +
-                '<div style="font-size: 0.74rem; background: rgba(245, 158, 11, 0.2); color: #fbbf24; padding: 2px 8px; border-radius: 8px; font-weight: 700; flex-shrink: 0;">' + lfSizeMB + ' MB</div>' +
-                '</div>' +
-                '<div style="display: flex; gap: 8px; align-items: center;">' +
-                '<button type="button" class="btn btn-primary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="flex: 1; padding: 9px; font-weight: 700; font-size: 0.82rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 6px;">📥 Get This File (Telegram)</button>' +
-                (isVid ? '<button type="button" class="btn btn-secondary btn-sm" data-act="stream-large-file" data-fileid="' + (lf.file_id || '') + '" data-msgid="' + (lf.channel_message_id || '') + '" data-size="' + lfSize + '" data-title="' + escapeHtml(lfName) + '" style="padding: 9px 12px; font-weight: 600; font-size: 0.78rem; border-radius: 8px; white-space: nowrap;">▶️ Stream</button>' : '') +
-                '</div>' +
-                '</div>';
-            }).join('') +
-            '</div>' +
+          // SECTION 5: PRIMARY BOT ACTION (ALL FILES)
+          html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 18px; display: flex; flex-direction: column; gap: 8px;">' +
+            '<div style="font-size: 0.78rem; color: var(--text-muted); text-align: center;">Want all files forwarded directly to your Telegram chat?</div>' +
+            '<button type="button" class="btn btn-secondary" data-act="send-file-bot" data-id="' + post.id + '" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 10px;">' +
+            '🚀 Open &amp; Deliver All Files in Bot Chat' +
+            '</button>' +
             '</div>';
+
+          bodyEl.innerHTML = html;
+          if (typeof trackPostView === 'function' && post.id) {
+            trackPostView(post.id);
+          }
+        } catch (rErr) {
+          console.error('renderPostDetailPage error:', rErr);
+          const bodyEl = document.getElementById('postDetailPageBody');
+          if (bodyEl) {
+            bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to display post: ' + escapeHtml(rErr.message) + '</div>';
+          }
         }
-
-        // SECTION 4: MEGA LINK / DIRECT LINK
-        if (post.direct_link) {
-          const linkTitle = post.direct_link_title || 'Open Mega Link / Direct File';
-          html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 14px; padding: 12px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px;">' +
-            '<div style="font-weight: 700; font-size: 0.82rem; color: #34d399;">🔗 External Cloud Link</div>' +
-            '<a href="' + escapeHtml(post.direct_link) + '" target="_blank" rel="noopener noreferrer" class="btn" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; color: #fff; background: linear-gradient(135deg, #10b981, #059669); border-radius: 10px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">' +
-            '☁️ ' + escapeHtml(linkTitle) + ' ↗️' +
-            '</a>' +
-            '</div>';
-        }
-
-        // SECTION 5: PRIMARY BOT ACTION (ALL FILES)
-        html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px; margin-bottom: 18px; display: flex; flex-direction: column; gap: 8px;">' +
-          '<div style="font-size: 0.78rem; color: var(--text-muted); text-align: center;">Want all files forwarded directly to your Telegram chat?</div>' +
-          '<button type="button" class="btn btn-secondary" data-act="send-file-bot" data-id="' + post.id + '" style="width: 100%; padding: 11px; font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 10px;">' +
-          '🚀 Open &amp; Deliver All Files in Bot Chat' +
-          '</button>' +
-          '</div>';
-
-        bodyEl.innerHTML = html;
-        trackPostView(post.id);
       }
 
       async function openPostDetailPage(postId) {
@@ -4051,26 +4064,34 @@ const rawHtml = `<!DOCTYPE html>
           tg.BackButton.onClick(goBackToFeed);
         }
 
-        // 1. Instant cache check for 0ms transition
-        if (postDetailCache.has(postId)) {
-          renderPostDetailPage(postDetailCache.get(postId));
-          return;
-        }
-
-        // 2. Instant feed preview if post is already in feed list
-        const feedPost = (publicFeedPosts || []).find(p => p.id === postId);
-        if (feedPost) {
-          renderPostDetailPage(feedPost);
-          const spinEl = document.createElement('div');
-          spinEl.id = 'postDetailFilesSpinner';
-          spinEl.style.cssText = 'text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.85rem;';
-          spinEl.innerHTML = '<span style="display:inline-block; animation: spin 1s linear infinite;">⏳</span> Loading files...';
-          bodyEl.appendChild(spinEl);
-        } else {
-          bodyEl.innerHTML = '<div style="padding: 50px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 36px; margin-bottom: 12px;">⏳</div>Loading post...</div>';
-        }
-
         try {
+          const strId = String(postId);
+
+          // 1. Instant cache check for 0ms transition
+          if (postDetailCache.has(strId)) {
+            renderPostDetailPage(postDetailCache.get(strId));
+            return;
+          }
+
+          // 2. Instant feed preview if post is already in feed list
+          const feedPost = (typeof allPosts !== 'undefined' && Array.isArray(allPosts))
+            ? allPosts.find(p => String(p.id) === strId)
+            : null;
+
+          if (feedPost) {
+            bodyEl.innerHTML = '<div style="margin-bottom: 16px;">' +
+              '<div style="font-size: 1.25rem; font-weight: 800; color: #f8fafc; line-height: 1.35; margin-bottom: 6px;">' + escapeHtml(feedPost.title) + '</div>' +
+              '<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-muted);">' +
+              (feedPost.is_promoted ? '<span style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; font-weight: 800; padding: 2px 7px; border-radius: 6px;">⭐ Exclusive</span>' : '') +
+              '<span style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 6px;">🏷️ ' + escapeHtml(feedPost.category || 'All') + '</span>' +
+              '</div>' +
+              '</div>' +
+              (feedPost.preview_image ? '<div style="border-radius: 14px; overflow: hidden; background: #000; margin-bottom: 16px; text-align: center;"><img src="' + escapeHtml(feedPost.preview_image) + '" style="max-height: 280px; width: 100%; object-fit: contain;" /></div>' : '') +
+              '<div style="padding: 30px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 28px; margin-bottom: 8px;">⏳</div>Loading media &amp; files...</div>';
+          } else {
+            bodyEl.innerHTML = '<div style="padding: 50px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 36px; margin-bottom: 12px;">⏳</div>Loading post...</div>';
+          }
+
           const res = await fetch('/api/posts/' + postId + '?user_id=' + currentUserId);
           const data = await res.json();
           if (!data.success || !data.post) {
@@ -4078,9 +4099,10 @@ const rawHtml = `<!DOCTYPE html>
             return;
           }
 
-          postDetailCache.set(postId, data.post);
+          postDetailCache.set(strId, data.post);
           renderPostDetailPage(data.post);
         } catch (e) {
+          console.error('openPostDetailPage error:', e);
           bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to load post details: ' + escapeHtml(e.message) + '</div>';
         }
       }
