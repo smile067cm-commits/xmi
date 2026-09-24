@@ -3953,9 +3953,9 @@ const rawHtml = `<!DOCTYPE html>
               '<div style="font-size: 0.74rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 12px; font-weight: 700; flex-shrink: 0;" id="postActiveVideoSize">' + firstSizeMB + ' MB</div>' +
               '</div>' +
 
-              // EXACTLY 1 VIDEO PLAYER IN THE DOM!
+              // EXACTLY 1 VIDEO PLAYER IN THE DOM (No poster image, auto-buffered)
               '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" oncontextmenu="return false;">' +
-              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture preload="metadata" poster="' + escapeHtml(post.preview_image || '') + '" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
+              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture preload="auto" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
               '</div>' +
 
               '<div id="postLargeFileNotice" style="display: ' + (isFirstLarge ? 'block' : 'none') + '; margin-top: 10px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 10px; padding: 10px; font-size: 0.78rem; color: #fbbf24; text-align: center;">⚡ Large File (&gt; 100 MB) — Fast native Telegram delivery recommended</div>' +
@@ -4120,6 +4120,7 @@ const rawHtml = `<!DOCTYPE html>
                 }
               });
 
+              player.preload = 'auto';
               player.src = streamSrc;
               player.load();
               player.play().catch(e => console.log('Autoplay notice:', e));

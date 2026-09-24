@@ -116,7 +116,9 @@ export function createRouter() {
     timestamp: Date.now()
   }));
 
-  // -------------------------------------------------------------
+  // In-memory cache for Telegram getFile responses to eliminate latency on range chunks
+  const tgFilePathCache = new Map();
+
   // GET /api/stream - Secure Video & Media Stream Proxy (No external URLs exposed)
   // -------------------------------------------------------------
   const handleStream = async (request, env) => {
@@ -176,42 +178,61 @@ export function createRouter() {
 
       const isImage = Boolean(detectedMime && detectedMime.startsWith('image/'));
 
+      // Helper to fetch and cache Telegram file path
+      const getTelegramFilePath = async (fid) => {
+        const cached = tgFilePathCache.get(fid);
+        if (cached && (Date.now() - cached.timestamp < 3600000)) {
+          return cached;
+        }
+        const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fid)}`);
+        const tgData = await tgRes.json();
+        if (tgData.ok && tgData.result?.file_path) {
+          const fp = tgData.result.file_path;
+          let mime = detectedMime;
+          if (!mime) {
+            const fpLower = fp.toLowerCase();
+            if (fpLower.endsWith('.jpg') || fpLower.endsWith('.jpeg')) mime = 'image/jpeg';
+            else if (fpLower.endsWith('.png')) mime = 'image/png';
+            else if (fpLower.endsWith('.webp')) mime = 'image/webp';
+            else if (fpLower.endsWith('.gif')) mime = 'image/gif';
+            else if (fpLower.endsWith('.mp4')) mime = 'video/mp4';
+            else if (fpLower.endsWith('.webm')) mime = 'video/webm';
+            else if (fpLower.endsWith('.mkv')) mime = 'video/mp4';
+            else mime = 'video/mp4';
+          }
+          const info = {
+            filePath: fp,
+            fileSize: tgData.result.file_size || fileSize,
+            detectedMime: mime,
+            timestamp: Date.now()
+          };
+          tgFilePathCache.set(fid, info);
+          return info;
+        }
+        return null;
+      };
+
       // TIER 1: Use Telegram Bot API getFile for files <= 20MB or any Image
       // Blazingly fast CDN-backed delivery directly on Telegram's global edge network
       if (fileId && (isImage || fileSize <= 20 * 1024 * 1024)) {
         try {
-          const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
-          const tgData = await tgRes.json();
-
-          if (tgData.ok && tgData.result?.file_path) {
-            const filePath = tgData.result.file_path;
-            const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`;
-
-            // Auto-detect mime from Telegram file path if not already known
-            if (!detectedMime) {
-              const fpLower = filePath.toLowerCase();
-              if (fpLower.endsWith('.jpg') || fpLower.endsWith('.jpeg')) detectedMime = 'image/jpeg';
-              else if (fpLower.endsWith('.png')) detectedMime = 'image/png';
-              else if (fpLower.endsWith('.webp')) detectedMime = 'image/webp';
-              else if (fpLower.endsWith('.gif')) detectedMime = 'image/gif';
-              else if (fpLower.endsWith('.mp4')) detectedMime = 'video/mp4';
-              else if (fpLower.endsWith('.webm')) detectedMime = 'video/webm';
-              else if (fpLower.endsWith('.mkv')) detectedMime = 'video/mp4';
-              else detectedMime = 'video/mp4';
-            }
+          const fileInfo = await getTelegramFilePath(fileId);
+          if (fileInfo && fileInfo.filePath) {
+            const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${fileInfo.filePath}`;
+            const effectiveMime = fileInfo.detectedMime || detectedMime || 'video/mp4';
 
             const upstreamRes = await fetch(downloadUrl, { headers: forwardHeaders });
 
             if (upstreamRes.ok || upstreamRes.status === 206) {
               const responseHeaders = new Headers(corsHeaders);
               responseHeaders.set('Accept-Ranges', 'bytes');
-              responseHeaders.set('Content-Type', detectedMime);
+              responseHeaders.set('Content-Type', effectiveMime);
               responseHeaders.set('Content-Disposition', 'inline');
 
-              if (detectedMime.startsWith('image/')) {
+              if (effectiveMime.startsWith('image/')) {
                 responseHeaders.set('Cache-Control', 'public, max-age=604800, immutable');
               } else {
-                responseHeaders.set('Cache-Control', 'no-cache');
+                responseHeaders.set('Cache-Control', 'public, max-age=3600');
               }
 
               if (upstreamRes.headers.get('content-range')) {
@@ -265,15 +286,14 @@ export function createRouter() {
       // TIER 3 Fallback: If Render didn't respond and fileId exists, try Telegram Bot API
       if (fileId) {
         try {
-          const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
-          const tgData = await tgRes.json();
-          if (tgData.ok && tgData.result?.file_path) {
-            const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${tgData.result.file_path}`;
+          const fileInfo = await getTelegramFilePath(fileId);
+          if (fileInfo && fileInfo.filePath) {
+            const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${fileInfo.filePath}`;
             const upstreamRes = await fetch(downloadUrl, { headers: forwardHeaders });
             if (upstreamRes.ok || upstreamRes.status === 206) {
               const responseHeaders = new Headers(corsHeaders);
               responseHeaders.set('Accept-Ranges', 'bytes');
-              responseHeaders.set('Content-Type', detectedMime || 'video/mp4');
+              responseHeaders.set('Content-Type', fileInfo.detectedMime || detectedMime || 'video/mp4');
               responseHeaders.set('Content-Disposition', 'inline');
               responseHeaders.set('Cache-Control', 'no-cache');
               if (upstreamRes.headers.get('content-range')) responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
