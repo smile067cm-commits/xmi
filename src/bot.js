@@ -474,7 +474,7 @@ export function createBot(env) {
         ]
       ];
 
-      if (post.preview_image) {
+      if (post.preview_image && (post.preview_image.endsWith('.jpg') || post.preview_image.endsWith('.png') || post.preview_image.endsWith('.webp') || post.preview_image.includes('.jpg') || post.preview_image.includes('.png'))) {
         try {
           await ctx.replyWithPhoto(post.preview_image, {
             caption,
@@ -483,18 +483,32 @@ export function createBot(env) {
             ...Markup.inlineKeyboard(postKeyboard)
           });
         } catch (e) {
+          try {
+            await ctx.reply(caption, {
+              parse_mode: 'Markdown',
+              protect_content: true,
+              ...Markup.inlineKeyboard(postKeyboard)
+            });
+          } catch (e2) {
+            await ctx.reply(cleanTitle, {
+              protect_content: true,
+              ...Markup.inlineKeyboard(postKeyboard)
+            }).catch(() => {});
+          }
+        }
+      } else {
+        try {
           await ctx.reply(caption, {
             parse_mode: 'Markdown',
             protect_content: true,
             ...Markup.inlineKeyboard(postKeyboard)
           });
+        } catch (e2) {
+          await ctx.reply(cleanTitle, {
+            protect_content: true,
+            ...Markup.inlineKeyboard(postKeyboard)
+          }).catch(() => {});
         }
-      } else {
-        await ctx.reply(caption, {
-          parse_mode: 'Markdown',
-          protect_content: true,
-          ...Markup.inlineKeyboard(postKeyboard)
-        });
       }
     }
 
@@ -606,10 +620,13 @@ export function createBot(env) {
   }
 
   // -------------------------------------------------------------
-  // /start handler with Deep Linking
+  // /start handler with Deep Linking (Case-Insensitive & Typo-Tolerant)
   // -------------------------------------------------------------
-  bot.start(async (ctx) => {
-    const payload = ctx.startPayload || '';
+  const handleStart = async (ctx) => {
+    let payload = ctx.startPayload || '';
+    if (!payload && ctx.match && ctx.match[2]) {
+      payload = ctx.match[2].trim();
+    }
     const userId = ctx.from?.id;
 
     // 1. Referral Deep Link: ref_<inviter_id>
@@ -748,7 +765,10 @@ export function createBot(env) {
 
     // Default Main Menu
     return await showMainMenu(ctx);
-  });
+  };
+
+  bot.start(handleStart);
+  bot.hears(/^\/(start|Start|START|stsrt)(?:@\w+)?(?:\s+(.*))?$/i, handleStart);
 
   bot.action('main_menu', showMainMenu);
   bot.action('admin_main_menu', showMainMenu);
