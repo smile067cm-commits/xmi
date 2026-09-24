@@ -324,8 +324,7 @@ export function createRouter() {
     }
   };
 
-  router.head('/api/stream', handleStream);
-  router.get('/api/stream', handleStream);
+  router.all('/api/stream', handleStream);
 
   // -------------------------------------------------------------
   // GET /api/posts - Public posts
