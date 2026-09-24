@@ -3944,8 +3944,7 @@ const rawHtml = `<!DOCTYPE html>
             const firstSize = Number(firstVid.size) || 0;
             const firstSizeMB = (firstSize / (1024 * 1024)).toFixed(1);
             const isFirstLarge = firstSize > 100 * 1024 * 1024;
-            const firstTitle = firstVid.file_name || 'Video 1';
-            const firstStreamSrc = '/api/stream?post_id=' + post.id + (firstVid.file_id ? ('&file_id=' + encodeURIComponent(firstVid.file_id)) : '');
+            const firstStreamSrc = '/api/stream?post_id=' + post.id + (firstVid.file_id ? ('&file_id=' + encodeURIComponent(firstVid.file_id)) : '') + (firstVid.channel_message_id ? ('&msg_id=' + encodeURIComponent(firstVid.channel_message_id)) : '') + (firstVid.size ? ('&size=' + encodeURIComponent(firstVid.size)) : '');
 
             html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px; padding: 14px;">' +
               '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">' +
@@ -4096,8 +4095,7 @@ const rawHtml = `<!DOCTYPE html>
               const vSize = Number(vid.size) || 0;
               const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
               const isLarge = vSize > 100 * 1024 * 1024;
-              const vTitle = vid.file_name || ('Video ' + (vIdx + 1));
-              const streamSrc = '/api/stream?post_id=' + currentDetailPost.id + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '');
+              const streamSrc = '/api/stream?post_id=' + currentDetailPost.id + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '') + (vid.channel_message_id ? ('&msg_id=' + encodeURIComponent(vid.channel_message_id)) : '') + (vid.size ? ('&size=' + encodeURIComponent(vid.size)) : '');
 
               const titleEl = document.getElementById('postActiveVideoTitle');
               if (titleEl) titleEl.textContent = '🎬 ' + vTitle;

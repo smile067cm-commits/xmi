@@ -127,11 +127,11 @@ export function createRouter() {
       const postId = url.searchParams.get('post_id') || url.searchParams.get('id');
       let fileId = url.searchParams.get('file_id');
       let channelMsgId = url.searchParams.get('msg_id');
+      let fileSize = Number(url.searchParams.get('size')) || 0;
       let detectedMime = null;
-      let fileSize = 0;
 
-      // 1. Resolve file info if post_id is provided
-      if (postId) {
+      // 1. Only resolve file info from database if missing either fileId or channelMsgId
+      if (postId && (!channelMsgId || !fileId || !fileSize)) {
         const post = await getPostById(env, postId);
         if (post && post.folders) {
           const files = (post.folders || []).flatMap(f => f.files || []);
@@ -143,9 +143,9 @@ export function createRouter() {
             targetFile = files.find(f => (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name))) || files[0];
           }
           if (targetFile) {
-            fileId = targetFile.file_id;
-            channelMsgId = targetFile.channel_message_id;
-            fileSize = Number(targetFile.size) || 0;
+            fileId = targetFile.file_id || fileId;
+            channelMsgId = targetFile.channel_message_id || channelMsgId;
+            fileSize = Number(targetFile.size) || fileSize;
             if (targetFile.mime_type) {
               detectedMime = targetFile.mime_type;
             } else if (targetFile.file_name) {
