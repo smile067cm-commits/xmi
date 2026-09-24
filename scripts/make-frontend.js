@@ -2106,6 +2106,12 @@ const rawHtml = `<!DOCTYPE html>
       const badge = document.getElementById('postPhotoCounterBadge');
       if (badge) badge.textContent = (activePhotoIndex + 1) + ' / ' + currentPostPictures.length;
 
+      const photoViewsEl = document.getElementById('postActivePhotoViews');
+      if (photoViewsEl) {
+        photoViewsEl.textContent = pic.view_count || 0;
+        if (pic.id) photoViewsEl.setAttribute('data-fview-id', pic.id);
+      }
+
       document.querySelectorAll('.photo-thumb-item').forEach((t, idx) => {
         if (idx === activePhotoIndex) {
           t.style.borderColor = '#38bdf8';
@@ -2114,6 +2120,10 @@ const rawHtml = `<!DOCTYPE html>
           t.style.borderColor = 'rgba(255,255,255,0.12)';
         }
       });
+
+      if (pic.id && currentDetailPost) {
+        trackFileView(currentDetailPost.id, pic.id);
+      }
     }
 
     function closeImageLightbox() {
@@ -2183,10 +2193,46 @@ const rawHtml = `<!DOCTYPE html>
 
       setupEventListeners();
 
+      // Check if user was viewing a post before page refresh or opened a direct post link
+      checkInitialPostRoute();
+
       // Start presence heartbeat
       sendAppHeartbeat();
       setInterval(sendAppHeartbeat, 60000);
     }
+
+    function checkInitialPostRoute() {
+      try {
+        let targetPostId = null;
+        const hash = window.location.hash || '';
+        const hashMatch = hash.match(/post[=_](\d+)|^#(\d+)$/i);
+        if (hashMatch) {
+          targetPostId = hashMatch[1] || hashMatch[2];
+        }
+        if (!targetPostId) {
+          const urlParams = new URLSearchParams(window.location.search);
+          targetPostId = urlParams.get('post') || urlParams.get('post_id');
+        }
+        if (!targetPostId) {
+          try { targetPostId = sessionStorage.getItem('active_post_id'); } catch (_) {}
+        }
+        if (targetPostId) {
+          openPostDetailPage(targetPostId);
+        }
+      } catch (e) {
+        console.warn('checkInitialPostRoute error:', e);
+      }
+    }
+
+    window.addEventListener('hashchange', () => {
+      const hash = window.location.hash || '';
+      const m = hash.match(/post[=_](\d+)|^#(\d+)$/i);
+      if (m) {
+        openPostDetailPage(m[1] || m[2]);
+      } else if (!hash || hash === '#home' || hash === '#feed') {
+        goBackToFeed();
+      }
+    });
 
     // Generate Destination Link for Admin to Shorten
     async function generateNewDestLink() {
@@ -3940,6 +3986,13 @@ const rawHtml = `<!DOCTYPE html>
         if (tg?.BackButton) {
           tg.BackButton.hide();
         }
+
+        try {
+          if (window.location.hash.startsWith('#post')) {
+            history.replaceState(null, '', window.location.pathname + (window.location.search || ''));
+          }
+          sessionStorage.removeItem('active_post_id');
+        } catch (_) {}
       }
 
       function renderPostDetailPage(post) {
@@ -3953,14 +4006,16 @@ const rawHtml = `<!DOCTYPE html>
           // 1. Gather all pictures (Cover + Image files)
           const pictures = [];
           if (post.preview_image) {
-            pictures.push({ url: post.preview_image, title: post.title + ' (Cover)' });
+            pictures.push({ id: 0, url: post.preview_image, title: post.title + ' (Cover)', view_count: post.view_count || 0 });
           }
           allFiles.forEach(f => {
             const isImg = (f.mime_type && f.mime_type.startsWith('image/')) || (f.file_name && /\.(jpe?g|png|webp|gif)$/i.test(f.file_name));
             if (isImg && f.file_id) {
               pictures.push({
+                id: f.id || f.channel_message_id,
                 url: '/api/stream?post_id=' + post.id + '&file_id=' + encodeURIComponent(f.file_id),
-                title: f.file_name || 'Photo'
+                title: f.file_name || 'Photo',
+                view_count: f.view_count || 0
               });
             }
           });
@@ -4021,7 +4076,10 @@ const rawHtml = `<!DOCTYPE html>
             html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px;">' +
               '<div style="padding: 12px 16px; font-weight: 700; font-size: 0.88rem; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">' +
               '<span>🖼️ Photos (' + pictures.length + ')</span>' +
+              '<div style="display: flex; align-items: center; gap: 8px;">' +
+              '<span style="font-size: 0.74rem; background: rgba(255,255,255,0.06); color: #cbd5e1; padding: 2px 8px; border-radius: 10px; font-weight: 600;">👁️ <span id="postActivePhotoViews" data-fview-id="' + (curPic.id || 0) + '">' + (curPic.view_count || 0) + '</span> views</span>' +
               '<span style="font-size: 0.75rem; color: var(--text-muted);">' + (pictures.length > 1 ? '‹ Swipe or tap arrows ›' : 'Tap photo to Zoom') + '</span>' +
+              '</div>' +
               '</div>' +
               '<div style="position: relative; user-select: none; max-height: 380px; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden;" id="postDetailMainPhotoWrap">' +
               '<img id="postDetailMainPhoto" src="' + escapeHtml(curPic.url) + '" alt="" style="max-height: 380px; width: 100%; object-fit: contain; cursor: pointer;" />' +
@@ -4054,18 +4112,22 @@ const rawHtml = `<!DOCTYPE html>
             const firstSize = Number(firstVid.size) || 0;
             const firstSizeMB = (firstSize / (1024 * 1024)).toFixed(1);
             const firstTitle = firstVid.file_name || 'Video 1';
+            const firstVidKey = firstVid.id || firstVid.channel_message_id || 0;
             const firstStreamSrc = '/api/stream?post_id=' + post.id + (firstVid.file_id ? ('&file_id=' + encodeURIComponent(firstVid.file_id)) : '') + (firstVid.channel_message_id ? ('&msg_id=' + encodeURIComponent(firstVid.channel_message_id)) : '') + (firstVid.size ? ('&size=' + encodeURIComponent(firstVid.size)) : '');
 
             html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px; padding: 14px;">' +
               '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">' +
-              '<div style="font-weight: 700; font-size: 0.92rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72%;" id="postActiveVideoTitle">🎬 ' + escapeHtml(firstTitle) + '</div>' +
-              '<div style="font-size: 0.74rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 12px; font-weight: 700; flex-shrink: 0;" id="postActiveVideoSize">' + firstSizeMB + ' MB</div>' +
+              '<div style="font-weight: 700; font-size: 0.92rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 58%;" id="postActiveVideoTitle">🎬 ' + escapeHtml(firstTitle) + '</div>' +
+              '<div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">' +
+              '<div style="font-size: 0.74rem; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 8px; border-radius: 12px; font-weight: 700;" id="postActiveVideoSize">' + firstSizeMB + ' MB</div>' +
+              '<div style="font-size: 0.74rem; background: rgba(255, 255, 255, 0.08); color: #cbd5e1; padding: 2px 8px; border-radius: 12px; font-weight: 600;" id="postActiveVideoViews">👁️ <span class="vcount" data-fview-id="' + firstVidKey + '">' + (firstVid.view_count || 0) + '</span> views</div>' +
+              '</div>' +
               '</div>' +
 
               // EXACTLY 1 VIDEO PLAYER IN THE DOM WITH FULLSCREEN CAPABILITY
               '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" id="postVideoPlayerWrap" oncontextmenu="return false;">' +
               '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" preload="metadata" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
-              '<button type="button" id="btnVideoFullscreen" style="position: absolute; top: 10px; right: 10px; z-index: 10; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; padding: 5px 10px; font-size: 0.76rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 5px; backdrop-filter: blur(4px);">⛶ Fullscreen</button>' +
+              '<button type="button" id="btnVideoFullscreen" style="position: absolute; top: 10px; right: 10px; z-index: 10; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; padding: 5px 10px; font-size: 0.76rem; font-weight: 700; cursor: pointer; display: flex; align-items: gap: 5px; backdrop-filter: blur(4px);">⛶ Fullscreen</button>' +
               '<button type="button" id="btnVideoExitFullscreen" style="display: none; position: absolute; top: 16px; right: 16px; z-index: 1000000; background: rgba(239,68,68,0.85); color: #fff; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.8);">✕</button>' +
               '</div>' +
 
@@ -4083,14 +4145,16 @@ const rawHtml = `<!DOCTYPE html>
                   const vSize = Number(vid.size) || 0;
                   const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
                   const vName = vid.file_name || ('Video ' + (idx + 1));
+                  const vKey = vid.id || vid.channel_message_id || 0;
                   const isActive = idx === 0;
 
                   return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.14)' : 'rgba(255,255,255,0.04)') + '; border: 1px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s ease;">' +
-                    '<div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 75%;">' +
+                    '<div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 65%;">' +
                     '<span class="vid-play-icon" style="font-size: 1rem;">' + (isActive ? '▶️' : '🎬') + '</span>' +
                     '<span style="font-weight: 600; font-size: 0.82rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + escapeHtml(vName) + '</span>' +
                     '</div>' +
-                    '<div style="display: flex; align-items: center; gap: 6px;">' +
+                    '<div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">' +
+                    '<span style="font-size: 0.72rem; color: #94a3b8; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 6px; font-weight: 600;">👁️ <span data-fview-id="' + vKey + '">' + (vid.view_count || 0) + '</span> views</span>' +
                     '<span style="font-size: 0.72rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 6px; font-weight: 600;">' + vSizeMB + ' MB</span>' +
                     '</div>' +
                     '</div>';
@@ -4120,8 +4184,11 @@ const rawHtml = `<!DOCTYPE html>
 
                 return '<div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">' +
                   '<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">' +
-                  '<div style="font-weight: 700; font-size: 0.85rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 72%;">' + (isVid ? '🎬 ' : '📁 ') + escapeHtml(lfName) + '</div>' +
-                  '<div style="font-size: 0.74rem; background: rgba(245, 158, 11, 0.2); color: #fbbf24; padding: 2px 8px; border-radius: 8px; font-weight: 700; flex-shrink: 0;">' + lfSizeMB + ' MB</div>' +
+                  '<div style="font-weight: 700; font-size: 0.85rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55%;">' + (isVid ? '🎬 ' : '📁 ') + escapeHtml(lfName) + '</div>' +
+                  '<div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">' +
+                  '<span style="font-size: 0.72rem; background: rgba(255, 255, 255, 0.06); color: #cbd5e1; padding: 2px 8px; border-radius: 8px; font-weight: 600;">👁️ <span data-fview-id="' + fKey + '">' + (lf.view_count || 0) + '</span> views</span>' +
+                  '<span style="font-size: 0.74rem; background: rgba(245, 158, 11, 0.2); color: #fbbf24; padding: 2px 8px; border-radius: 8px; font-weight: 700;">' + lfSizeMB + ' MB</span>' +
+                  '</div>' +
                   '</div>' +
                   '<div style="display: flex; gap: 8px; align-items: center;">' +
                   '<button type="button" class="btn btn-primary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="width: 100%; padding: 10px; font-weight: 700; font-size: 0.82rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 6px;">📥 Get File (' + lfSizeMB + ' MB)</button>' +
@@ -4157,6 +4224,9 @@ const rawHtml = `<!DOCTYPE html>
           const playerEl = document.getElementById('postActiveVideoPlayer');
           if (playerEl && videosForPlayer.length > 0) {
             const firstV = videosForPlayer[0];
+            playerEl.onplay = () => {
+              if (firstV) trackFileView(post.id, firstV.id || firstV.channel_message_id);
+            };
             playerEl.onerror = () => {
               if (firstV && firstV.channel_message_id) {
                 const directUrl = 'https://xmi-stream-bot.onrender.com/stream?channel_id=-1004415998750&msg_id=' + encodeURIComponent(firstV.channel_message_id);
@@ -4191,6 +4261,11 @@ const rawHtml = `<!DOCTYPE html>
         if (viewFeed) viewFeed.style.display = 'none';
         viewDetail.style.display = 'block';
         window.scrollTo({ top: 0, behavior: 'smooth' });
+
+        try {
+          history.replaceState(null, '', '#post=' + postId);
+          sessionStorage.setItem('active_post_id', String(postId));
+        } catch (_) {}
 
         if (tg?.BackButton) {
           tg.BackButton.show();
@@ -4244,11 +4319,8 @@ const rawHtml = `<!DOCTYPE html>
         const botUrl = 'https://t.me/' + botUsername + '?start=post_' + postId;
         if (tg && tg.openTelegramLink) {
           tg.openTelegramLink(botUrl);
-          setTimeout(() => {
-            if (tg.close) tg.close();
-          }, 400);
         } else {
-          window.location.href = botUrl;
+          window.open(botUrl, '_blank');
         }
       }
 
@@ -4256,11 +4328,91 @@ const rawHtml = `<!DOCTYPE html>
         const botUrl = 'https://t.me/' + botUsername + '?start=file_' + postId + '_' + fileId;
         if (tg && tg.openTelegramLink) {
           tg.openTelegramLink(botUrl);
-          setTimeout(() => {
-            if (tg.close) tg.close();
-          }, 400);
         } else {
-          window.location.href = botUrl;
+          window.open(botUrl, '_blank');
+        }
+      }
+
+      function trackFileView(postId, fileId) {
+        if (!postId || !fileId) return;
+        fetch('/api/file-view', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            post_id: postId,
+            file_id: fileId,
+            user_id: currentUserId,
+            username: currentUserName
+          })
+        }).then(r => r.json()).then(data => {
+          if (data && data.success && data.view_count !== undefined) {
+            document.querySelectorAll('[data-fview-id="' + fileId + '"]').forEach(el => {
+              el.textContent = data.view_count;
+            });
+          }
+        }).catch(() => {});
+      }
+
+      async function deliverFileInApp(postId, fileId, btnElement) {
+        if (!postId || !fileId) return;
+        const origText = btnElement ? btnElement.innerHTML : '📥 Get File';
+        if (btnElement) {
+          btnElement.innerHTML = '⏳ Delivering to chat...';
+          btnElement.disabled = true;
+        }
+
+        try {
+          const res = await fetch('/api/deliver-file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              post_id: postId,
+              file_id: fileId,
+              user_id: currentUserId,
+              username: currentUserName
+            })
+          });
+          const data = await res.json();
+
+          if (data && data.delivered) {
+            showToast('✅ File sent to your Telegram chat! Check messages.');
+            if (btnElement) {
+              btnElement.innerHTML = '✅ Sent to Chat';
+              btnElement.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+              setTimeout(() => {
+                btnElement.disabled = false;
+                btnElement.innerHTML = origText;
+                btnElement.style.background = '';
+              }, 4000);
+            }
+            if (data.view_count !== undefined) {
+              document.querySelectorAll('[data-fview-id="' + fileId + '"]').forEach(el => {
+                el.textContent = data.view_count;
+              });
+            }
+            return;
+          }
+
+          if (data && data.fallback_url) {
+            showToast('🚀 Opening bot chat to deliver file...');
+            forwardToTelegramSingleFile(postId, fileId);
+            if (btnElement) {
+              btnElement.disabled = false;
+              btnElement.innerHTML = origText;
+            }
+            return;
+          }
+
+          showToast('⚠️ Delivery notice: ' + (data?.error || 'Could not send file'));
+          forwardToTelegramSingleFile(postId, fileId);
+        } catch (e) {
+          console.warn('deliverFileInApp error:', e);
+          forwardToTelegramSingleFile(postId, fileId);
+        } finally {
+          if (btnElement) {
+            btnElement.disabled = false;
+            btnElement.innerHTML = origText;
+          }
         }
       }
 
@@ -4328,7 +4480,7 @@ const rawHtml = `<!DOCTYPE html>
           e.stopPropagation();
           const pId = singleBtn.dataset.pid;
           const fId = singleBtn.dataset.fid;
-          if (pId && fId) forwardToTelegramSingleFile(pId, fId);
+          if (pId && fId) deliverFileInApp(pId, fId, singleBtn);
           return;
         }
 
@@ -4345,12 +4497,17 @@ const rawHtml = `<!DOCTYPE html>
               const vSize = Number(vid.size) || 0;
               const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
               const vTitle = vid.file_name || ('Video ' + (vIdx + 1));
+              const vKey = vid.id || vid.channel_message_id || 0;
               const streamSrc = '/api/stream?post_id=' + currentDetailPost.id + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '') + (vid.channel_message_id ? ('&msg_id=' + encodeURIComponent(vid.channel_message_id)) : '') + (vid.size ? ('&size=' + encodeURIComponent(vid.size)) : '');
 
               const titleEl = document.getElementById('postActiveVideoTitle');
               if (titleEl) titleEl.textContent = '🎬 ' + vTitle;
               const sizeEl = document.getElementById('postActiveVideoSize');
               if (sizeEl) sizeEl.textContent = vSizeMB + ' MB';
+              const viewsEl = document.getElementById('postActiveVideoViews');
+              if (viewsEl) {
+                viewsEl.innerHTML = '👁️ <span class="vcount" data-fview-id="' + vKey + '">' + (vid.view_count || 0) + '</span> views';
+              }
 
               document.querySelectorAll('.video-file-card').forEach((c, idx) => {
                 const icon = c.querySelector('.vid-play-icon');
@@ -4369,6 +4526,8 @@ const rawHtml = `<!DOCTYPE html>
               player.src = streamSrc;
               player.load();
               player.play().catch(e => console.log('Autoplay notice:', e));
+
+              trackFileView(currentDetailPost.id, vKey);
 
               player.onerror = () => {
                 if (vid.channel_message_id) {

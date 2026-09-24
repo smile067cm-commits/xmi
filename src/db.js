@@ -253,6 +253,68 @@ export async function getAllPostsForAdmin(env) {
 }
 
 /**
+ * Retrieve file view counts map for a specific post { [file_id]: count }
+ */
+export async function getFileViewsForPost(env, postId) {
+  if (!env.SUPABASE_URL || !postId) return {};
+  try {
+    const url = `${getSupabaseBaseUrl(env)}/settings?key=eq.file_views_${postId}&select=value`;
+    const res = await fetch(url, { method: 'GET', headers: getSupabaseHeaders(env) });
+    if (res.ok) {
+      const rows = await res.json();
+      if (rows && rows[0]?.value) {
+        return typeof rows[0].value === 'string' ? JSON.parse(rows[0].value) : rows[0].value;
+      }
+    }
+  } catch (err) {
+    console.warn('getFileViewsForPost warning:', err.message);
+  }
+  return {};
+}
+
+/**
+ * Increment view count for a specific file in a post
+ */
+export async function incrementFileView(env, postId, fileId, userId = null, username = null, firstName = null) {
+  if (!env.SUPABASE_URL || !postId || !fileId) return 1;
+  try {
+    const viewsMap = await getFileViewsForPost(env, postId);
+    const fKey = String(fileId);
+    viewsMap[fKey] = (Number(viewsMap[fKey]) || 0) + 1;
+
+    const url = `${getSupabaseBaseUrl(env)}/settings`;
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...getSupabaseHeaders(env),
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        key: `file_views_${postId}`,
+        value: viewsMap,
+        updated_at: new Date().toISOString()
+      })
+    });
+
+    if (userId) {
+      recordFileAccess(env, {
+        post_id: postId,
+        file_id: fKey,
+        item_name: `View file #${fKey}`,
+        user_id: userId,
+        username,
+        first_name: firstName
+      }).catch(() => {});
+    }
+
+    return viewsMap[fKey];
+  } catch (err) {
+    console.warn('incrementFileView warning:', err.message);
+    return 1;
+  }
+}
+
+/**
  * Fetch single post with folders, direct links, comments, and like status
  */
 export async function getPostById(env, postId, userId = null, isAdmin = false) {
@@ -279,6 +341,14 @@ export async function getPostById(env, postId, userId = null, isAdmin = false) {
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
   
   const folders = (post.folders || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  const fileViews = await getFileViewsForPost(env, postId);
+  for (const f of folders) {
+    if (Array.isArray(f.files)) {
+      for (const file of f.files) {
+        file.view_count = Number(fileViews[file.id] || fileViews[file.channel_message_id] || 0);
+      }
+    }
+  }
 
   return {
     id: post.id,

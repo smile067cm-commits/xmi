@@ -14,6 +14,8 @@ import {
   togglePromotePost,
   recordPostView,
   recordFileAccess,
+  incrementFileView,
+  getFileViewsForPost,
   getPostAnalytics,
   getGlobalStats,
   toggleSavePost,
@@ -1305,6 +1307,165 @@ export function createRouter() {
       return jsonResponse({ success: true });
     } catch (err) {
       return jsonResponse({ success: false, error: err.message }, 200);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // ALL /api/file-view - Increment view count for a specific file
+  // -------------------------------------------------------------
+  router.all('/api/file-view', async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      let postId = url.searchParams.get('post_id');
+      let fileId = url.searchParams.get('file_id');
+      let userId = url.searchParams.get('user_id');
+      let username = url.searchParams.get('username');
+
+      if (request.method === 'POST') {
+        try {
+          const body = await request.json();
+          if (body) {
+            postId = body.post_id || postId;
+            fileId = body.file_id || fileId;
+            userId = body.user_id || userId;
+            username = body.username || username;
+          }
+        } catch (_) {}
+      }
+
+      if (!postId || !fileId) {
+        return jsonResponse({ success: false, error: 'post_id and file_id are required' }, 400);
+      }
+
+      const count = await incrementFileView(env, postId, fileId, userId, username);
+      return jsonResponse({ success: true, post_id: postId, file_id: fileId, view_count: count });
+    } catch (err) {
+      return jsonResponse({ success: false, error: err.message }, 200);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/deliver-file - Deliver file directly to Telegram chat (keeps MiniApp open)
+  // -------------------------------------------------------------
+  router.post('/api/deliver-file', async (request, env) => {
+    try {
+      const body = await request.json().catch(() => ({}));
+      const { post_id, file_id, user_id, username, first_name } = body || {};
+
+      if (!post_id || !file_id) {
+        return jsonResponse({ success: false, error: 'Missing post_id or file_id' }, 400);
+      }
+
+      const botUsername = env.BOT_USERNAME || 'Xminty_bot';
+      const fallbackUrl = `https://t.me/${botUsername}?start=file_${post_id}_${file_id}`;
+
+      if (!user_id || !env.BOT_TOKEN) {
+        return jsonResponse({
+          success: false,
+          fallback_url: fallbackUrl,
+          message: 'User ID missing or bot token not configured'
+        });
+      }
+
+      // Fetch post to get the target file details and protection settings
+      const post = await getPostById(env, post_id, user_id, true);
+      if (!post) {
+        return jsonResponse({ success: false, error: 'Post not found', fallback_url: fallbackUrl }, 404);
+      }
+
+      const allFiles = (post.folders || []).flatMap(f => f.files || []);
+      const file = allFiles.find(f => String(f.id) === String(file_id) || String(f.channel_message_id) === String(file_id) || String(f.file_id) === String(file_id));
+
+      if (!file) {
+        return jsonResponse({ success: false, error: 'File not found in post', fallback_url: fallbackUrl }, 404);
+      }
+
+      // Increment file view count
+      const viewCount = await incrementFileView(env, post_id, file.id || file.channel_message_id, user_id, username, first_name);
+
+      const protectContent = Boolean(post.protect_content);
+      const fileName = file.file_name || 'File';
+      const sizeMB = file.size ? (Number(file.size) / (1024 * 1024)).toFixed(1) : 'Unknown';
+      const safeTitle = String(post.title || '').replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
+      const safeFileName = String(fileName).replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
+      const captionText = `📁 *${safeFileName}*\n` +
+        `📦 *Size:* \`${sizeMB} MB\`\n` +
+        `📌 *From Post:* \`${safeTitle}\``;
+
+      let deliveryResult = null;
+      const tgApiBase = `https://api.telegram.org/bot${env.BOT_TOKEN}`;
+
+      // Method A: Copy message from storage channel if channel_message_id exists
+      if (file.channel_message_id && env.CHANNEL_ID) {
+        const copyRes = await fetch(`${tgApiBase}/copyMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: Number(user_id),
+            from_chat_id: env.CHANNEL_ID,
+            message_id: Number(file.channel_message_id),
+            caption: captionText,
+            parse_mode: 'Markdown',
+            protect_content: protectContent
+          })
+        });
+        deliveryResult = await copyRes.json().catch(() => null);
+      }
+
+      // Method B: Send document/video using Telegram file_id
+      if ((!deliveryResult || !deliveryResult.ok) && file.file_id) {
+        const isVideo = (file.mime_type && file.mime_type.startsWith('video/')) || /\.(mp4|mkv|mov|webm)$/i.test(fileName);
+        const sendEndpoint = isVideo ? 'sendVideo' : 'sendDocument';
+        const payload = {
+          chat_id: Number(user_id),
+          caption: captionText,
+          parse_mode: 'Markdown',
+          protect_content: protectContent
+        };
+        if (isVideo) {
+          payload.video = file.file_id;
+        } else {
+          payload.document = file.file_id;
+        }
+
+        const sendRes = await fetch(`${tgApiBase}/${sendEndpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        deliveryResult = await sendRes.json().catch(() => null);
+      }
+
+      if (deliveryResult && deliveryResult.ok) {
+        const sentMsgId = deliveryResult.result?.message_id;
+
+        // Auto-delete timer handling
+        if (post.auto_delete_minutes && Number(post.auto_delete_minutes) > 0 && sentMsgId) {
+          const deleteAfter = Number(post.auto_delete_minutes);
+          const deleteAt = new Date(Date.now() + deleteAfter * 60 * 1000).toISOString();
+          addEphemeralMessages(env, [{
+            chat_id: Number(user_id),
+            message_id: sentMsgId,
+            delete_at: deleteAt
+          }]).catch(() => {});
+        }
+
+        return jsonResponse({
+          success: true,
+          delivered: true,
+          view_count: viewCount,
+          message: 'File sent directly to your Telegram chat!'
+        });
+      } else {
+        return jsonResponse({
+          success: false,
+          need_start: true,
+          fallback_url: fallbackUrl,
+          telegram_error: deliveryResult?.description || 'Could not deliver directly'
+        });
+      }
+    } catch (err) {
+      return jsonResponse({ success: false, error: err.message }, 500);
     }
   });
 
