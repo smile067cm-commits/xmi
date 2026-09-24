@@ -1859,6 +1859,9 @@ const rawHtml = `<!DOCTYPE html>
         <button type="button" id="btnLightboxClose" style="background: rgba(239,68,68,0.4); color: #fff; border: 1px solid rgba(239,68,68,0.7); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; margin-left: 4px;" title="Close">✕</button>
       </div>
     </div>
+    <!-- Previous & Next Arrow Buttons on Lightbox -->
+    <button type="button" id="btnLightboxPrev" class="lightbox-nav-btn" style="position: fixed; left: 12px; top: 50%; transform: translateY(-50%); z-index: 100003; background: rgba(0,0,0,0.65); color: #fff; border: 1px solid rgba(255,255,255,0.25); border-radius: 50%; width: 44px; height: 44px; font-size: 1.6rem; display: none; align-items: center; justify-content: center; cursor: pointer; backdrop-filter: blur(6px); user-select: none;">‹</button>
+    <button type="button" id="btnLightboxNext" class="lightbox-nav-btn" style="position: fixed; right: 12px; top: 50%; transform: translateY(-50%); z-index: 100003; background: rgba(0,0,0,0.65); color: #fff; border: 1px solid rgba(255,255,255,0.25); border-radius: 50%; width: 44px; height: 44px; font-size: 1.6rem; display: none; align-items: center; justify-content: center; cursor: pointer; backdrop-filter: blur(6px); user-select: none;">›</button>
     <div id="lightboxBackdrop" style="width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; overflow: auto; padding: 60px 14px 20px 14px; cursor: pointer; -webkit-overflow-scrolling: touch;">
       <img id="lightboxImg" src="" alt="Preview" style="max-width: 95vw; max-height: 85vh; object-fit: contain; border-radius: 8px; transition: transform 0.2s cubic-bezier(0.2, 0, 0, 1); cursor: zoom-in; box-shadow: 0 12px 48px rgba(0,0,0,0.9); user-select: none;" />
     </div>
@@ -1890,6 +1893,11 @@ const rawHtml = `<!DOCTYPE html>
     let activeCommentPostId = null;
     let basePostNumber = 76;
     let selectedUserForAction = null;
+    let currentDetailPost = null;
+    let currentPostPictures = [];
+    let currentPostVideos = [];
+    let activePhotoIndex = 0;
+    let activeVideoIndex = 0;
 
     function showToast(msg) {
       const toast = document.getElementById('toast');
@@ -1978,12 +1986,19 @@ const rawHtml = `<!DOCTYPE html>
     }
 
     // ==========================================
-    // Fullscreen Image Lightbox with Pinch & Zoom
+    // Fullscreen Image Lightbox with Pinch, Zoom & Swiping
     // ==========================================
     let lightboxScale = 1.0;
     let isLightboxOpen = false;
 
-    function openImageLightbox(imageUrl, title) {
+    function openImageLightbox(imageUrl, title, optIdx) {
+      if (typeof optIdx === 'number') {
+        activePhotoIndex = optIdx;
+      }
+      if (!imageUrl && currentPostPictures && currentPostPictures[activePhotoIndex]) {
+        imageUrl = currentPostPictures[activePhotoIndex].url;
+        title = currentPostPictures[activePhotoIndex].title;
+      }
       if (!imageUrl) return;
       const modal = document.getElementById('imageLightboxModal');
       const img = document.getElementById('lightboxImg');
@@ -1991,10 +2006,17 @@ const rawHtml = `<!DOCTYPE html>
       if (!modal || !img) return;
 
       img.src = imageUrl;
-      if (titleEl) titleEl.textContent = '🖼️ ' + (title || 'Preview Image');
+      const count = (currentPostPictures && currentPostPictures.length > 1) ? ' (' + (activePhotoIndex + 1) + '/' + currentPostPictures.length + ')' : '';
+      if (titleEl) titleEl.textContent = '🖼️ ' + (title || 'Preview Image') + count;
       setLightboxZoom(1.0);
       modal.classList.add('active');
       isLightboxOpen = true;
+
+      // Show navigation arrows on lightbox if multiple photos
+      const navBtns = modal.querySelectorAll('.lightbox-nav-btn');
+      navBtns.forEach(btn => {
+        btn.style.display = (currentPostPictures && currentPostPictures.length > 1) ? 'flex' : 'none';
+      });
 
       // Enable Telegram Native Back Button or browser back button
       if (tg?.BackButton) {
@@ -2004,6 +2026,61 @@ const rawHtml = `<!DOCTYPE html>
       try {
         window.history.pushState({ modal: 'lightbox' }, '');
       } catch (e) {}
+    }
+
+    function switchLightboxPhoto(newIdx) {
+      if (!currentPostPictures || currentPostPictures.length === 0) return;
+      if (newIdx < 0) newIdx = currentPostPictures.length - 1;
+      if (newIdx >= currentPostPictures.length) newIdx = 0;
+      activePhotoIndex = newIdx;
+      const pic = currentPostPictures[activePhotoIndex];
+      if (!pic) return;
+
+      const img = document.getElementById('lightboxImg');
+      if (img) img.src = pic.url;
+      const titleEl = document.getElementById('lightboxTitle');
+      if (titleEl) {
+        titleEl.textContent = '🖼️ ' + (pic.title || 'Photo') + ' (' + (activePhotoIndex + 1) + '/' + currentPostPictures.length + ')';
+      }
+      setLightboxZoom(1.0);
+
+      // Keep post detail main photo & thumbnails synced
+      const mainImg = document.getElementById('postDetailMainPhoto');
+      if (mainImg) mainImg.src = pic.url;
+      const badge = document.getElementById('postPhotoCounterBadge');
+      if (badge) badge.textContent = (activePhotoIndex + 1) + ' / ' + currentPostPictures.length;
+      document.querySelectorAll('.photo-thumb-item').forEach((t, idx) => {
+        if (idx === activePhotoIndex) {
+          t.style.borderColor = '#38bdf8';
+          t.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+        } else {
+          t.style.borderColor = 'rgba(255,255,255,0.12)';
+        }
+      });
+    }
+
+    function switchPostDetailPhoto(newIdx) {
+      if (!currentPostPictures || currentPostPictures.length === 0) return;
+      if (newIdx < 0) newIdx = currentPostPictures.length - 1;
+      if (newIdx >= currentPostPictures.length) newIdx = 0;
+      activePhotoIndex = newIdx;
+      const pic = currentPostPictures[activePhotoIndex];
+      if (!pic) return;
+
+      const mainImg = document.getElementById('postDetailMainPhoto');
+      if (mainImg) mainImg.src = pic.url;
+
+      const badge = document.getElementById('postPhotoCounterBadge');
+      if (badge) badge.textContent = (activePhotoIndex + 1) + ' / ' + currentPostPictures.length;
+
+      document.querySelectorAll('.photo-thumb-item').forEach((t, idx) => {
+        if (idx === activePhotoIndex) {
+          t.style.borderColor = '#38bdf8';
+          t.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+        } else {
+          t.style.borderColor = 'rgba(255,255,255,0.12)';
+        }
+      });
     }
 
     function closeImageLightbox() {
@@ -3795,11 +3872,11 @@ const rawHtml = `<!DOCTYPE html>
       // POST DETAIL PAGE (IN-PAGE VIEW, NOT POPUP)
       // =============================================================
       const postDetailCache = new Map();
-      let currentDetailPost = null;
-      let currentPostPictures = [];
-      let currentPostVideos = [];
-      let activePhotoIndex = 0;
-      let activeVideoIndex = 0;
+      currentDetailPost = null;
+      currentPostPictures = [];
+      currentPostVideos = [];
+      activePhotoIndex = 0;
+      activeVideoIndex = 0;
 
       async function triggerAdsgramAd(blockId) {
         if (!window.Adsgram || !blockId) return true;
@@ -3870,10 +3947,11 @@ const rawHtml = `<!DOCTYPE html>
             return (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name));
           });
 
-          // Large files (> 100MB)
+          // Large files (> 100MB) OR non-streamable files
           const largeFiles = nonImageFiles.filter(f => {
+            const isVid = (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name));
             const sz = Number(f.size) || 0;
-            return sz > LARGE_FILE_THRESHOLD;
+            return !isVid || sz > LARGE_FILE_THRESHOLD;
           });
 
           // Streamable videos (<= 100MB)
@@ -3882,11 +3960,11 @@ const rawHtml = `<!DOCTYPE html>
             return sz <= LARGE_FILE_THRESHOLD;
           });
 
-          // Video list for player: use streamable videos if available, otherwise all videos
-          const videosForPlayer = streamableVideos.length > 0 ? streamableVideos : allVideoFiles;
+          // Video list for player: only streamable videos
+          const videosForPlayer = streamableVideos;
 
-          // Store all videos for player indexing
-          currentPostVideos = allVideoFiles.length > 0 ? allVideoFiles : nonImageFiles;
+          // Store streamable videos for player indexing
+          currentPostVideos = streamableVideos;
           activeVideoIndex = 0;
 
           let html = '';
@@ -3910,11 +3988,16 @@ const rawHtml = `<!DOCTYPE html>
             html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px;">' +
               '<div style="padding: 12px 16px; font-weight: 700; font-size: 0.88rem; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.06);">' +
               '<span>🖼️ Photos (' + pictures.length + ')</span>' +
-              '<span style="font-size: 0.75rem; color: var(--text-muted);">Tap photo to Zoom</span>' +
+              '<span style="font-size: 0.75rem; color: var(--text-muted);">' + (pictures.length > 1 ? '‹ Swipe or tap arrows ›' : 'Tap photo to Zoom') + '</span>' +
               '</div>' +
-              '<div style="position: relative; cursor: pointer; max-height: 380px; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden;" id="postDetailMainPhotoWrap">' +
-              '<img id="postDetailMainPhoto" src="' + escapeHtml(curPic.url) + '" alt="" style="max-height: 380px; width: 100%; object-fit: contain;" />' +
-              '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 4px 10px; border-radius: 6px; backdrop-filter: blur(4px); pointer-events: none;">' +
+              '<div style="position: relative; user-select: none; max-height: 380px; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden;" id="postDetailMainPhotoWrap">' +
+              '<img id="postDetailMainPhoto" src="' + escapeHtml(curPic.url) + '" alt="" style="max-height: 380px; width: 100%; object-fit: contain; cursor: pointer;" />' +
+              (pictures.length > 1 ? (
+                '<div id="postPhotoCounterBadge" style="position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 3px 8px; border-radius: 12px; backdrop-filter: blur(4px); pointer-events: none; z-index: 2;">1 / ' + pictures.length + '</div>' +
+                '<button type="button" class="post-photo-arrow btn-photo-prev" style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.6); color: #fff; border: 1px solid rgba(255,255,255,0.25); border-radius: 50%; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; cursor: pointer; backdrop-filter: blur(4px); z-index: 3; line-height: 1;">‹</button>' +
+                '<button type="button" class="post-photo-arrow btn-photo-next" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,0.6); color: #fff; border: 1px solid rgba(255,255,255,0.25); border-radius: 50%; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; cursor: pointer; backdrop-filter: blur(4px); z-index: 3; line-height: 1;">›</button>'
+              ) : '') +
+              '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.75); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 4px 10px; border-radius: 6px; backdrop-filter: blur(4px); pointer-events: none; z-index: 2;">' +
               '🔍 Tap to Zoom' +
               '</div>' +
               '</div>';
@@ -3932,14 +4015,13 @@ const rawHtml = `<!DOCTYPE html>
             html += '</div>';
           }
 
-          // SECTION 2: VIDEO STREAM PLAYER (NEXT - ONLY 1 LOADED AT STARTING!)
+          // SECTION 2: VIDEO STREAM PLAYER (STREAMABLE VIDEOS ONLY)
           if (videosForPlayer.length > 0) {
             const firstVid = videosForPlayer[0];
             const firstSize = Number(firstVid.size) || 0;
             const firstSizeMB = (firstSize / (1024 * 1024)).toFixed(1);
             const firstTitle = firstVid.file_name || 'Video 1';
             const firstStreamSrc = '/api/stream?post_id=' + post.id + (firstVid.file_id ? ('&file_id=' + encodeURIComponent(firstVid.file_id)) : '') + (firstVid.channel_message_id ? ('&msg_id=' + encodeURIComponent(firstVid.channel_message_id)) : '') + (firstVid.size ? ('&size=' + encodeURIComponent(firstVid.size)) : '');
-            const firstFileKey = firstVid.id || firstVid.channel_message_id || 0;
 
             html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 16px; overflow: hidden; margin-bottom: 18px; padding: 14px;">' +
               '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px;">' +
@@ -3950,32 +4032,26 @@ const rawHtml = `<!DOCTYPE html>
               // EXACTLY 1 VIDEO PLAYER IN THE DOM
               '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" oncontextmenu="return false;">' +
               '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" disablePictureInPicture preload="auto" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
-              '</div>' +
-
-              '<div style="margin-top: 10px;">' +
-              '<button type="button" class="btn btn-secondary btn-sm" id="btnActiveVideoBot" data-pid="' + post.id + '" data-fid="' + firstFileKey + '" style="width: 100%; padding: 10px; font-weight: 600; font-size: 0.82rem; border-radius: 10px;">📥 Send This Video to Telegram Chat</button>' +
               '</div>';
 
-            // Playlist for videos
+            // Playlist for streamable videos (tapping any switches active video)
             if (videosForPlayer.length > 1) {
               html += '<div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">' +
-                '<div style="font-weight: 700; font-size: 0.84rem; color: #94a3b8; margin-bottom: 10px;">📁 Video Files (' + videosForPlayer.length + ') — Tap to play</div>' +
+                '<div style="font-weight: 700; font-size: 0.84rem; color: #94a3b8; margin-bottom: 10px;">📁 Streamable Videos (' + videosForPlayer.length + ') — Tap to play</div>' +
                 '<div style="display: flex; flex-direction: column; gap: 8px;" id="postVideoFilesList">' +
                 videosForPlayer.map((vid, idx) => {
                   const vSize = Number(vid.size) || 0;
                   const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
                   const vName = vid.file_name || ('Video ' + (idx + 1));
                   const isActive = idx === 0;
-                  const fKey = vid.id || vid.channel_message_id || 0;
 
                   return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.14)' : 'rgba(255,255,255,0.04)') + '; border: 1px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s ease;">' +
-                    '<div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 65%;">' +
+                    '<div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 75%;">' +
                     '<span class="vid-play-icon" style="font-size: 1rem;">' + (isActive ? '▶️' : '🎬') + '</span>' +
                     '<span style="font-weight: 600; font-size: 0.82rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + escapeHtml(vName) + '</span>' +
                     '</div>' +
                     '<div style="display: flex; align-items: center; gap: 6px;">' +
                     '<span style="font-size: 0.72rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 6px; font-weight: 600;">' + vSizeMB + ' MB</span>' +
-                    '<button type="button" class="btn btn-secondary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="padding: 3px 8px; font-size: 0.72rem; border-radius: 6px; white-space: nowrap;">📥 Get</button>' +
                     '</div>' +
                     '</div>';
                 }).join('') +
@@ -3986,14 +4062,14 @@ const rawHtml = `<!DOCTYPE html>
             html += '</div>';
           }
 
-          // SECTION 3: LARGE FILES (> 100 MB) — FAST DIRECT GET BUTTON FOR EACH
+          // SECTION 3: LARGE FILES (> 100 MB / NOT STREAMABLE) — FAST DIRECT GET BUTTON FOR EACH
           if (largeFiles.length > 0) {
             html += '<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 16px; padding: 14px; margin-bottom: 18px;">' +
               '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">' +
               '<div style="font-weight: 700; font-size: 0.9rem; color: #fbbf24; display: flex; align-items: center; gap: 6px;">📦 Large Files (&gt; 100 MB)</div>' +
               '<span style="font-size: 0.72rem; color: #fbbf24; background: rgba(245, 158, 11, 0.15); padding: 2px 8px; border-radius: 10px; font-weight: 700;">' + largeFiles.length + ' file(s)</span>' +
               '</div>' +
-              '<div style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 12px;">Fast native Telegram delivery — tap below to get each file individually:</div>' +
+              '<div style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 12px;">Fast native Telegram delivery — tap below to get each large file directly:</div>' +
               '<div style="display: flex; flex-direction: column; gap: 10px;">' +
               largeFiles.map((lf, lIdx) => {
                 const lfSize = Number(lf.size) || 0;
@@ -4008,8 +4084,7 @@ const rawHtml = `<!DOCTYPE html>
                   '<div style="font-size: 0.74rem; background: rgba(245, 158, 11, 0.2); color: #fbbf24; padding: 2px 8px; border-radius: 8px; font-weight: 700; flex-shrink: 0;">' + lfSizeMB + ' MB</div>' +
                   '</div>' +
                   '<div style="display: flex; gap: 8px; align-items: center;">' +
-                  '<button type="button" class="btn btn-primary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="flex: 1; padding: 9px; font-weight: 700; font-size: 0.82rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 6px;">📥 Get This File (Telegram)</button>' +
-                  (isVid ? '<button type="button" class="btn btn-secondary btn-sm" data-act="stream-large-file" data-fileid="' + (lf.file_id || '') + '" data-msgid="' + (lf.channel_message_id || '') + '" data-size="' + lfSize + '" data-title="' + escapeHtml(lfName) + '" style="padding: 9px 12px; font-weight: 600; font-size: 0.78rem; border-radius: 8px; white-space: nowrap;">▶️ Stream</button>' : '') +
+                  '<button type="button" class="btn btn-primary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="width: 100%; padding: 10px; font-weight: 700; font-size: 0.82rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 6px;">📥 Get File (' + lfSizeMB + ' MB)</button>' +
                   '</div>' +
                   '</div>';
               }).join('') +
@@ -4164,60 +4239,38 @@ const rawHtml = `<!DOCTYPE html>
         const thumb = e.target.closest('.photo-thumb-item');
         if (thumb) {
           const idx = parseInt(thumb.dataset.idx, 10);
-          if (currentPostPictures[idx]) {
-            activePhotoIndex = idx;
-            const mainImg = document.getElementById('postDetailMainPhoto');
-            if (mainImg) mainImg.src = currentPostPictures[idx].url;
-            document.querySelectorAll('.photo-thumb-item').forEach(t => {
-              t.style.borderColor = 'rgba(255,255,255,0.12)';
-            });
-            thumb.style.borderColor = '#38bdf8';
-          }
+          switchPostDetailPhoto(idx);
           return;
         }
 
-        // 2. Main photo clicked -> zoom lightbox
+        // 2. Photo Prev / Next arrow buttons clicked
+        const prevArrow = e.target.closest('.btn-photo-prev');
+        if (prevArrow) {
+          e.stopPropagation();
+          switchPostDetailPhoto(activePhotoIndex - 1);
+          return;
+        }
+        const nextArrow = e.target.closest('.btn-photo-next');
+        if (nextArrow) {
+          e.stopPropagation();
+          switchPostDetailPhoto(activePhotoIndex + 1);
+          return;
+        }
+
+        // 3. Main photo clicked -> zoom lightbox
         const photoWrap = e.target.closest('#postDetailMainPhotoWrap');
-        if (photoWrap && currentPostPictures[activePhotoIndex]) {
-          openImageLightbox(currentPostPictures[activePhotoIndex].url, currentPostPictures[activePhotoIndex].title);
+        if (photoWrap && currentPostPictures && currentPostPictures[activePhotoIndex]) {
+          openImageLightbox(currentPostPictures[activePhotoIndex].url, currentPostPictures[activePhotoIndex].title, activePhotoIndex);
           return;
         }
 
-        // 3. Send Single File to Bot Chat
+        // 4. Send Single File to Bot Chat (Large files)
         const singleBtn = e.target.closest('[data-act="send-single-file"]');
         if (singleBtn) {
           e.stopPropagation();
           const pId = singleBtn.dataset.pid;
           const fId = singleBtn.dataset.fid;
           if (pId && fId) forwardToTelegramSingleFile(pId, fId);
-          return;
-        }
-
-        // 4. Stream Large File in Player
-        const streamLargeBtn = e.target.closest('[data-act="stream-large-file"]');
-        if (streamLargeBtn && currentDetailPost) {
-          e.stopPropagation();
-          const fileId = streamLargeBtn.dataset.fileid;
-          const msgId = streamLargeBtn.dataset.msgid;
-          const size = streamLargeBtn.dataset.size;
-          const title = streamLargeBtn.dataset.title;
-
-          const player = document.getElementById('postActiveVideoPlayer');
-          if (player) {
-            try { player.pause(); } catch (_) {}
-            const streamSrc = '/api/stream?post_id=' + currentDetailPost.id + (fileId ? ('&file_id=' + encodeURIComponent(fileId)) : '') + (msgId ? ('&msg_id=' + encodeURIComponent(msgId)) : '') + (size ? ('&size=' + encodeURIComponent(size)) : '');
-
-            const titleEl = document.getElementById('postActiveVideoTitle');
-            if (titleEl) titleEl.textContent = '🎬 ' + title;
-            const sizeEl = document.getElementById('postActiveVideoSize');
-            if (sizeEl) sizeEl.textContent = (Number(size) / (1024 * 1024)).toFixed(1) + ' MB';
-
-            player.preload = 'auto';
-            player.src = streamSrc;
-            player.load();
-            player.play().catch(e => console.log('Autoplay notice:', e));
-            player.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }
           return;
         }
 
@@ -4241,11 +4294,6 @@ const rawHtml = `<!DOCTYPE html>
               const sizeEl = document.getElementById('postActiveVideoSize');
               if (sizeEl) sizeEl.textContent = vSizeMB + ' MB';
 
-              const activeSendBtn = document.getElementById('btnActiveVideoBot');
-              if (activeSendBtn) {
-                activeSendBtn.dataset.fid = vid.id || vid.channel_message_id || 0;
-              }
-
               document.querySelectorAll('.video-file-card').forEach((c, idx) => {
                 const icon = c.querySelector('.vid-play-icon');
                 if (idx === vIdx) {
@@ -4268,20 +4316,7 @@ const rawHtml = `<!DOCTYPE html>
           return;
         }
 
-        // 6. Send active video to bot chat
-        const activeVideoBtn = e.target.closest('#btnActiveVideoBot');
-        if (activeVideoBtn && currentDetailPost) {
-          const pId = activeVideoBtn.dataset.pid || currentDetailPost.id;
-          const fId = activeVideoBtn.dataset.fid;
-          if (pId && fId) {
-            forwardToTelegramSingleFile(pId, fId);
-          } else if (pId) {
-            forwardToTelegram(pId);
-          }
-          return;
-        }
-
-        // 7. Send entire post / all files to bot
+        // 6. Send entire post / all files to bot
         const sendBotBtn = e.target.closest('[data-act="send-file-bot"]');
         if (sendBotBtn) {
           const postId = sendBotBtn.dataset.id || (currentDetailPost ? currentDetailPost.id : null);
@@ -4290,10 +4325,84 @@ const rawHtml = `<!DOCTYPE html>
         }
       });
 
+      // Touch swipe gestures for main photos in post detail page
+      let pSwipeStartX = 0;
+      let pSwipeStartY = 0;
+      document.getElementById('postDetailPageBody')?.addEventListener('touchstart', (e) => {
+        const wrap = e.target.closest('#postDetailMainPhotoWrap');
+        if (wrap && e.touches.length === 1) {
+          pSwipeStartX = e.touches[0].clientX;
+          pSwipeStartY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+
+      document.getElementById('postDetailPageBody')?.addEventListener('touchend', (e) => {
+        const wrap = e.target.closest('#postDetailMainPhotoWrap');
+        if (wrap && currentPostPictures && currentPostPictures.length > 1 && e.changedTouches.length === 1) {
+          const diffX = e.changedTouches[0].clientX - pSwipeStartX;
+          const diffY = e.changedTouches[0].clientY - pSwipeStartY;
+          if (Math.abs(diffX) > 35 && Math.abs(diffX) > Math.abs(diffY) * 1.2) {
+            if (diffX < 0) {
+              // Swipe left -> next photo
+              switchPostDetailPhoto(activePhotoIndex + 1);
+            } else {
+              // Swipe right -> previous photo
+              switchPostDetailPhoto(activePhotoIndex - 1);
+            }
+          }
+        }
+      }, { passive: true });
+
       // Lightbox Controls & Dismissal Listeners
       document.getElementById('btnLightboxClose')?.addEventListener('click', (e) => {
         e.stopPropagation();
         closeImageLightbox();
+      });
+
+      document.getElementById('btnLightboxPrev')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        switchLightboxPhoto(activePhotoIndex - 1);
+      });
+
+      document.getElementById('btnLightboxNext')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        switchLightboxPhoto(activePhotoIndex + 1);
+      });
+
+      // Touch swipe gestures in Fullscreen Lightbox
+      let lbSwipeStartX = 0;
+      let lbSwipeStartY = 0;
+      const lbModal = document.getElementById('imageLightboxModal');
+      lbModal?.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1 && lightboxScale <= 1.05) {
+          lbSwipeStartX = e.touches[0].clientX;
+          lbSwipeStartY = e.touches[0].clientY;
+        }
+      }, { passive: true });
+
+      lbModal?.addEventListener('touchend', (e) => {
+        if (e.changedTouches.length === 1 && lightboxScale <= 1.05 && currentPostPictures && currentPostPictures.length > 1) {
+          const diffX = e.changedTouches[0].clientX - lbSwipeStartX;
+          const diffY = e.changedTouches[0].clientY - lbSwipeStartY;
+          if (Math.abs(diffX) > 35 && Math.abs(diffX) > Math.abs(diffY) * 1.2) {
+            if (diffX < 0) {
+              // Swipe left -> next photo
+              switchLightboxPhoto(activePhotoIndex + 1);
+            } else {
+              // Swipe right -> previous photo
+              switchLightboxPhoto(activePhotoIndex - 1);
+            }
+          }
+        }
+      }, { passive: true });
+
+      // Keyboard arrow navigation for lightbox
+      window.addEventListener('keydown', (e) => {
+        if (isLightboxOpen) {
+          if (e.key === 'ArrowRight') switchLightboxPhoto(activePhotoIndex + 1);
+          if (e.key === 'ArrowLeft') switchLightboxPhoto(activePhotoIndex - 1);
+          if (e.key === 'Escape') closeImageLightbox();
+        }
       });
 
       document.getElementById('btnLightboxZoomIn')?.addEventListener('click', (e) => {
