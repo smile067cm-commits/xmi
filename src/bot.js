@@ -1968,39 +1968,7 @@ export function createBot(env) {
           }
 
           if (sentMid) {
-            if (autoDeleteMinutes > 0) {
-              const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
-              const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
-                `This post message will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
-                (protectContent
-                  ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
-                  : `👉 *Please forward or save to your Saved Messages now before it disappears.*`);
-
-              let noticeMid = null;
-              try {
-                const nRes = await ctx.telegram.sendMessage(targetId, noticeText, {
-                  parse_mode: 'Markdown',
-                  protect_content: protectContent
-                });
-                noticeMid = nRes.message_id;
-              } catch {}
-
-              const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
-              ephemeralRecords.push({
-                chat_id: targetId,
-                message_id: sentMid,
-                delete_at: deleteAt,
-                is_deleted: false
-              });
-              if (noticeMid) {
-                ephemeralRecords.push({
-                  chat_id: targetId,
-                  message_id: noticeMid,
-                  delete_at: deleteAt,
-                  is_deleted: false
-                });
-              }
-            }
+            // Broadcast messages are permanent and do not auto-delete
           } else {
             failedCount++;
             failedDetails.push({ user_id: targetId, reason: 'Telegram message delivery failed' });
@@ -2015,14 +1983,11 @@ export function createBot(env) {
         }
       }
 
-      if (ephemeralRecords.length > 0) {
-        await addEphemeralMessages(env, ephemeralRecords);
-      }
-
       let summaryText = `✅ *Post Broadcast Complete!*\n\n` +
         `• 🚀 *Successfully Sent:* \`${sentCount}\`\n` +
         `• ❌ *Failed:* \`${failedCount}\`\n` +
-        `• 👥 *Total Users:* \`${userIds.length}\``;
+        `• 👥 *Total Users:* \`${userIds.length}\`\n` +
+        `• ♾️ *Expiry:* \`None (Permanent)\``;
 
       if (failedDetails.length > 0) {
         summaryText += `\n\n⚠️ *Failure Breakdown:*\n` +

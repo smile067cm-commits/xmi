@@ -1455,43 +1455,7 @@ export function createRouter() {
           }
 
           if (sentMid) {
-            if (autoDeleteMinutes > 0) {
-              const minuteUnit = autoDeleteMinutes === 1 ? '1 minute' : `${autoDeleteMinutes} minutes`;
-              const noticeText = `⏳ ⚠️ *Auto-Delete Warning:*\n\n` +
-                `This message and all files/links above will automatically self-destruct & delete in *${minuteUnit}*!\n\n` +
-                (protectContent
-                  ? `🔒 *Content protection is enabled (forwarding & saving restricted).*`
-                  : `👉 *Please forward or save to your Saved Messages now before they disappear.*`);
-
-              const nRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  chat_id: targetId,
-                  text: noticeText,
-                  parse_mode: 'Markdown',
-                  protect_content: protectContent
-                })
-              });
-              const nData = await nRes.json();
-              const noticeMid = (nData.ok && nData.result) ? nData.result.message_id : null;
-
-              const deleteAt = new Date(Date.now() + autoDeleteMinutes * 60 * 1000).toISOString();
-              ephemeralRecords.push({
-                chat_id: targetId,
-                message_id: sentMid,
-                delete_at: deleteAt,
-                is_deleted: false
-              });
-              if (noticeMid) {
-                ephemeralRecords.push({
-                  chat_id: targetId,
-                  message_id: noticeMid,
-                  delete_at: deleteAt,
-                  is_deleted: false
-                });
-              }
-            }
+            // Broadcast messages are permanent and do not auto-delete
           } else {
             failedCount++;
             failedDetails.push({
@@ -1515,9 +1479,6 @@ export function createRouter() {
         }
       }
 
-      if (ephemeralRecords.length > 0) {
-        await addEphemeralMessages(env, ephemeralRecords);
-      }
 
       return jsonResponse({
         success: true,
