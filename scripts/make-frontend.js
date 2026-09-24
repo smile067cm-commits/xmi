@@ -14,6 +14,9 @@ const rawHtml = `<!DOCTYPE html>
   <!-- Telegram WebApp SDK -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 
+  <!-- Adsgram SDK for Telegram Mini Apps -->
+  <script src="https://sad.adsgram.ai/js/sad.min.js"></script>
+
   <!-- Google Fonts: Inter -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1294,6 +1297,57 @@ const rawHtml = `<!DOCTYPE html>
             </div>
           </div>
 
+          <!-- Video Streaming & Render Tier Settings -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+              <div>
+                <div style="font-weight: 700; font-size: 0.92rem; color: #38bdf8;">🎥 In-App Video Streaming</div>
+                <div style="font-size: 0.74rem; color: var(--text-muted);">Stream videos inside Mini App (&lt;20MB Worker, 20-100MB Render, &gt;100MB Chat).</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setStreamToggle" checked />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div>
+                <label style="font-size: 0.74rem; font-weight: 600; color: var(--text-muted);">🚀 Render Streaming Service URL (for 20MB–100MB)</label>
+                <input type="url" id="setRenderStreamUrl" class="form-input" placeholder="https://xmi-stream-bot.onrender.com" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Adsgram Monetization Settings -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 14px; padding: 14px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+              <div>
+                <div style="font-weight: 700; font-size: 0.92rem; color: #fbbf24;">💰 Adsgram Ad Monetization</div>
+                <div style="font-size: 0.74rem; color: var(--text-muted);">Monetize app with partner.adsgram.ai (Rewarded video &amp; Pre-roll).</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setAdsgramToggle" />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <div>
+                <label style="font-size: 0.74rem; font-weight: 600; color: var(--text-muted);">🎬 Rewarded Video Block ID</label>
+                <input type="text" id="setAdsgramRewardedId" class="form-input" placeholder="e.g. 1234" />
+              </div>
+              <div>
+                <label style="font-size: 0.74rem; font-weight: 600; color: var(--text-muted);">📱 Interstitial Ad Block ID</label>
+                <input type="text" id="setAdsgramInterstitialId" class="form-input" placeholder="e.g. 5678" />
+              </div>
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
+                <span style="font-size: 0.74rem; color: var(--text-muted);">Watch Ad Before Video Stream (Pre-Roll)</span>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="setAdsgramPrerollToggle" />
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <!-- Metrics Management (Reset Likes, Views & Downloads) -->
           <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 14px; padding: 14px;">
             <div style="font-weight: 700; font-size: 0.92rem; color: #f87171; margin-bottom: 4px;">🧹 Reset Metrics &amp; Logs</div>
@@ -1792,6 +1846,35 @@ const rawHtml = `<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- 8. In-App Video Streaming Player Modal -->
+  <div class="modal-overlay" id="videoPlayerModal" style="background: rgba(4, 7, 18, 0.95); z-index: 100000; padding: 12px; backdrop-filter: blur(12px);">
+    <div class="modal-content" style="max-width: 650px; width: 100%; border: 1px solid rgba(56, 189, 248, 0.25); background: #0b1329; border-radius: 18px; overflow: hidden; padding: 0; box-shadow: 0 20px 60px rgba(0,0,0,0.85);">
+      <div style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(15,23,42,0.85);">
+        <div style="font-weight: 700; font-size: 0.95rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 80%; display: flex; align-items: center; gap: 6px;">
+          <span>🎬</span> <span id="videoPlayerTitle">Video Stream</span>
+        </div>
+        <button type="button" id="btnVideoPlayerClose" style="background: rgba(255,255,255,0.1); border: none; color: #fff; width: 32px; height: 32px; border-radius: 50%; font-size: 1.1rem; cursor: pointer; display: flex; align-items: center; justify-content: center;">✕</button>
+      </div>
+      <div style="position: relative; width: 100%; background: #000; display: flex; align-items: center; justify-content: center; min-height: 240px; max-height: 70vh;">
+        <video id="streamVideoTag" playsinline webkit-playsinline controls style="width: 100%; max-height: 70vh; background: #000; outline: none;"></video>
+        <div id="videoStreamLoading" style="position: absolute; display: none; flex-direction: column; align-items: center; gap: 8px; color: #38bdf8; font-weight: 600; font-size: 0.85rem; pointer-events: none; background: rgba(0,0,0,0.75); padding: 12px 18px; border-radius: 12px; backdrop-filter: blur(6px);">
+          <div style="font-size: 26px;">⏳</div>
+          <span id="videoStreamStatusText">Loading stream...</span>
+        </div>
+      </div>
+      <div style="padding: 14px 18px; background: rgba(15,23,42,0.6); display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.78rem; color: var(--text-muted);">
+          <div id="videoPlayerTierBadge" style="display: inline-flex; align-items: center; gap: 5px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 3px 9px; border-radius: 20px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3);">⚡ Cloudflare Stream (&lt;20MB)</div>
+          <div id="videoPlayerSize">0 MB</div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnVideoSendToBot" style="flex: 1; padding: 10px; font-size: 0.82rem; font-weight: 600;">📥 Forward File to Telegram Chat</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="btnVideoCopyStreamUrl" style="padding: 10px 14px; font-size: 0.82rem;">📋 Copy Link</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="toast"></div>
 
   <!-- Client-Side JavaScript Logic -->
@@ -2171,6 +2254,16 @@ const rawHtml = `<!DOCTYPE html>
         let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted" style="color: #fff; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);">⭐ Exclusive</span>' : '';
         const zoomHint = post.preview_image ? '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 6px; pointer-events: none; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 3px;">🔍 Tap to Zoom</div>' : '';
 
+        let actionButtonsHtml = '';
+        if (post.video_file && globalSettings.stream_enabled !== false) {
+          actionButtonsHtml = '<div style="display: flex; gap: 8px; margin-top: 6px;">' +
+            '<button class="btn" data-act="stream-video" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '" data-fileid="' + escapeHtml(post.video_file.file_id || '') + '" data-msgid="' + (post.video_file.channel_message_id || '') + '" data-size="' + (post.video_file.size || 0) + '" style="flex: 1.4; background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; font-weight: 700; padding: 10px; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 14px rgba(56, 189, 248, 0.35);">▶️ Watch Video</button>' +
+            '<button class="btn btn-secondary" data-act="open-in-bot" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '" style="flex: 1; padding: 10px; font-weight: 600; border-radius: 10px; font-size: 0.8rem;">📥 Bot Chat</button>' +
+            '</div>';
+        } else {
+          actionButtonsHtml = '<button class="btn-open-bot-full" data-act="open-in-bot" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '">🚀 Open in Bot</button>';
+        }
+
         card.innerHTML = '<div class="post-image-container" style="cursor: pointer;" data-act="preview-image" data-img="' + escapeHtml(post.preview_image || '') + '" data-title="' + escapeHtml(post.title) + '">' + imgHtml + zoomHint + (promotedBadge ? '<div class="post-badges-top">' + promotedBadge + '</div>' : '') + '</div>' +
           '<div class="post-body">' +
           '<h3 class="post-title">' + escapeHtml(post.title) + '</h3>' +
@@ -2182,7 +2275,7 @@ const rawHtml = `<!DOCTYPE html>
           '<button class="action-btn ' + (isSaved ? 'saved' : '') + '" data-act="save" data-id="' + post.id + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="' + (isSaved ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>' +
           '</div>' +
           '</div>' +
-          '<button class="btn-open-bot-full" data-act="open-in-bot" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '">🚀 Open in Bot</button>' +
+          actionButtonsHtml +
           '</div>';
 
         grid.appendChild(card);
@@ -3050,6 +3143,14 @@ const rawHtml = `<!DOCTYPE html>
           document.getElementById('setRequireBotStartToggle').checked = Boolean(globalSettings.require_bot_start_enabled);
           document.getElementById('setRequireBotStartMsg').value = globalSettings.require_bot_start_message || '';
           document.getElementById('setRequireBotStartLink').value = globalSettings.require_bot_start_link || '';
+
+          // Stream & Adsgram Settings
+          if (document.getElementById('setStreamToggle')) document.getElementById('setStreamToggle').checked = globalSettings.stream_enabled !== false;
+          if (document.getElementById('setRenderStreamUrl')) document.getElementById('setRenderStreamUrl').value = globalSettings.render_stream_url || '';
+          if (document.getElementById('setAdsgramToggle')) document.getElementById('setAdsgramToggle').checked = Boolean(globalSettings.adsgram_enabled);
+          if (document.getElementById('setAdsgramRewardedId')) document.getElementById('setAdsgramRewardedId').value = globalSettings.adsgram_rewarded_block_id || '';
+          if (document.getElementById('setAdsgramInterstitialId')) document.getElementById('setAdsgramInterstitialId').value = globalSettings.adsgram_interstitial_block_id || '';
+          if (document.getElementById('setAdsgramPrerollToggle')) document.getElementById('setAdsgramPrerollToggle').checked = Boolean(globalSettings.adsgram_preroll_enabled);
         }
       });
 
@@ -3691,22 +3792,187 @@ const rawHtml = `<!DOCTYPE html>
           return;
         }
 
+        // In-App Video Streaming Click
+        const streamBtn = e.target.closest('[data-act="stream-video"]');
+        if (streamBtn) {
+          const postId = streamBtn.dataset.id;
+          const postTitle = streamBtn.dataset.title || ('Video #' + postId);
+          const fileId = streamBtn.dataset.fileid;
+          const msgId = streamBtn.dataset.msgid;
+          const fileSize = Number(streamBtn.dataset.size) || 0;
+
+          openVideoPlayerModal({
+            postId,
+            postTitle,
+            fileId,
+            msgId,
+            fileSize
+          });
+          return;
+        }
+
         // Single "Open in Bot" button click -> Deep link to bot and close Mini App
         const openBotBtn = e.target.closest('[data-act="open-in-bot"]');
         if (openBotBtn) {
           const postId = openBotBtn.dataset.id;
           const postTitle = openBotBtn.dataset.title || ('Post #' + postId);
           trackPostDownload(postId, postTitle);
-          const botUrl = 'https://t.me/' + botUsername + '?start=post_' + postId;
-          if (tg && tg.openTelegramLink) {
-            tg.openTelegramLink(botUrl);
-            setTimeout(() => {
-              if (tg.close) tg.close();
-            }, 300);
-          } else {
-            window.location.href = botUrl;
-          }
+          forwardToTelegram(postId);
           return;
+        }
+      });
+
+      // Video Player State & Controls
+      let currentPlayingStreamUrl = '';
+      let activeStreamPostId = null;
+
+      async function triggerAdsgramAd(blockId) {
+        if (!window.Adsgram || !blockId) return true;
+        try {
+          const AdController = window.Adsgram.init({ blockId: String(blockId) });
+          await AdController.show();
+          return true;
+        } catch (e) {
+          console.warn('Adsgram ad notice:', e);
+          return true;
+        }
+      }
+
+      async function openVideoPlayerModal({ postId, postTitle, fileId, msgId, fileSize }) {
+        activeStreamPostId = postId;
+        const modal = document.getElementById('videoPlayerModal');
+        const video = document.getElementById('streamVideoTag');
+        const titleEl = document.getElementById('videoPlayerTitle');
+        const badgeEl = document.getElementById('videoPlayerTierBadge');
+        const sizeEl = document.getElementById('videoPlayerSize');
+        const loadingEl = document.getElementById('videoStreamLoading');
+        const statusText = document.getElementById('videoStreamStatusText');
+
+        if (!modal || !video) return;
+
+        titleEl.textContent = postTitle;
+        const sizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+        sizeEl.textContent = sizeMB > 0 ? (sizeMB + ' MB') : '';
+
+        // Check if pre-roll ad is enabled
+        if (globalSettings.adsgram_enabled && globalSettings.adsgram_preroll_enabled && globalSettings.adsgram_rewarded_block_id) {
+          showToast('📺 Playing short sponsor message...');
+          await triggerAdsgramAd(globalSettings.adsgram_rewarded_block_id);
+        }
+
+        modal.classList.add('active');
+        if (loadingEl) {
+          loadingEl.style.display = 'flex';
+          if (statusText) statusText.textContent = 'Connecting stream...';
+        }
+
+        let streamUrl = '';
+
+        // TIER 1: < 20 MB -> Stream via Cloudflare Worker
+        if (fileSize <= 20 * 1024 * 1024 && fileId) {
+          streamUrl = '/api/stream?file_id=' + encodeURIComponent(fileId);
+          if (badgeEl) {
+            badgeEl.textContent = '⚡ Cloudflare Stream (<20MB)';
+            badgeEl.style.color = '#38bdf8';
+            badgeEl.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+          }
+        }
+        // TIER 2: 20 MB - 100 MB -> Stream via Render Server
+        else if (fileSize <= 100 * 1024 * 1024 && msgId) {
+          const renderUrl = (globalSettings.render_stream_url || '').replace(/\/+$/, '');
+          if (renderUrl) {
+            streamUrl = renderUrl + '/stream?channel_id=-1004415998750&msg_id=' + msgId;
+            if (badgeEl) {
+              badgeEl.textContent = '🚀 Render Stream Server (20-100MB)';
+              badgeEl.style.color = '#a78bfa';
+              badgeEl.style.borderColor = 'rgba(167, 139, 250, 0.4)';
+            }
+          } else {
+            // Render URL not yet configured: fallback to Worker if fileId exists or forward to Telegram
+            if (fileId) {
+              streamUrl = '/api/stream?file_id=' + encodeURIComponent(fileId);
+              if (badgeEl) badgeEl.textContent = '⚡ Direct Telegram Stream';
+            } else {
+              if (badgeEl) badgeEl.textContent = '⚠️ Large Video — Opening Bot';
+              showToast('Forwarding video to your Telegram chat...');
+              forwardToTelegram(postId);
+              closeVideoPlayer();
+              return;
+            }
+          }
+        }
+        // TIER 3: > 100 MB -> Forward directly to Telegram Chat
+        else {
+          if (badgeEl) badgeEl.textContent = '📦 Large Video (>100MB)';
+          showToast('Large file (>100MB) — Forwarding directly to Telegram chat!');
+          forwardToTelegram(postId);
+          closeVideoPlayer();
+          return;
+        }
+
+        currentPlayingStreamUrl = streamUrl;
+        video.src = streamUrl;
+
+        video.onloadeddata = () => {
+          if (loadingEl) loadingEl.style.display = 'none';
+        };
+
+        video.onerror = () => {
+          if (loadingEl) loadingEl.style.display = 'none';
+          showToast('Failed to stream video. Opening in Telegram bot...');
+          setTimeout(() => {
+            forwardToTelegram(postId);
+            closeVideoPlayer();
+          }, 1200);
+        };
+
+        try {
+          await video.play();
+        } catch (playErr) {
+          if (loadingEl) loadingEl.style.display = 'none';
+          console.warn('Auto-play was prevented by browser:', playErr);
+        }
+
+        trackPostView(postId);
+      }
+
+      function closeVideoPlayer() {
+        const modal = document.getElementById('videoPlayerModal');
+        const video = document.getElementById('streamVideoTag');
+        if (video) {
+          video.pause();
+          video.removeAttribute('src');
+          video.load();
+        }
+        if (modal) modal.classList.remove('active');
+        const loadingEl = document.getElementById('videoStreamLoading');
+        if (loadingEl) loadingEl.style.display = 'none';
+      }
+
+      function forwardToTelegram(postId) {
+        const botUrl = 'https://t.me/' + botUsername + '?start=post_' + postId;
+        if (tg && tg.openTelegramLink) {
+          tg.openTelegramLink(botUrl);
+          setTimeout(() => {
+            if (tg.close) tg.close();
+          }, 400);
+        } else {
+          window.location.href = botUrl;
+        }
+      }
+
+      document.getElementById('btnVideoPlayerClose')?.addEventListener('click', closeVideoPlayer);
+      document.getElementById('btnVideoSendToBot')?.addEventListener('click', () => {
+        if (activeStreamPostId) {
+          forwardToTelegram(activeStreamPostId);
+          closeVideoPlayer();
+        }
+      });
+      document.getElementById('btnVideoCopyStreamUrl')?.addEventListener('click', () => {
+        if (currentPlayingStreamUrl) {
+          const fullUrl = currentPlayingStreamUrl.startsWith('http') ? currentPlayingStreamUrl : (window.location.origin + currentPlayingStreamUrl);
+          navigator.clipboard.writeText(fullUrl);
+          showToast('📋 Stream link copied to clipboard!');
         }
       });
 
@@ -3854,7 +4120,14 @@ const rawHtml = `<!DOCTYPE html>
           force_join_enabled: document.getElementById('setForceJoinToggle').checked,
           require_bot_start_enabled: document.getElementById('setRequireBotStartToggle').checked,
           require_bot_start_message: document.getElementById('setRequireBotStartMsg').value.trim(),
-          require_bot_start_link: document.getElementById('setRequireBotStartLink').value.trim()
+          require_bot_start_link: document.getElementById('setRequireBotStartLink').value.trim(),
+
+          stream_enabled: document.getElementById('setStreamToggle') ? document.getElementById('setStreamToggle').checked : true,
+          render_stream_url: document.getElementById('setRenderStreamUrl') ? document.getElementById('setRenderStreamUrl').value.trim() : '',
+          adsgram_enabled: document.getElementById('setAdsgramToggle') ? document.getElementById('setAdsgramToggle').checked : false,
+          adsgram_rewarded_block_id: document.getElementById('setAdsgramRewardedId') ? document.getElementById('setAdsgramRewardedId').value.trim() : '',
+          adsgram_interstitial_block_id: document.getElementById('setAdsgramInterstitialId') ? document.getElementById('setAdsgramInterstitialId').value.trim() : '',
+          adsgram_preroll_enabled: document.getElementById('setAdsgramPrerollToggle') ? document.getElementById('setAdsgramPrerollToggle').checked : false
         };
 
 

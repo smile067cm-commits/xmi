@@ -167,7 +167,7 @@ export async function getUser(env, userId) {
  * Fetch published posts for public feed (Promoted posts pinned to top)
  */
 export async function getPublishedPosts(env, userId = null) {
-  const url = `${getSupabaseBaseUrl(env)}/posts?status=eq.published&order=is_promoted.desc,created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,is_promoted,category,tags,status,created_at,likes(user_id),comments(id,is_hidden),post_views(id),saved_posts(user_id),file_access_logs(id)`;
+  const url = `${getSupabaseBaseUrl(env)}/posts?status=eq.published&order=is_promoted.desc,created_at.desc&select=id,title,preview_image,direct_link,direct_link_title,is_promoted,category,tags,status,created_at,folders(id,files(id,file_id,channel_message_id,file_name,mime_type,size)),likes(user_id),comments(id,is_hidden),post_views(id),saved_posts(user_id),file_access_logs(id)`;
   
   const res = await fetch(url, {
     method: 'GET',
@@ -180,24 +180,38 @@ export async function getPublishedPosts(env, userId = null) {
 
   const posts = await res.json();
   
-  return posts.map(post => ({
-    id: post.id,
-    title: post.title,
-    preview_image: post.preview_image,
-    direct_link: post.direct_link,
-    direct_link_title: post.direct_link_title,
-    is_promoted: Boolean(post.is_promoted),
-    category: post.category || 'All',
-    tags: post.tags || '',
-    status: post.status,
-    created_at: post.created_at,
-    like_count: post.likes ? post.likes.length : 0,
-    liked: userId ? (post.likes || []).some(l => String(l.user_id) === String(userId)) : false,
-    comment_count: post.comments ? post.comments.filter(c => !c.is_hidden).length : 0,
-    view_count: post.post_views ? post.post_views.length : 0,
-    access_count: post.file_access_logs ? post.file_access_logs.length : 0,
-    is_saved: userId ? (post.saved_posts || []).some(s => String(s.user_id) === String(userId)) : false
-  }));
+  return posts.map(post => {
+    const allFiles = (post.folders || []).flatMap(f => f.files || []);
+    const videoFile = allFiles.find(f => (f.mime_type && f.mime_type.startsWith('video/')) || (f.file_name && /\.(mp4|mkv|mov|webm|avi)$/i.test(f.file_name))) || allFiles[0] || null;
+
+    return {
+      id: post.id,
+      title: post.title,
+      preview_image: post.preview_image,
+      direct_link: post.direct_link,
+      direct_link_title: post.direct_link_title,
+      is_promoted: Boolean(post.is_promoted),
+      category: post.category || 'All',
+      tags: post.tags || '',
+      status: post.status,
+      created_at: post.created_at,
+      like_count: post.likes ? post.likes.length : 0,
+      liked: userId ? (post.likes || []).some(l => String(l.user_id) === String(userId)) : false,
+      comment_count: post.comments ? post.comments.filter(c => !c.is_hidden).length : 0,
+      view_count: post.post_views ? post.post_views.length : 0,
+      access_count: post.file_access_logs ? post.file_access_logs.length : 0,
+      is_saved: userId ? (post.saved_posts || []).some(s => String(s.user_id) === String(userId)) : false,
+      files_count: allFiles.length,
+      video_file: videoFile ? {
+        id: videoFile.id,
+        file_id: videoFile.file_id,
+        channel_message_id: videoFile.channel_message_id,
+        file_name: videoFile.file_name,
+        size: Number(videoFile.size) || 0,
+        mime_type: videoFile.mime_type
+      } : null
+    };
+  });
 }
 
 /**

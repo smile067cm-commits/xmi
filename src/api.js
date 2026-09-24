@@ -94,6 +94,18 @@ export function createRouter() {
     return htmlResponse(getAppHtml(env));
   };
 
+  const serveHead = () => new Response(null, {
+    status: 200,
+    headers: {
+      ...corsHeaders,
+      'Content-Type': 'text/html; charset=utf-8'
+    }
+  });
+
+  router.head('/', serveHead);
+  router.head('/app', serveHead);
+  router.head('*', serveHead);
+
   router.get('/', serveApp);
   router.get('/app', serveApp);
 
@@ -103,6 +115,62 @@ export function createRouter() {
     status: 'online',
     timestamp: Date.now()
   }));
+
+  // -------------------------------------------------------------
+  // GET /api/stream - Stream Telegram videos directly (< 20MB)
+  // -------------------------------------------------------------
+  const handleStream = async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const fileId = url.searchParams.get('file_id');
+      if (!fileId) {
+        return errorResponse('Missing file_id parameter', 400);
+      }
+
+      // Fetch file metadata from Telegram Bot API
+      const tgRes = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
+      const tgData = await tgRes.json();
+
+      if (!tgData.ok || !tgData.result?.file_path) {
+        return errorResponse('Telegram file not found or expired', 404);
+      }
+
+      const filePath = tgData.result.file_path;
+      const downloadUrl = `https://api.telegram.org/file/bot${env.BOT_TOKEN}/${filePath}`;
+
+      const forwardHeaders = {};
+      const rangeHeader = request.headers.get('Range');
+      if (rangeHeader) {
+        forwardHeaders['Range'] = rangeHeader;
+      }
+
+      const upstreamRes = await fetch(downloadUrl, {
+        headers: forwardHeaders
+      });
+
+      const responseHeaders = new Headers(corsHeaders);
+      responseHeaders.set('Accept-Ranges', 'bytes');
+      responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || 'video/mp4');
+
+      if (upstreamRes.headers.get('content-range')) {
+        responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
+      }
+      if (upstreamRes.headers.get('content-length')) {
+        responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
+      }
+
+      return new Response(upstreamRes.body, {
+        status: upstreamRes.status,
+        headers: responseHeaders
+      });
+    } catch (err) {
+      console.error('API /api/stream error:', err);
+      return errorResponse(err.message, 500);
+    }
+  };
+
+  router.head('/api/stream', handleStream);
+  router.get('/api/stream', handleStream);
 
   // -------------------------------------------------------------
   // GET /api/posts - Public posts
@@ -261,7 +329,13 @@ export function createRouter() {
         'require_bot_start_link',
         'blocked_user_ids',
         'categories',
-        'shorteners'
+        'shorteners',
+        'stream_enabled',
+        'render_stream_url',
+        'adsgram_enabled',
+        'adsgram_rewarded_block_id',
+        'adsgram_interstitial_block_id',
+        'adsgram_preroll_enabled'
       ];
 
       for (const [key, value] of Object.entries(settings)) {
