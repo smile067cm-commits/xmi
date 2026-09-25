@@ -3305,15 +3305,19 @@ const rawHtml = `<!DOCTYPE html>
           const timeStr = d.accessed_at ? formatRelativeTime(d.accessed_at) + ' (' + formatISTTime(d.accessed_at) + ')' : '';
           const postTitle = formatActivityActionTitle(d.posts?.title ? escapeHtml(d.posts.title) : ('Post #' + d.post_id));
           const itemName = formatActivityActionTitle(d.item_name || 'Resource');
+          const isStreamWatch = (d.item_name && (d.item_name.includes('Watched') || d.item_name.startsWith('🎬')));
+          const badgeHtml = isStreamWatch
+            ? '<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8;">🎬 Video Stream</span>'
+            : '<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc;">🤖 Bot Delivery</span>';
 
           row.innerHTML = '<div>' +
-            '<div style="display: flex; align-items: center; gap: 6px;">' +
-              '<strong style="color: #4ade80;">📥 ' + escapeHtml(itemName) + '</strong>' +
-              '<span style="font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; background: rgba(168, 85, 247, 0.15); color: #c084fc;">🤖 Bot Delivery</span>' +
+            '<div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">' +
+              '<strong style="color: ' + (isStreamWatch ? '#38bdf8' : '#4ade80') + ';">' + (isStreamWatch ? '' : '📥 ') + escapeHtml(itemName) + '</strong>' +
+              badgeHtml +
             '</div>' +
             '<div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">From Post: ' + postTitle + '</div>' +
           '</div>' +
-          '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right;">' + timeStr + '</div>';
+          '<div style="font-size: 0.7rem; color: var(--text-muted); text-align: right; flex-shrink: 0;">' + timeStr + '</div>';
           list.appendChild(row);
         });
       } else if (currentUserActivityTab === 'views') {
@@ -4264,14 +4268,14 @@ const rawHtml = `<!DOCTYPE html>
               '</div>' +
               '<div style="display: flex; align-items: center; gap: 6px;">' +
               '<span style="color: var(--text-muted);">Required:</span>' +
-              '<span id="requiredNetSpeedText" style="font-weight: 700; color: #f8fafc;">~1.5 Mbps</span>' +
+              '<span id="requiredNetSpeedText" style="font-weight: 700; color: #f8fafc;">~150 KB/s</span>' +
               '<span id="speedQualityBadge" style="font-size: 0.7rem; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: rgba(34,197,94,0.15); color: #22c55e;">🟢 Smooth</span>' +
               '</div>' +
               '</div>' +
 
               // EXACTLY 1 VIDEO PLAYER IN THE DOM WITH FULLSCREEN CAPABILITY
               '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" id="postVideoPlayerWrap" oncontextmenu="return false;">' +
-              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" preload="auto" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;">' +
+              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" preload="metadata" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;">' +
               '<source src="' + firstStreamSrc + '" type="video/mp4">' +
               'Your browser does not support HTML5 video.' +
               '</video>' +
@@ -4291,26 +4295,40 @@ const rawHtml = `<!DOCTYPE html>
               '<button type="button" id="btnVideoFullscreenBar" class="btn btn-secondary btn-sm" style="flex: 1; padding: 10px; font-weight: 700; font-size: 0.82rem; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 6px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8;">⛶ Watch in Full Screen</button>' +
               '</div>';
 
-            // Playlist for streamable videos (tapping any switches active video)
-            if (videosForPlayer.length > 1) {
+            // 2-PER-ROW THUMBNAIL BOXES GRID (Tapping any box switches & plays that video)
+            if (videosForPlayer.length > 0) {
               html += '<div style="margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">' +
-                '<div style="font-weight: 700; font-size: 0.84rem; color: #94a3b8; margin-bottom: 10px;">📁 Streamable Videos (' + videosForPlayer.length + ') — Tap to play</div>' +
-                '<div style="display: flex; flex-direction: column; gap: 8px;" id="postVideoFilesList">' +
+                '<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">' +
+                '<div style="font-weight: 700; font-size: 0.85rem; color: #f8fafc; display: flex; align-items: center; gap: 6px;">🎬 Select Video (' + videosForPlayer.length + ')</div>' +
+                '<span style="font-size: 0.72rem; color: var(--text-muted);">Tap box to play</span>' +
+                '</div>' +
+                '<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;" id="postVideoFilesList">' +
                 videosForPlayer.map((vid, idx) => {
                   const vSize = Number(vid.size) || 0;
                   const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
                   const vName = vid.file_name || ('Video ' + (idx + 1));
                   const vKey = vid.id || vid.channel_message_id || 0;
                   const isActive = idx === 0;
+                  const thumbSrc = '/api/thumbnail?msg_id=' + encodeURIComponent(vid.channel_message_id || '') + '&post_id=' + encodeURIComponent(post.id) + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '');
+                  const fallbackImg = post.preview_image ? escapeHtml(post.preview_image) : '';
 
-                  return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.14)' : 'rgba(255,255,255,0.04)') + '; border: 1px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all 0.2s ease;">' +
-                    '<div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 65%;">' +
-                    '<span class="vid-play-icon" style="font-size: 1rem;">' + (isActive ? '▶️' : '🎬') + '</span>' +
-                    '<span style="font-weight: 600; font-size: 0.82rem; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + escapeHtml(vName) + '</span>' +
+                  return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.12)' : 'rgba(15, 23, 42, 0.7)') + '; border: 1.5px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 12px; overflow: hidden; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; box-shadow: ' + (isActive ? '0 0 12px rgba(56,189,248,0.25)' : 'none') + ';">' +
+                    // Thumbnail aspect ratio container
+                    '<div style="position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden;">' +
+                    '<img src="' + thumbSrc + '" loading="lazy" alt="Thumbnail" ' + (fallbackImg ? ('onerror="if(this.src!=\'' + fallbackImg + '\'){this.src=\'' + fallbackImg + '\';}"') : '') + ' style="width: 100%; height: 100%; object-fit: cover; display: block;">' +
+                    // Play icon overlay
+                    '<div class="vid-play-badge" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: ' + (isActive ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.4)') + '; transition: all 0.2s ease;">' +
+                    '<div style="width: 32px; height: 32px; border-radius: 50%; background: ' + (isActive ? '#38bdf8' : 'rgba(0,0,0,0.65)') + '; border: 1.5px solid ' + (isActive ? '#fff' : 'rgba(255,255,255,0.7)') + '; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.5);">' + (isActive ? '▶' : '▶') + '</div>' +
                     '</div>' +
-                    '<div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">' +
-                    '<span style="font-size: 0.72rem; color: #94a3b8; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 6px; font-weight: 600;">👁️ <span data-fview-id="' + vKey + '">' + (vid.view_count || 0) + '</span> views</span>' +
-                    '<span style="font-size: 0.72rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1); padding: 2px 6px; border-radius: 6px; font-weight: 600;">' + vSizeMB + ' MB</span>' +
+                    // Size badge
+                    '<span style="position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.75); color: #38bdf8; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; backdrop-filter: blur(4px);">' + vSizeMB + ' MB</span>' +
+                    // Views badge
+                    '<span style="position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.75); color: #cbd5e1; font-size: 0.65rem; font-weight: 600; padding: 2px 6px; border-radius: 6px; backdrop-filter: blur(4px);">👁️ <span data-fview-id="' + vKey + '">' + (vid.view_count || 0) + '</span></span>' +
+                    '</div>' +
+                    // Card Bottom Info
+                    '<div style="padding: 8px 10px; display: flex; flex-direction: column; gap: 2px;">' +
+                    '<div class="vid-card-title" style="font-weight: 700; font-size: 0.78rem; color: ' + (isActive ? '#38bdf8' : '#f8fafc') + '; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">🎬 ' + escapeHtml(vName) + '</div>' +
+                    '<div class="vid-card-status" style="font-size: 0.68rem; color: ' + (isActive ? '#38bdf8' : 'var(--text-muted)') + '; font-weight: 600;">' + (isActive ? '🟢 Playing' : 'Tap to stream') + '</div>' +
                     '</div>' +
                     '</div>';
                 }).join('') +
@@ -4421,33 +4439,49 @@ const rawHtml = `<!DOCTYPE html>
               ? player.duration
               : 0;
             if (!duration && vSize > 0) {
-              duration = Math.max(30, Math.min(600, (vSize / (1024 * 1024)) * 8));
+              // Estimate duration: assume typical mobile video bitrate of ~150 KB/s (~1.2 Mbps)
+              duration = Math.max(30, (vSize / (150 * 1024)));
             }
             if (duration > 0 && vSize > 0) {
-              const mbps = Number(((vSize * 8) / (duration * 1000000)).toFixed(1));
-              return Math.max(0.5, mbps);
+              const bytesPerSec = vSize / duration;
+              const kbps = Math.round(bytesPerSec / 1024);
+              const mbps = Number(((bytesPerSec * 8) / 1000000).toFixed(2));
+              return { kbps: Math.max(25, kbps), mbps: Math.max(0.2, mbps) };
             }
-            return 1.5;
+            return { kbps: 150, mbps: 1.2 };
           }
 
-          function updateVideoSpeedBadge(userMbps, reqMbps) {
+          function updateVideoSpeedBadge(userMbps, req) {
             const dot = document.getElementById('speedIndicatorDot');
             const userText = document.getElementById('userNetSpeedText');
             const reqText = document.getElementById('requiredNetSpeedText');
             const badge = document.getElementById('speedQualityBadge');
             if (!dot || !userText || !reqText || !badge) return;
 
-            userText.textContent = userMbps + ' Mbps';
-            reqText.textContent = '~' + reqMbps + ' Mbps';
+            let userSpeedDisplay = '';
+            if (userMbps >= 1.0) {
+              userSpeedDisplay = userMbps.toFixed(1) + ' Mbps';
+            } else {
+              userSpeedDisplay = Math.round(userMbps * 125) + ' KB/s';
+            }
+            userText.textContent = userSpeedDisplay;
 
-            if (userMbps >= reqMbps * 1.1) {
+            let reqDisplay = '';
+            if (req.kbps >= 1000) {
+              reqDisplay = '~' + (req.kbps / 1024).toFixed(1) + ' MB/s';
+            } else {
+              reqDisplay = '~' + req.kbps + ' KB/s';
+            }
+            reqText.textContent = reqDisplay;
+
+            if (userMbps >= req.mbps * 1.1) {
               dot.style.background = '#22c55e';
               dot.style.boxShadow = '0 0 8px #22c55e';
               userText.style.color = '#22c55e';
               badge.style.background = 'rgba(34, 197, 94, 0.15)';
               badge.style.color = '#22c55e';
               badge.textContent = '🟢 Smooth';
-            } else if (userMbps >= reqMbps * 0.75) {
+            } else if (userMbps >= req.mbps * 0.7) {
               dot.style.background = '#f59e0b';
               dot.style.boxShadow = '0 0 8px #f59e0b';
               userText.style.color = '#f59e0b';
@@ -4471,6 +4505,8 @@ const rawHtml = `<!DOCTYPE html>
             });
           }
 
+          let activeVideoHalfWatched = false;
+
           if (playerEl && videosForPlayer.length > 0) {
             const curVid = () => currentPostVideos[activeVideoIndex] || videosForPlayer[0];
 
@@ -4485,8 +4521,24 @@ const rawHtml = `<!DOCTYPE html>
             };
             playerEl.onplaying = () => {
               if (errorOverlayEl) errorOverlayEl.style.display = 'none';
-              const v = curVid();
-              if (v) trackFileView(post.id, v.id || v.channel_message_id);
+            };
+            playerEl.ontimeupdate = () => {
+              // Only count view if user played or skipped to at least half (50%) of video duration
+              if (!activeVideoHalfWatched && !isAdmin) {
+                const dur = playerEl.duration;
+                const cur = playerEl.currentTime;
+                if (dur > 0 && isFinite(dur) && cur >= (dur * 0.5)) {
+                  activeVideoHalfWatched = true;
+                  const v = curVid();
+                  if (v) {
+                    const vKey = v.id || v.channel_message_id;
+                    const vSize = Number(v.size) || 0;
+                    const mbConsumed = ((vSize * (cur / dur)) / (1024 * 1024)).toFixed(1);
+                    const watchSec = Math.round(cur);
+                    trackFileView(post.id, vKey, watchSec, mbConsumed, v.file_name);
+                  }
+                }
+              }
             };
             playerEl.onerror = () => {
               if (document.hidden) return; // Prevent crashes on app minimization
@@ -4627,8 +4679,14 @@ const rawHtml = `<!DOCTYPE html>
         }
       }
 
-      function trackFileView(postId, fileId) {
-        if (!postId || !fileId) return;
+      const trackedFileViewKeys = new Set();
+
+      function trackFileView(postId, fileId, watchSec, mbConsumed, fileName) {
+        if (!postId || !fileId || isAdmin) return;
+        const viewKey = String(postId) + '_' + String(fileId);
+        if (trackedFileViewKeys.has(viewKey)) return;
+        trackedFileViewKeys.add(viewKey);
+
         fetch('/api/file-view', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4636,7 +4694,11 @@ const rawHtml = `<!DOCTYPE html>
             post_id: postId,
             file_id: fileId,
             user_id: currentUserId,
-            username: currentUserName
+            username: currentUserName,
+            first_name: tg?.initDataUnsafe?.user?.first_name || '',
+            watch_seconds: watchSec !== undefined ? watchSec : null,
+            mb_consumed: mbConsumed !== undefined ? mbConsumed : null,
+            file_name: fileName || null
           })
         }).then(r => r.json()).then(data => {
           if (data && data.success && data.view_count !== undefined) {
@@ -4785,6 +4847,7 @@ const rawHtml = `<!DOCTYPE html>
           const vid = currentPostVideos[vIdx];
           if (vid && currentDetailPost) {
             activeVideoIndex = vIdx;
+            activeVideoHalfWatched = false; // Reset 50% watch flag for new video
             const player = document.getElementById('postActiveVideoPlayer');
             if (player) {
               try { player.pause(); } catch (_) {}
@@ -4803,16 +4866,37 @@ const rawHtml = `<!DOCTYPE html>
                 viewsEl.innerHTML = '👁️ <span class="vcount" data-fview-id="' + vKey + '">' + (vid.view_count || 0) + '</span> views';
               }
 
+              // Update grid cards styling
               document.querySelectorAll('.video-file-card').forEach((c, idx) => {
-                const icon = c.querySelector('.vid-play-icon');
+                const titleEl = c.querySelector('.vid-card-title');
+                const statusEl = c.querySelector('.vid-card-status');
+                const badgeEl = c.querySelector('.vid-play-badge > div');
                 if (idx === vIdx) {
-                  c.style.background = 'rgba(56, 189, 248, 0.14)';
+                  c.style.background = 'rgba(56, 189, 248, 0.12)';
                   c.style.borderColor = '#38bdf8';
-                  if (icon) icon.textContent = '▶️';
+                  c.style.boxShadow = '0 0 12px rgba(56,189,248,0.25)';
+                  if (titleEl) titleEl.style.color = '#38bdf8';
+                  if (statusEl) {
+                    statusEl.textContent = '🟢 Playing';
+                    statusEl.style.color = '#38bdf8';
+                  }
+                  if (badgeEl) {
+                    badgeEl.style.background = '#38bdf8';
+                    badgeEl.style.borderColor = '#fff';
+                  }
                 } else {
-                  c.style.background = 'rgba(255,255,255,0.04)';
+                  c.style.background = 'rgba(15, 23, 42, 0.7)';
                   c.style.borderColor = 'rgba(255,255,255,0.08)';
-                  if (icon) icon.textContent = '🎬';
+                  c.style.boxShadow = 'none';
+                  if (titleEl) titleEl.style.color = '#f8fafc';
+                  if (statusEl) {
+                    statusEl.textContent = 'Tap to stream';
+                    statusEl.style.color = 'var(--text-muted)';
+                  }
+                  if (badgeEl) {
+                    badgeEl.style.background = 'rgba(0,0,0,0.65)';
+                    badgeEl.style.borderColor = 'rgba(255,255,255,0.7)';
+                  }
                 }
               });
 
@@ -4820,7 +4904,7 @@ const rawHtml = `<!DOCTYPE html>
               const errOverlay = document.getElementById('videoErrorOverlay');
               if (errOverlay) errOverlay.style.display = 'none';
 
-              player.preload = 'auto';
+              player.preload = 'metadata';
               player.src = streamSrc;
               player.load();
               const pPromise = player.play();
@@ -4832,7 +4916,11 @@ const rawHtml = `<!DOCTYPE html>
                 refreshSpeedMeter(vid, player);
               }
 
-              trackFileView(currentDetailPost.id, vKey);
+              // Smooth scroll to top of video player wrap
+              const playerWrap = document.getElementById('postVideoPlayerWrap');
+              if (playerWrap) {
+                playerWrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              }
 
               player.onerror = () => {
                 if (document.hidden) return; // Prevent crashes on app minimization

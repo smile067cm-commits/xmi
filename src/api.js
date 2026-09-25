@@ -342,7 +342,76 @@ export function createRouter() {
     }
   };
 
-  router.all('/api/stream', handleStream);
+  router.all('/api/stream', (req, env) => {
+    const url = new URL(req.url);
+    if (url.searchParams.get('thumb') === '1') {
+      return handleThumbnail(req, env);
+    }
+    return handleStream(req, env);
+  });
+
+  // -------------------------------------------------------------
+  // GET /api/thumbnail - Extract or proxy video thumbnail via Render / MTProto / Fallback
+  // -------------------------------------------------------------
+  const handleThumbnail = async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const msgId = url.searchParams.get('msg_id') || url.searchParams.get('channel_message_id');
+      const postId = url.searchParams.get('post_id') || url.searchParams.get('id');
+
+      const settings = await getSettings(env);
+      const renderUrl = (settings?.render_stream_url || env.RENDER_STREAM_URL || 'https://xmi-stream-bot.onrender.com').replace(/\/+$/, '');
+      const storageChannel = env.CHANNEL_ID || '-1004415998750';
+
+      // 1. Try Render MTProto /thumb endpoint
+      if (renderUrl && msgId) {
+        try {
+          const upstreamRes = await fetch(`${renderUrl}/thumb?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(msgId)}`);
+          if (upstreamRes.ok) {
+            const imgBuffer = await upstreamRes.arrayBuffer();
+            return new Response(imgBuffer, {
+              status: 200,
+              headers: {
+                ...corsHeaders,
+                'Content-Type': upstreamRes.headers.get('content-type') || 'image/jpeg',
+                'Cache-Control': 'public, max-age=604800, immutable'
+              }
+            });
+          }
+        } catch (e) {
+          console.warn('Render thumb fetch notice:', e.message);
+        }
+      }
+
+      // 2. Fallback to post preview image if available
+      if (postId) {
+        const post = await getPostById(env, postId).catch(() => null);
+        if (post && post.preview_image) {
+          return Response.redirect(post.preview_image, 302);
+        }
+      }
+
+      // 3. Fallback: Sleek inline SVG video thumbnail
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180" fill="none">
+        <rect width="320" height="180" fill="#0b1120"/>
+        <circle cx="160" cy="85" r="28" fill="rgba(56, 189, 248, 0.15)" stroke="#38bdf8" stroke-width="2"/>
+        <polygon points="154,73 174,85 154,97" fill="#38bdf8"/>
+        <text x="160" y="135" fill="#94a3b8" font-size="12" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" text-anchor="middle" font-weight="600">Video Stream</text>
+      </svg>`;
+      return new Response(svg, {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'image/svg+xml',
+          'Cache-Control': 'public, max-age=86400'
+        }
+      });
+    } catch (err) {
+      return errorResponse(err.message, 500);
+    }
+  };
+
+  router.all('/api/thumbnail', handleThumbnail);
 
   // -------------------------------------------------------------
   // GET /api/posts - Public posts
@@ -1336,6 +1405,10 @@ export function createRouter() {
       let fileId = url.searchParams.get('file_id');
       let userId = url.searchParams.get('user_id');
       let username = url.searchParams.get('username');
+      let firstName = url.searchParams.get('first_name');
+      let watchSeconds = url.searchParams.get('watch_seconds');
+      let mbConsumed = url.searchParams.get('mb_consumed');
+      let fileName = url.searchParams.get('file_name');
 
       if (request.method === 'POST') {
         try {
@@ -1345,6 +1418,10 @@ export function createRouter() {
             fileId = body.file_id || fileId;
             userId = body.user_id || userId;
             username = body.username || username;
+            firstName = body.first_name || firstName;
+            watchSeconds = body.watch_seconds !== undefined ? body.watch_seconds : watchSeconds;
+            mbConsumed = body.mb_consumed !== undefined ? body.mb_consumed : mbConsumed;
+            fileName = body.file_name || fileName;
           }
         } catch (_) {}
       }
@@ -1353,7 +1430,13 @@ export function createRouter() {
         return jsonResponse({ success: false, error: 'post_id and file_id are required' }, 400);
       }
 
-      const count = await incrementFileView(env, postId, fileId, userId, username);
+      // Check if admin user - NEVER count views or log activity for admins!
+      if (userId && await isAdminUser(env, userId)) {
+        const viewsMap = await getFileViewsForPost(env, postId);
+        return jsonResponse({ success: true, post_id: postId, file_id: fileId, view_count: viewsMap[String(fileId)] || 0, is_admin: true });
+      }
+
+      const count = await incrementFileView(env, postId, fileId, userId, username, firstName, watchSeconds, mbConsumed, fileName);
       return jsonResponse({ success: true, post_id: postId, file_id: fileId, view_count: count });
     } catch (err) {
       return jsonResponse({ success: false, error: err.message }, 200);

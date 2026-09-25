@@ -275,11 +275,17 @@ export async function getFileViewsForPost(env, postId) {
 /**
  * Increment view count for a specific file in a post
  */
-export async function incrementFileView(env, postId, fileId, userId = null, username = null, firstName = null) {
+export async function incrementFileView(env, postId, fileId, userId = null, username = null, firstName = null, watchSeconds = null, mbConsumed = null, fileName = null) {
   if (!env.SUPABASE_URL || !postId || !fileId) return 1;
   try {
-    const viewsMap = await getFileViewsForPost(env, postId);
     const fKey = String(fileId);
+    const viewsMap = await getFileViewsForPost(env, postId);
+
+    // If user is admin, NEVER count views or log activity for admins!
+    if (userId && await isAdminUser(env, userId)) {
+      return Number(viewsMap[fKey]) || 0;
+    }
+
     viewsMap[fKey] = (Number(viewsMap[fKey]) || 0) + 1;
 
     const url = `${getSupabaseBaseUrl(env)}/settings`;
@@ -297,10 +303,19 @@ export async function incrementFileView(env, postId, fileId, userId = null, user
     });
 
     if (userId) {
+      let itemName = `View file #${fKey}`;
+      if (watchSeconds !== null && watchSeconds !== undefined) {
+        const vName = fileName || `Video #${fKey}`;
+        const mbText = (mbConsumed !== null && mbConsumed !== undefined && mbConsumed !== '') ? ` • ${mbConsumed} MB` : '';
+        itemName = `🎬 Watched: ${vName} (${watchSeconds}s watched${mbText})`;
+      } else if (fileName) {
+        itemName = `View ${fileName}`;
+      }
+
       recordFileAccess(env, {
         post_id: postId,
         file_id: fKey,
-        item_name: `View file #${fKey}`,
+        item_name: itemName,
         user_id: userId,
         username,
         first_name: firstName
@@ -1393,18 +1408,20 @@ export async function getUserActivity(env, userId) {
     });
   }
 
-  // 4. File Downloads / Accesses (delivered via Telegram bot or direct item delivery)
+  // 4. File Downloads / Accesses (delivered via Telegram bot or direct item delivery or video stream watch)
   for (const d of rawDownloads) {
     const pTitle = d.posts?.title || `Post #${d.post_id}`;
+    const itemName = d.item_name || 'File';
+    const isStreamWatch = itemName.startsWith('🎬') || itemName.includes('Watched');
     timeline.push({
-      type: 'download',
-      source: 'bot',
-      source_name: '🤖 Bot',
-      title: `Downloaded: ${d.item_name || 'File'}`,
+      type: isStreamWatch ? 'stream' : 'download',
+      source: isStreamWatch ? 'app' : 'bot',
+      source_name: isStreamWatch ? '📱 Mini App' : '🤖 Bot',
+      title: itemName,
       description: `From ${pTitle}`,
       post_id: d.post_id,
       date: d.accessed_at,
-      icon: '📥'
+      icon: isStreamWatch ? '🎬' : '📥'
     });
   }
 
