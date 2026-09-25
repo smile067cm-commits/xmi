@@ -351,7 +351,34 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
-  // GET /api/thumbnail - Extract or proxy video thumbnail via Render / MTProto / Fallback
+  // Video thumbnail cache & Catbox uploader
+  // -------------------------------------------------------------
+  const catboxThumbCache = new Map();
+
+  async function uploadBufferToCatbox(buffer, filename = 'thumb.jpg') {
+    try {
+      const formData = new FormData();
+      formData.append('reqtype', 'fileupload');
+      const blob = new Blob([buffer], { type: 'image/jpeg' });
+      formData.append('fileToUpload', blob, filename);
+      const res = await fetch('https://catbox.moe/user/api.php', {
+        method: 'POST',
+        body: formData
+      });
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.trim().startsWith('http')) {
+          return text.trim();
+        }
+      }
+    } catch (e) {
+      console.warn('Worker upload to Catbox error:', e.message);
+    }
+    return null;
+  }
+
+  // -------------------------------------------------------------
+  // GET /api/thumbnail - Extract video thumbnail via Render / Catbox / Fallback
   // -------------------------------------------------------------
   const handleThumbnail = async (request, env) => {
     try {
@@ -359,11 +386,79 @@ export function createRouter() {
       const msgId = url.searchParams.get('msg_id') || url.searchParams.get('channel_message_id');
       const postId = url.searchParams.get('post_id') || url.searchParams.get('id');
 
+      // 1. Instant check: In-memory cache for this msgId (0ms)
+      if (msgId && catboxThumbCache.has(msgId)) {
+        return Response.redirect(catboxThumbCache.get(msgId), 302);
+      }
+
+      // 2. Check Cloudflare Edge Cache
+      const cache = caches.default;
+      const cacheKey = new Request(url.toString(), request);
+      const cachedResponse = await cache.match(cacheKey);
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+
       const settings = await getSettings(env);
       const renderUrl = (settings?.render_stream_url || env.RENDER_STREAM_URL || 'https://xmi-stream-bot.onrender.com').replace(/\/+$/, '');
       const storageChannel = env.CHANNEL_ID || '-1004415998750';
 
-      // 1. Instant check: If post has a preview_image, redirect immediately (0ms latency)
+      // 3. Extract unique video thumbnail via Render MTProto without downloading full video
+      if (renderUrl && msgId) {
+        try {
+          const upstreamRes = await fetch(`${renderUrl}/thumb?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(msgId)}&json=1`, {
+            signal: AbortSignal.timeout(4500)
+          });
+          if (upstreamRes.ok) {
+            const contentType = upstreamRes.headers.get('content-type') || '';
+            let catboxUrl = null;
+
+            if (contentType.includes('application/json')) {
+              const data = await upstreamRes.json().catch(() => null);
+              if (data && data.url) {
+                catboxUrl = data.url;
+              }
+            } else if (contentType.includes('image/')) {
+              // Render returned raw JPEG buffer -> upload to Catbox anonymously
+              const imgBuffer = await upstreamRes.arrayBuffer();
+              if (imgBuffer && imgBuffer.byteLength > 0) {
+                catboxUrl = await uploadBufferToCatbox(imgBuffer, `thumb_${msgId}.jpg`);
+                if (!catboxUrl) {
+                  // Fallback: serve image directly with long cache
+                  const directImgRes = new Response(imgBuffer, {
+                    status: 200,
+                    headers: {
+                      ...corsHeaders,
+                      'Content-Type': contentType,
+                      'Cache-Control': 'public, max-age=604800, immutable'
+                    }
+                  });
+                  try { await cache.put(cacheKey, directImgRes.clone()); } catch (_) {}
+                  return directImgRes;
+                }
+              }
+            }
+
+            if (catboxUrl) {
+              catboxThumbCache.set(msgId, catboxUrl);
+              const redirectRes = new Response(null, {
+                status: 302,
+                headers: {
+                  ...corsHeaders,
+                  'Location': catboxUrl,
+                  'Cache-Control': 'public, max-age=2592000, immutable'
+                }
+              });
+              try { await cache.put(cacheKey, redirectRes.clone()); } catch (_) {}
+              return redirectRes;
+            }
+          }
+        } catch (e) {
+          console.warn('Render thumbnail extraction error:', e.message);
+        }
+      }
+
+      // 4. Secondary fallback: Post preview image (if Render is warming up)
       if (postId) {
         const post = await getPostById(env, postId).catch(() => null);
         if (post && post.preview_image) {
@@ -371,27 +466,7 @@ export function createRouter() {
         }
       }
 
-      // 2. Try Render MTProto /thumb endpoint with strict 1.5s timeout so user never waits
-      if (renderUrl && msgId) {
-        try {
-          const upstreamRes = await fetch(`${renderUrl}/thumb?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(msgId)}`, {
-            signal: AbortSignal.timeout(1500)
-          });
-          if (upstreamRes.ok) {
-            const imgBuffer = await upstreamRes.arrayBuffer();
-            return new Response(imgBuffer, {
-              status: 200,
-              headers: {
-                ...corsHeaders,
-                'Content-Type': upstreamRes.headers.get('content-type') || 'image/jpeg',
-                'Cache-Control': 'public, max-age=604800, immutable'
-              }
-            });
-          }
-        } catch (_) {}
-      }
-
-      // 3. Fallback: Sleek inline SVG video thumbnail
+      // 5. Final fallback: Sleek inline SVG video thumbnail
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180" fill="none">
         <rect width="320" height="180" fill="#0b1120"/>
         <circle cx="160" cy="85" r="28" fill="rgba(56, 189, 248, 0.15)" stroke="#38bdf8" stroke-width="2"/>

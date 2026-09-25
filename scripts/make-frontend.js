@@ -4328,9 +4328,7 @@ const rawHtml = `<!DOCTYPE html>
                   const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
                   const vName = vid.file_name || ('Video ' + (idx + 1));
                   const vKey = vid.id || vid.channel_message_id || 0;
-                  const isActive = idx === 0;
-                  const thumbSrc = post.preview_image ? escapeHtml(post.preview_image) : ('/api/thumbnail?msg_id=' + encodeURIComponent(vid.channel_message_id || '') + '&post_id=' + encodeURIComponent(post.id) + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : ''));
-                  const fallbackImg = post.preview_image ? escapeHtml(post.preview_image) : '';
+                  const thumbSrc = '/api/thumbnail?msg_id=' + encodeURIComponent(vid.channel_message_id || '') + '&post_id=' + encodeURIComponent(post.id) + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '');
 
                   return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.12)' : 'rgba(15, 23, 42, 0.7)') + '; border: 1.5px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 12px; overflow: hidden; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; box-shadow: ' + (isActive ? '0 0 12px rgba(56,189,248,0.25)' : 'none') + ';">' +
                     // Thumbnail aspect ratio container
