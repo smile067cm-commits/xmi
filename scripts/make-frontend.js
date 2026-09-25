@@ -2495,6 +2495,9 @@ const rawHtml = `<!DOCTYPE html>
         const timeoutId = setTimeout(() => controller.abort(), 9000);
         const res = await fetch('/api/posts?user_id=' + currentUserId, { signal: controller.signal });
         clearTimeout(timeoutId);
+        if (!res.ok) {
+          throw new Error('HTTP ' + res.status);
+        }
         const data = await res.json();
         if (data.success && Array.isArray(data.posts)) {
           allPosts = data.posts.map(p => {
@@ -2511,6 +2514,8 @@ const rawHtml = `<!DOCTYPE html>
           } catch (_) {}
           savedPostIds = new Set(allPosts.filter(p => p.is_saved).map(p => p.id));
           renderFeed();
+        } else {
+          throw new Error(data?.error || 'Invalid posts response');
         }
       } catch (e) {
         console.error('Failed to load posts:', e);
@@ -2520,8 +2525,8 @@ const rawHtml = `<!DOCTYPE html>
           if (grid) {
             grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 40px 16px; text-align: center; color: var(--text-muted);">' +
               '<div style="font-size: 32px; margin-bottom: 10px;">📶</div>' +
-              '<div style="font-weight: 700; color: #f8fafc; font-size: 1rem; margin-bottom: 4px;">Slow Connection Detected</div>' +
-              '<div style="font-size: 0.8rem; margin-bottom: 16px;">Unable to fetch posts quickly. Tap below to retry.</div>' +
+              '<div style="font-weight: 700; color: #f8fafc; font-size: 1rem; margin-bottom: 4px;">Unable to Load Posts</div>' +
+              '<div style="font-size: 0.8rem; margin-bottom: 16px;">Connection slow or interrupted. Tap below to retry.</div>' +
               '<button type="button" class="btn btn-primary" onclick="loadPosts()" style="padding: 9px 18px; font-weight: 700; border-radius: 10px;">🔄 Retry Loading</button>' +
             '</div>';
           }
@@ -2532,81 +2537,92 @@ const rawHtml = `<!DOCTYPE html>
     // Render Public Feed (Only 1 primary action button: Open in Bot)
     function renderFeed() {
       const grid = document.getElementById('postsGrid');
-      grid.innerHTML = '';
+      if (!grid) return;
 
-      let list = [...allPosts];
+      try {
+        grid.innerHTML = '';
 
-      if (currentView === 'saved') {
-        list = list.filter(p => savedPostIds.has(p.id));
-      }
+        let list = [...allPosts];
 
-      if (currentSearch.trim()) {
-        const q = currentSearch.toLowerCase();
-        list = list.filter(p =>
-          (p.title || '').toLowerCase().includes(q) ||
-          (p.tags || '').toLowerCase().includes(q)
-        );
-      }
-
-      // Sort: Promoted / Exclusive posts ALWAYS appear at top!
-      list.sort((a, b) => {
-        if (a.is_promoted && !b.is_promoted) return -1;
-        if (!a.is_promoted && b.is_promoted) return 1;
-
-        if (currentSort === 'views') {
-          return (Number(b.view_count) || 0) - (Number(a.view_count) || 0);
-        } else if (currentSort === 'likes') {
-          return (Number(b.like_count) || 0) - (Number(a.like_count) || 0);
-        } else if (currentSort === 'downloads') {
-          return (Number(b.access_count) || 0) - (Number(a.access_count) || 0);
-        } else if (currentSort === 'latest') {
-          return new Date(b.created_at || 0) - new Date(a.created_at || 0);
-        } else {
-          // Default 'all': Organic engagement ranking as per highest likes, views, and downloads with dynamic variety
-          return (b._popularityScore || 0) - (a._popularityScore || 0);
-        }
-      });
-
-      if (list.length === 0) {
-        grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 40px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 38px; margin-bottom: 8px;">🔍</div><div style="font-weight: 600;">No posts found</div><div style="font-size: 0.8rem; margin-top: 4px;">Try a different search term.</div></div>';
-        return;
-      }
-
-      list.forEach(post => {
-        const card = document.createElement('div');
-        card.className = 'post-card' + (post.is_promoted ? ' is-promoted' : '');
-
-        const isSaved = savedPostIds.has(post.id);
-        const pointsRequired = Number(globalSettings.points_per_post) || 0;
-        const shortenerOn = Boolean(globalSettings.shortener_enabled && pointsRequired > 0);
-
-        let imgHtml = '<div class="post-image-placeholder">📄</div>';
-        if (post.preview_image) {
-          imgHtml = '<div class="post-image-backdrop" style="background-image: url(&quot;' + escapeHtml(post.preview_image) + '&quot;);"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />';
+        if (currentView === 'saved') {
+          list = list.filter(p => savedPostIds.has(p.id));
         }
 
-        let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted" style="color: #fff; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);">⭐ Exclusive</span>' : '';
-        const zoomHint = post.preview_image ? '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 6px; pointer-events: none; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 3px;">🔍 Tap to Zoom</div>' : '';
+        if (currentSearch.trim()) {
+          const q = currentSearch.toLowerCase();
+          list = list.filter(p =>
+            (p.title || '').toLowerCase().includes(q) ||
+            (p.tags || '').toLowerCase().includes(q)
+          );
+        }
 
-        const actionButtonHtml = '<button class="btn-open-bot-full" data-act="open-post" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; font-weight: 700; box-shadow: 0 4px 14px rgba(56, 189, 248, 0.25);">📂 Open Post</button>';
+        // Sort: Promoted / Exclusive posts ALWAYS appear at top!
+        list.sort((a, b) => {
+          if (a.is_promoted && !b.is_promoted) return -1;
+          if (!a.is_promoted && b.is_promoted) return 1;
 
-        card.innerHTML = '<div class="post-image-container" style="cursor: pointer;" data-act="open-post" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '">' + imgHtml + zoomHint + (promotedBadge ? '<div class="post-badges-top">' + promotedBadge + '</div>' : '') + '</div>' +
-          '<div class="post-body">' +
-          '<h3 class="post-title">' + escapeHtml(post.title) + '</h3>' +
-          '<div class="post-meta"><span>📅 ' + formatISTDate(post.created_at) + '</span>' + (post.tags ? '<span>• ' + escapeHtml(post.tags) + '</span>' : '') + (shortenerOn ? '<span style="color: #fbbf24; font-weight: 700;">• 🪙 ' + pointsRequired + ' pt' + (pointsRequired > 1 ? 's' : '') + '</span>' : '') + '</div>' +
-          '<div class="post-actions-row">' +
-          '<div class="social-counters">' +
-          '<button class="action-btn ' + (post.is_liked ? 'liked' : '') + '" data-act="like" data-id="' + post.id + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>' + (post.like_count || 0) + '</span></button>' +
-          '<button class="action-btn" data-act="comment" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg><span>' + (post.comment_count || 0) + '</span></button>' +
-          '<button class="action-btn ' + (isSaved ? 'saved' : '') + '" data-act="save" data-id="' + post.id + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="' + (isSaved ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>' +
-          '</div>' +
-          '</div>' +
-          actionButtonHtml +
-          '</div>';
+          if (currentSort === 'views') {
+            return (Number(b.view_count) || 0) - (Number(a.view_count) || 0);
+          } else if (currentSort === 'likes') {
+            return (Number(b.like_count) || 0) - (Number(a.like_count) || 0);
+          } else if (currentSort === 'downloads') {
+            return (Number(b.access_count) || 0) - (Number(a.access_count) || 0);
+          } else if (currentSort === 'latest') {
+            return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+          } else {
+            // Default 'all': Organic engagement ranking as per highest likes, views, and downloads with dynamic variety
+            return (b._popularityScore || 0) - (a._popularityScore || 0);
+          }
+        });
 
-        grid.appendChild(card);
-        trackPostView(post.id);
-      });
+        if (list.length === 0) {
+          grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 40px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 38px; margin-bottom: 8px;">🔍</div><div style="font-weight: 600;">No posts found</div><div style="font-size: 0.8rem; margin-top: 4px;">Try a different search term.</div></div>';
+          return;
+        }
+
+        list.forEach(post => {
+          const card = document.createElement('div');
+          card.className = 'post-card' + (post.is_promoted ? ' is-promoted' : '');
+
+          const isSaved = savedPostIds.has(post.id);
+          const pointsRequired = Number(globalSettings.points_per_post) || 0;
+          const shortenerOn = Boolean(globalSettings.shortener_enabled && pointsRequired > 0);
+
+          let imgHtml = '<div class="post-image-placeholder">📄</div>';
+          if (post.preview_image) {
+            imgHtml = '<div class="post-image-backdrop" style="background-image: url(&quot;' + escapeHtml(post.preview_image) + '&quot;);"></div><img src="' + escapeHtml(post.preview_image) + '" alt="" class="post-image-fg" loading="lazy" />';
+          }
+
+          let promotedBadge = post.is_promoted ? '<span class="post-status-badge status-promoted" style="color: #fff; font-weight: 800; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);">⭐ Exclusive</span>' : '';
+          const zoomHint = post.preview_image ? '<div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.65); color: #fff; font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 6px; pointer-events: none; backdrop-filter: blur(4px); display: flex; align-items: center; gap: 3px;">🔍 Tap to Zoom</div>' : '';
+
+          const actionButtonHtml = '<button class="btn-open-bot-full" data-act="open-post" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '" style="background: linear-gradient(135deg, #0284c7, #38bdf8); color: #fff; font-weight: 700; box-shadow: 0 4px 14px rgba(56, 189, 248, 0.25);">📂 Open Post</button>';
+
+          card.innerHTML = '<div class="post-image-container" style="cursor: pointer;" data-act="open-post" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '">' + imgHtml + zoomHint + (promotedBadge ? '<div class="post-badges-top">' + promotedBadge + '</div>' : '') + '</div>' +
+            '<div class="post-body">' +
+            '<h3 class="post-title">' + escapeHtml(post.title) + '</h3>' +
+            '<div class="post-meta"><span>📅 ' + formatISTDate(post.created_at) + '</span>' + (post.tags ? '<span>• ' + escapeHtml(post.tags) + '</span>' : '') + (shortenerOn ? '<span style="color: #fbbf24; font-weight: 700;">• 🪙 ' + pointsRequired + ' pt' + (pointsRequired > 1 ? 's' : '') + '</span>' : '') + '</div>' +
+            '<div class="post-actions-row">' +
+            '<div class="social-counters">' +
+            '<button class="action-btn ' + (post.is_liked ? 'liked' : '') + '" data-act="like" data-id="' + post.id + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg><span>' + (post.like_count || 0) + '</span></button>' +
+            '<button class="action-btn" data-act="comment" data-id="' + post.id + '" data-title="' + escapeHtml(post.title) + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg><span>' + (post.comment_count || 0) + '</span></button>' +
+            '<button class="action-btn ' + (isSaved ? 'saved' : '') + '" data-act="save" data-id="' + post.id + '"><svg width="15" height="15" viewBox="0 0 24 24" fill="' + (isSaved ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></button>' +
+            '</div>' +
+            '</div>' +
+            actionButtonHtml +
+            '</div>';
+
+          grid.appendChild(card);
+          try { trackPostView(post.id); } catch (_) {}
+        });
+      } catch (renderErr) {
+        console.error('renderFeed error:', renderErr);
+        grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 40px 16px; text-align: center; color: var(--text-muted);">' +
+          '<div style="font-size: 32px; margin-bottom: 10px;">⚠️</div>' +
+          '<div style="font-weight: 700; color: #f8fafc; font-size: 1rem; margin-bottom: 4px;">Unable to display posts</div>' +
+          '<button type="button" class="btn btn-primary" onclick="loadPosts()" style="padding: 9px 18px; font-weight: 700; border-radius: 10px; margin-top: 10px;">🔄 Refresh Feed</button>' +
+        '</div>';
+      }
     }
 
     // Render Admin Hub Posts List
@@ -4943,7 +4959,7 @@ const rawHtml = `<!DOCTYPE html>
           const fname = thumbBtn.dataset.fname || 'file';
           const curThumb = thumbBtn.dataset.fthumb || '';
 
-          const newThumb = prompt('Enter new thumbnail URL (Catbox, direct link) for "' + fname + '":\n(Leave empty to remove custom thumbnail)', curThumb);
+          const newThumb = prompt('Enter new thumbnail URL (Catbox, direct link) for "' + fname + '" (or leave empty to remove):', curThumb);
           if (newThumb === null) return;
 
           showToast('⏳ Updating thumbnail...');
@@ -4985,7 +5001,7 @@ const rawHtml = `<!DOCTYPE html>
           e.preventDefault();
           const pid = coverBtn.dataset.pid;
           const curCover = (currentDetailPost && currentDetailPost.preview_image) || '';
-          const newCover = prompt('Enter new Post Cover / Preview Image URL (Catbox, direct link):\n(Leave empty to remove cover image)', curCover);
+          const newCover = prompt('Enter new Post Cover / Preview Image URL (Catbox, direct link) (or leave empty to remove):', curCover);
           if (newCover === null) return;
 
           showToast('⏳ Updating post cover...');
