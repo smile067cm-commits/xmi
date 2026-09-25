@@ -719,11 +719,38 @@ export function createBot(env) {
         });
       }
     } else {
-      // Regular User: Send 3 posts automatically
+      // Regular User: Show welcome message with Open App button ONLY (no posts sent)
+      const name = escapeMarkdown(ctx.from?.first_name || 'there');
+      const text = `👋 *Welcome, ${name}!*\n\n` +
+        `Tap the button below to open the Mini App and access all posts, videos, and files:`;
+
+      const inlineButtons = [
+        [
+          userAppUrl && userAppUrl.startsWith('https://')
+            ? Markup.button.webApp('🚀 Open App', userAppUrl)
+            : Markup.button.url('🚀 Open App', userAppUrl || 'https://xmi.lakshminighty1.workers.dev')
+        ]
+      ];
+
       if (ctx.callbackQuery) {
-        await ctx.answerCbQuery();
+        await ctx.answerCbQuery().catch(() => {});
+        try {
+          return await ctx.editMessageText(text, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(inlineButtons)
+          });
+        } catch (e) {
+          return await ctx.reply(text, {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(inlineButtons)
+          });
+        }
+      } else {
+        return await ctx.reply(text, {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard(inlineButtons)
+        });
       }
-      return await sendPostFeedToUser(ctx, env, 1);
     }
   }
 
@@ -957,13 +984,7 @@ export function createBot(env) {
   bot.hears(/^\/(start|Start|START|stsrt)(?:@\w+)?(?:\s+(.*))?$/i, handleStart);
 
   bot.action('main_menu', async (ctx) => {
-    const userId = ctx.from?.id;
-    const isAdmin = await isAdminUser(env, userId);
-    if (isAdmin) {
-      return await showMainMenu(ctx);
-    }
-    if (ctx.callbackQuery) await ctx.answerCbQuery();
-    return await sendPostFeedToUser(ctx, env, 1);
+    return await showMainMenu(ctx);
   });
 
   bot.action('admin_main_menu', async (ctx) => {
@@ -971,7 +992,7 @@ export function createBot(env) {
     const isAdmin = await isAdminUser(env, userId);
     if (!isAdmin) {
       if (ctx.callbackQuery) await ctx.answerCbQuery('⛔ Admin access only');
-      return await sendPostFeedToUser(ctx, env, 1);
+      return await showMainMenu(ctx);
     }
     return await showMainMenu(ctx);
   });
@@ -3738,6 +3759,13 @@ export function createBot(env) {
         if (text === '📊 Stats' || text === '📊 Hub Stats') return await handleStats(ctx);
         if (text === '📢 Broadcast') return await startBroadcastFlow(ctx);
         if (text === '⚙️ Settings') return await handleSettingsMenu(ctx);
+      } else {
+        if (['➕ Add Post', '📑 Manage Posts', '📊 Stats', '📊 Hub Stats', '📢 Broadcast', '⚙️ Settings'].includes(text)) {
+          await ctx.reply('👋 Please use the Mini App to explore posts and content.', {
+            reply_markup: { remove_keyboard: true }
+          }).catch(() => {});
+          return await showMainMenu(ctx);
+        }
       }
       if (text === '🔍 Browse Posts' || text === '🔍 Browse All Posts') return await handleBrowsePosts(ctx);
       if (text === '🔖 Saved Posts' || text === '🔖 My Saved Posts') return await handleSavedPosts(ctx);
