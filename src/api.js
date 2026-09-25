@@ -117,6 +117,19 @@ export function createRouter() {
     timestamp: Date.now()
   }));
 
+  // Lightweight speed test probe endpoint (64KB raw buffer for precise downlink estimation)
+  const speedTestData = new Uint8Array(64 * 1024);
+  router.get('/api/user/speed-test', () => {
+    return new Response(speedTestData, {
+      status: 200,
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/octet-stream',
+        'Cache-Control': 'no-cache, no-store, must-revalidate'
+      }
+    });
+  });
+
   // In-memory cache for Telegram getFile responses to eliminate latency on range chunks
   const tgFilePathCache = new Map();
 

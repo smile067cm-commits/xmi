@@ -4255,17 +4255,26 @@ const rawHtml = `<!DOCTYPE html>
               '</div>' +
               '</div>' +
 
-              // EXACTLY 1 VIDEO PLAYER IN THE DOM WITH FULLSCREEN & BUFFER INDICATORS
+              // LIVE INTERNET SPEED & REQUIRED BITRATE METER
+              '<div id="videoSpeedMeterBar" style="display: flex; align-items: center; justify-content: space-between; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 7px 12px; margin-bottom: 10px; font-size: 0.74rem; flex-wrap: wrap; gap: 6px;">' +
+              '<div style="display: flex; align-items: center; gap: 6px;">' +
+              '<span id="speedIndicatorDot" style="width: 8px; height: 8px; border-radius: 50%; background: #22c55e; display: inline-block; box-shadow: 0 0 8px #22c55e; transition: all 0.3s ease;"></span>' +
+              '<span style="color: var(--text-muted);">Net Speed:</span>' +
+              '<span id="userNetSpeedText" style="font-weight: 700; color: #22c55e;">Measuring...</span>' +
+              '</div>' +
+              '<div style="display: flex; align-items: center; gap: 6px;">' +
+              '<span style="color: var(--text-muted);">Required:</span>' +
+              '<span id="requiredNetSpeedText" style="font-weight: 700; color: #f8fafc;">~1.5 Mbps</span>' +
+              '<span id="speedQualityBadge" style="font-size: 0.7rem; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: rgba(34,197,94,0.15); color: #22c55e;">🟢 Smooth</span>' +
+              '</div>' +
+              '</div>' +
+
+              // EXACTLY 1 VIDEO PLAYER IN THE DOM WITH FULLSCREEN CAPABILITY
               '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" id="postVideoPlayerWrap" oncontextmenu="return false;">' +
               '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" preload="auto" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;">' +
               '<source src="' + firstStreamSrc + '" type="video/mp4">' +
               'Your browser does not support HTML5 video.' +
               '</video>' +
-              '<div id="videoLoadingSpinner" style="display: none; position: absolute; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 5; pointer-events: none;">' +
-              '<div style="background: rgba(15,23,42,0.9); border: 1px solid rgba(56,189,248,0.4); border-radius: 12px; padding: 10px 18px; color: #38bdf8; font-weight: 700; font-size: 0.84rem; display: flex; align-items: center; gap: 8px;">' +
-              '<span>⏳</span> Buffering video...' +
-              '</div>' +
-              '</div>' +
               '<div id="videoErrorOverlay" style="display: none; position: absolute; inset: 0; background: rgba(0,0,0,0.88); align-items: center; justify-content: center; flex-direction: column; gap: 10px; z-index: 6; padding: 16px; text-align: center;">' +
               '<div style="color: #f87171; font-weight: 700; font-size: 0.88rem;">⚠️ Video stream delayed or loading slowly</div>' +
               '<div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">' +
@@ -4368,29 +4377,119 @@ const rawHtml = `<!DOCTYPE html>
 
           // Attach safe event handling and fallback for resilient video playback
           const playerEl = document.getElementById('postActiveVideoPlayer');
-          const spinnerEl = document.getElementById('videoLoadingSpinner');
           const errorOverlayEl = document.getElementById('videoErrorOverlay');
           let videoRetryCount = 0;
+
+          let lastMeasuredDownlinkMbps = null;
+          let speedTestInProgress = false;
+
+          async function getLiveInternetSpeed() {
+            if (lastMeasuredDownlinkMbps && (Date.now() - lastMeasuredDownlinkMbps.time < 30000)) {
+              return lastMeasuredDownlinkMbps.speed;
+            }
+            if (speedTestInProgress) {
+              return lastMeasuredDownlinkMbps ? lastMeasuredDownlinkMbps.speed : 5.0;
+            }
+            speedTestInProgress = true;
+            try {
+              const t0 = performance.now();
+              const res = await fetch('/api/user/speed-test?t=' + Date.now(), { cache: 'no-store' });
+              if (res.ok) {
+                const buf = await res.arrayBuffer();
+                const t1 = performance.now();
+                const durSec = (t1 - t0) / 1000;
+                if (durSec > 0 && buf.byteLength > 0) {
+                  const mbps = Number(((buf.byteLength * 8) / (durSec * 1000000)).toFixed(1));
+                  lastMeasuredDownlinkMbps = { speed: Math.max(0.1, mbps), time: Date.now() };
+                  speedTestInProgress = false;
+                  return lastMeasuredDownlinkMbps.speed;
+                }
+              }
+            } catch (_) {}
+            speedTestInProgress = false;
+            if (navigator.connection && navigator.connection.downlink) {
+              const dl = Number(navigator.connection.downlink.toFixed(1));
+              lastMeasuredDownlinkMbps = { speed: dl, time: Date.now() };
+              return dl;
+            }
+            return 5.0;
+          }
+
+          function calculateRequiredSpeed(vid, player) {
+            const vSize = Number(vid?.size) || 0;
+            let duration = (player && player.duration && isFinite(player.duration) && player.duration > 0)
+              ? player.duration
+              : 0;
+            if (!duration && vSize > 0) {
+              duration = Math.max(30, Math.min(600, (vSize / (1024 * 1024)) * 8));
+            }
+            if (duration > 0 && vSize > 0) {
+              const mbps = Number(((vSize * 8) / (duration * 1000000)).toFixed(1));
+              return Math.max(0.5, mbps);
+            }
+            return 1.5;
+          }
+
+          function updateVideoSpeedBadge(userMbps, reqMbps) {
+            const dot = document.getElementById('speedIndicatorDot');
+            const userText = document.getElementById('userNetSpeedText');
+            const reqText = document.getElementById('requiredNetSpeedText');
+            const badge = document.getElementById('speedQualityBadge');
+            if (!dot || !userText || !reqText || !badge) return;
+
+            userText.textContent = userMbps + ' Mbps';
+            reqText.textContent = '~' + reqMbps + ' Mbps';
+
+            if (userMbps >= reqMbps * 1.1) {
+              dot.style.background = '#22c55e';
+              dot.style.boxShadow = '0 0 8px #22c55e';
+              userText.style.color = '#22c55e';
+              badge.style.background = 'rgba(34, 197, 94, 0.15)';
+              badge.style.color = '#22c55e';
+              badge.textContent = '🟢 Smooth';
+            } else if (userMbps >= reqMbps * 0.75) {
+              dot.style.background = '#f59e0b';
+              dot.style.boxShadow = '0 0 8px #f59e0b';
+              userText.style.color = '#f59e0b';
+              badge.style.background = 'rgba(245, 158, 11, 0.15)';
+              badge.style.color = '#f59e0b';
+              badge.textContent = '🟡 Moderate';
+            } else {
+              dot.style.background = '#ef4444';
+              dot.style.boxShadow = '0 0 8px #ef4444';
+              userText.style.color = '#ef4444';
+              badge.style.background = 'rgba(239, 68, 68, 0.15)';
+              badge.style.color = '#ef4444';
+              badge.textContent = '🔴 Slow Net';
+            }
+          }
+
+          function refreshSpeedMeter(vid, player) {
+            getLiveInternetSpeed().then(userSpeed => {
+              const reqSpeed = calculateRequiredSpeed(vid, player);
+              updateVideoSpeedBadge(userSpeed, reqSpeed);
+            });
+          }
 
           if (playerEl && videosForPlayer.length > 0) {
             const curVid = () => currentPostVideos[activeVideoIndex] || videosForPlayer[0];
 
-            playerEl.onwaiting = () => {
-              if (spinnerEl) spinnerEl.style.display = 'flex';
+            refreshSpeedMeter(curVid(), playerEl);
+
+            playerEl.onloadedmetadata = () => {
+              refreshSpeedMeter(curVid(), playerEl);
             };
+
             playerEl.oncanplay = () => {
-              if (spinnerEl) spinnerEl.style.display = 'none';
               if (errorOverlayEl) errorOverlayEl.style.display = 'none';
             };
             playerEl.onplaying = () => {
-              if (spinnerEl) spinnerEl.style.display = 'none';
               if (errorOverlayEl) errorOverlayEl.style.display = 'none';
               const v = curVid();
               if (v) trackFileView(post.id, v.id || v.channel_message_id);
             };
             playerEl.onerror = () => {
               if (document.hidden) return; // Prevent crashes on app minimization
-              if (spinnerEl) spinnerEl.style.display = 'none';
               const v = curVid();
               if (v && v.channel_message_id && videoRetryCount === 0) {
                 videoRetryCount++;
@@ -4409,7 +4508,7 @@ const rawHtml = `<!DOCTYPE html>
               retryBtn.onclick = () => {
                 videoRetryCount = 0;
                 if (errorOverlayEl) errorOverlayEl.style.display = 'none';
-                if (spinnerEl) spinnerEl.style.display = 'flex';
+                refreshSpeedMeter(curVid(), playerEl);
                 playerEl.load();
                 playerEl.play().catch(() => {});
               };
@@ -4718,9 +4817,7 @@ const rawHtml = `<!DOCTYPE html>
               });
 
               videoRetryCount = 0;
-              const spinner = document.getElementById('videoLoadingSpinner');
               const errOverlay = document.getElementById('videoErrorOverlay');
-              if (spinner) spinner.style.display = 'flex';
               if (errOverlay) errOverlay.style.display = 'none';
 
               player.preload = 'auto';
@@ -4731,11 +4828,14 @@ const rawHtml = `<!DOCTYPE html>
                 pPromise.catch(e => console.log('Autoplay notice:', e));
               }
 
+              if (typeof refreshSpeedMeter === 'function') {
+                refreshSpeedMeter(vid, player);
+              }
+
               trackFileView(currentDetailPost.id, vKey);
 
               player.onerror = () => {
                 if (document.hidden) return; // Prevent crashes on app minimization
-                if (spinner) spinner.style.display = 'none';
                 if (vid.channel_message_id && videoRetryCount === 0) {
                   videoRetryCount++;
                   const directUrl = 'https://xmi-stream-bot.onrender.com/stream?channel_id=-1004415998750&msg_id=' + encodeURIComponent(vid.channel_message_id);
