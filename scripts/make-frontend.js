@@ -2270,10 +2270,11 @@ const rawHtml = `<!DOCTYPE html>
           if (spMatch) return spMatch[1] || spMatch[2];
         }
 
-        // 4. SessionStorage if user was viewing a post and refreshed the page
+        // 4. Stored post ONLY if URL hash explicitly starts with #post
+        // (Do NOT restore detail view automatically on startup if hash is empty, to prevent getting trapped in loading)
         try {
           const stored = sessionStorage.getItem('active_post_id');
-          if (stored && /^\d+$/.test(stored) && (hash.startsWith('#post') || sessionStorage.getItem('current_page_view') === 'detail')) {
+          if (stored && /^\d+$/.test(stored) && hash.startsWith('#post')) {
             return stored;
           }
         } catch (_) {}
@@ -2291,7 +2292,10 @@ const rawHtml = `<!DOCTYPE html>
     // Initialize App
     async function initApp() {
       // Clear any legacy localStorage post locks so regular open always lands on clean feed
-      try { localStorage.removeItem('active_post_id'); } catch (_) {}
+      try {
+        localStorage.removeItem('active_post_id');
+        sessionStorage.removeItem('current_page_view');
+      } catch (_) {}
 
       if (isAdmin) {
         showAdminElements();
@@ -2299,7 +2303,7 @@ const rawHtml = `<!DOCTYPE html>
 
       setupEventListeners();
 
-      // Check initial route if user came directly via a post link or start_param or refreshed on post detail
+      // Check initial route if user came directly via a post link or start_param
       checkInitialPostRoute();
 
       // If user was not viewing a post, restore previous view/tab on refresh
@@ -2327,9 +2331,9 @@ const rawHtml = `<!DOCTYPE html>
       sendAppHeartbeat();
       setInterval(sendAppHeartbeat, 60000);
 
-      // Instant Feed Restore (0ms): render from session cache immediately if available
+      // Instant Feed Restore (0ms): render from local/session cache immediately if available
       try {
-        const cached = sessionStorage.getItem('cached_feed_posts');
+        const cached = localStorage.getItem('cached_feed_posts') || sessionStorage.getItem('cached_feed_posts');
         if (cached) {
           const parsed = JSON.parse(cached);
           if (Array.isArray(parsed) && parsed.length > 0) {
@@ -2487,7 +2491,10 @@ const rawHtml = `<!DOCTYPE html>
     // Load Published Posts
     async function loadPosts() {
       try {
-        const res = await fetch('/api/posts?user_id=' + currentUserId);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 9000);
+        const res = await fetch('/api/posts?user_id=' + currentUserId, { signal: controller.signal });
+        clearTimeout(timeoutId);
         const data = await res.json();
         if (data.success && Array.isArray(data.posts)) {
           allPosts = data.posts.map(p => {
@@ -2500,12 +2507,25 @@ const rawHtml = `<!DOCTYPE html>
           });
           try {
             sessionStorage.setItem('cached_feed_posts', JSON.stringify(allPosts));
+            localStorage.setItem('cached_feed_posts', JSON.stringify(allPosts));
           } catch (_) {}
           savedPostIds = new Set(allPosts.filter(p => p.is_saved).map(p => p.id));
           renderFeed();
         }
       } catch (e) {
         console.error('Failed to load posts:', e);
+        // If we have no posts rendered yet (network slow or offline), show a friendly retry button
+        if (!allPosts || allPosts.length === 0) {
+          const grid = document.getElementById('postsGrid');
+          if (grid) {
+            grid.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1; padding: 40px 16px; text-align: center; color: var(--text-muted);">' +
+              '<div style="font-size: 32px; margin-bottom: 10px;">📶</div>' +
+              '<div style="font-weight: 700; color: #f8fafc; font-size: 1rem; margin-bottom: 4px;">Slow Connection Detected</div>' +
+              '<div style="font-size: 0.8rem; margin-bottom: 16px;">Unable to fetch posts quickly. Tap below to retry.</div>' +
+              '<button type="button" class="btn btn-primary" onclick="loadPosts()" style="padding: 9px 18px; font-weight: 700; border-radius: 10px;">🔄 Retry Loading</button>' +
+            '</div>';
+          }
+        }
       }
     }
 
@@ -4709,10 +4729,13 @@ const rawHtml = `<!DOCTYPE html>
             bodyEl.innerHTML = '<div style="padding: 50px 0; text-align: center; color: var(--text-muted);"><div style="font-size: 36px; margin-bottom: 12px;">⏳</div>Loading post...</div>';
           }
 
-          const res = await fetch('/api/posts/' + postId + '?user_id=' + currentUserId);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 9000);
+          const res = await fetch('/api/posts/' + postId + '?user_id=' + currentUserId, { signal: controller.signal });
+          clearTimeout(timeoutId);
           const data = await res.json();
           if (!data.success || !data.post) {
-            bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to load post. <button type="button" class="btn btn-secondary btn-sm" onclick="goBackToFeed()" style="margin-top:10px;">← Back to feed</button></div>';
+            bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to load post. <br/><br/><button type="button" class="btn btn-primary btn-sm" onclick="openPostDetailPage(' + postId + ')" style="margin-right:8px;">🔄 Retry</button><button type="button" class="btn btn-secondary btn-sm" onclick="goBackToFeed()">← Back to feed</button></div>';
             return;
           }
 
@@ -4720,7 +4743,13 @@ const rawHtml = `<!DOCTYPE html>
           renderPostDetailPage(data.post);
         } catch (e) {
           console.error('openPostDetailPage error:', e);
-          bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to load post details: ' + escapeHtml(e.message) + '</div>';
+          bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">' +
+            '<div style="font-size: 28px; margin-bottom: 8px;">📶</div>' +
+            '<div style="font-weight: 700; margin-bottom: 4px;">Network Timeout or Error</div>' +
+            '<div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 14px;">' + escapeHtml(e.message || 'Slow connection') + '</div>' +
+            '<button type="button" class="btn btn-primary btn-sm" onclick="openPostDetailPage(' + postId + ')" style="margin-right:8px; padding: 7px 14px;">🔄 Retry</button>' +
+            '<button type="button" class="btn btn-secondary btn-sm" onclick="goBackToFeed()" style="padding: 7px 14px;">← Back to feed</button>' +
+          '</div>';
         }
       }
 
