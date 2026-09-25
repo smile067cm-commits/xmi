@@ -1982,6 +1982,7 @@ const rawHtml = `<!DOCTYPE html>
     let currentPostVideos = [];
     let activePhotoIndex = 0;
     let activeVideoIndex = 0;
+    let savedFeedScrollY = 0;
 
     function showToast(msg) {
       const toast = document.getElementById('toast');
@@ -2269,10 +2270,10 @@ const rawHtml = `<!DOCTYPE html>
           if (spMatch) return spMatch[1] || spMatch[2];
         }
 
-        // 4. SessionStorage ONLY if hash already indicates post detail (prevent regular app launch traps)
+        // 4. SessionStorage if user was viewing a post and refreshed the page
         try {
           const stored = sessionStorage.getItem('active_post_id');
-          if (stored && /^\d+$/.test(stored) && hash && hash.startsWith('#post')) {
+          if (stored && /^\d+$/.test(stored) && (hash.startsWith('#post') || sessionStorage.getItem('current_page_view') === 'detail')) {
             return stored;
           }
         } catch (_) {}
@@ -2298,8 +2299,29 @@ const rawHtml = `<!DOCTYPE html>
 
       setupEventListeners();
 
-      // Check initial route if user came directly via a post link or start_param
+      // Check initial route if user came directly via a post link or start_param or refreshed on post detail
       checkInitialPostRoute();
+
+      // If user was not viewing a post, restore previous view/tab on refresh
+      if (!getTargetPostId()) {
+        try {
+          const savedNavMode = sessionStorage.getItem('active_nav_mode');
+          const savedAdminSubtab = sessionStorage.getItem('active_admin_subtab');
+          if (savedNavMode === 'admin' && isAdmin) {
+            document.getElementById('tabModeAdmin')?.click();
+            if (savedAdminSubtab) {
+              const subtabBtn = document.querySelector('.admin-subtab[data-atab="' + savedAdminSubtab + '"]');
+              if (subtabBtn) subtabBtn.click();
+            }
+          } else {
+            const savedUserView = sessionStorage.getItem('current_user_nav_view');
+            if (savedUserView === 'saved') {
+              const savedPill = document.querySelector('.user-nav-bar .nav-pill[data-view="saved"]');
+              if (savedPill) savedPill.click();
+            }
+          }
+        } catch (_) {}
+      }
 
       // Start presence heartbeat
       sendAppHeartbeat();
@@ -3372,6 +3394,7 @@ const rawHtml = `<!DOCTYPE html>
         document.getElementById('tabModeAdmin').classList.remove('active');
         document.getElementById('viewPublicFeed').style.display = 'block';
         document.getElementById('viewAdminHub').style.display = 'none';
+        sessionStorage.setItem('active_nav_mode', 'public');
       });
 
       document.getElementById('tabModeAdmin')?.addEventListener('click', () => {
@@ -3379,6 +3402,7 @@ const rawHtml = `<!DOCTYPE html>
         document.getElementById('tabModePublic').classList.remove('active');
         document.getElementById('viewPublicFeed').style.display = 'none';
         document.getElementById('viewAdminHub').style.display = 'block';
+        sessionStorage.setItem('active_nav_mode', 'admin');
         loadAdminPosts();
       });
 
@@ -3393,6 +3417,7 @@ const rawHtml = `<!DOCTYPE html>
         document.querySelectorAll('.admin-subtab').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         const atab = btn.dataset.atab;
+        sessionStorage.setItem('active_admin_subtab', atab);
 
         document.getElementById('adminTabPosts').style.display = atab === 'posts' ? 'block' : 'none';
         document.getElementById('adminTabUsers').style.display = atab === 'users' ? 'block' : 'none';
@@ -4000,6 +4025,7 @@ const rawHtml = `<!DOCTYPE html>
         document.querySelectorAll('.user-nav-bar .nav-pill').forEach(p => p.classList.remove('active'));
         pill.classList.add('active');
         currentView = view;
+        sessionStorage.setItem('current_user_nav_view', view);
         renderFeed();
       });
 
@@ -4136,6 +4162,11 @@ const rawHtml = `<!DOCTYPE html>
         if (viewDetail) viewDetail.style.display = 'none';
         if (viewFeed) viewFeed.style.display = 'block';
 
+        // Restore feed scroll position to where user was
+        setTimeout(() => {
+          window.scrollTo({ top: savedFeedScrollY, behavior: 'instant' });
+        }, 10);
+
         if (tg?.BackButton) {
           try { tg.BackButton.offClick(goBackToFeed); } catch (_) {}
           tg.BackButton.hide();
@@ -4146,6 +4177,7 @@ const rawHtml = `<!DOCTYPE html>
             history.replaceState(null, '', window.location.pathname + (window.location.search || ''));
           }
           sessionStorage.removeItem('active_post_id');
+          sessionStorage.setItem('current_page_view', 'feed');
           localStorage.removeItem('active_post_id');
         } catch (_) {}
       }
@@ -4215,7 +4247,10 @@ const rawHtml = `<!DOCTYPE html>
           // Post Header: Title, Tags, Stats
           const dateStr = post.created_at ? new Date(post.created_at).toLocaleDateString() : '';
           html += '<div style="margin-bottom: 16px;">' +
-            '<div style="font-size: 1.25rem; font-weight: 800; color: #f8fafc; line-height: 1.35; margin-bottom: 6px;">' + escapeHtml(post.title) + '</div>' +
+            '<div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">' +
+            '<div style="font-size: 1.25rem; font-weight: 800; color: #f8fafc; line-height: 1.35; margin-bottom: 6px; flex: 1;">' + escapeHtml(post.title) + '</div>' +
+            (isAdmin ? '<button type="button" class="btn btn-secondary btn-sm" id="btnAdminEditPostCover" data-pid="' + post.id + '" style="padding: 5px 10px; font-size: 0.72rem; font-weight: 700; border-radius: 8px; border: 1px solid rgba(56,189,248,0.4); color: #38bdf8; background: rgba(56,189,248,0.12); white-space: nowrap; cursor: pointer;">🖼️ Edit Cover</button>' : '') +
+            '</div>' +
             '<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-muted);">' +
             (post.is_promoted ? '<span style="background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; font-weight: 800; padding: 2px 7px; border-radius: 6px;">⭐ Exclusive</span>' : '') +
             '<span style="background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 6px;">🏷️ ' + escapeHtml(post.category || 'All') + '</span>' +
@@ -4328,7 +4363,8 @@ const rawHtml = `<!DOCTYPE html>
                   const vSizeMB = (vSize / (1024 * 1024)).toFixed(1);
                   const vName = vid.file_name || ('Video ' + (idx + 1));
                   const vKey = vid.id || vid.channel_message_id || 0;
-                  const thumbSrc = '/api/thumbnail?msg_id=' + encodeURIComponent(vid.channel_message_id || '') + '&post_id=' + encodeURIComponent(post.id) + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '');
+                  const isActive = idx === 0;
+                  const thumbSrc = vid.thumbnail_url ? escapeHtml(vid.thumbnail_url) : ('/api/thumbnail?msg_id=' + encodeURIComponent(vid.channel_message_id || '') + '&post_id=' + encodeURIComponent(post.id) + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : ''));
 
                   return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.12)' : 'rgba(15, 23, 42, 0.7)') + '; border: 1.5px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 12px; overflow: hidden; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; box-shadow: ' + (isActive ? '0 0 12px rgba(56,189,248,0.25)' : 'none') + ';">' +
                     // Thumbnail aspect ratio container
@@ -4342,6 +4378,8 @@ const rawHtml = `<!DOCTYPE html>
                     '<span style="position: absolute; top: 6px; right: 6px; background: rgba(0,0,0,0.75); color: #38bdf8; font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; backdrop-filter: blur(4px);">' + vSizeMB + ' MB</span>' +
                     // Views badge
                     '<span style="position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,0.75); color: #cbd5e1; font-size: 0.65rem; font-weight: 600; padding: 2px 6px; border-radius: 6px; backdrop-filter: blur(4px);">👁️ <span data-fview-id="' + vKey + '">' + (vid.view_count || 0) + '</span></span>' +
+                    // Admin Edit Thumb Button
+                    (isAdmin ? '<button type="button" class="btn-edit-file-thumb" data-pid="' + post.id + '" data-fid="' + (vid.id || '') + '" data-fmsg="' + (vid.channel_message_id || '') + '" data-fthumb="' + escapeHtml(vid.thumbnail_url || '') + '" data-fname="' + escapeHtml(vName) + '" style="position: absolute; bottom: 6px; right: 6px; z-index: 10; background: rgba(15,23,42,0.88); color: #38bdf8; border: 1px solid rgba(56,189,248,0.5); border-radius: 6px; padding: 2px 6px; font-size: 0.64rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 3px; backdrop-filter: blur(4px);">✏️ Edit Thumb</button>' : '') +
                     '</div>' +
                     // Card Bottom Info
                     '<div style="padding: 8px 10px; display: flex; flex-direction: column; gap: 2px;">' +
@@ -4382,7 +4420,8 @@ const rawHtml = `<!DOCTYPE html>
                   '</div>' +
                   '</div>' +
                   '<div style="display: flex; gap: 8px; align-items: center;">' +
-                  '<button type="button" class="btn btn-primary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="width: 100%; padding: 10px; font-weight: 700; font-size: 0.82rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 6px;">📥 Get File (' + lfSizeMB + ' MB)</button>' +
+                  '<button type="button" class="btn btn-primary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + fKey + '" style="flex: 1; padding: 10px; font-weight: 700; font-size: 0.82rem; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 6px;">📥 Get File (' + lfSizeMB + ' MB)</button>' +
+                  (isAdmin ? '<button type="button" class="btn btn-secondary btn-sm btn-edit-file-thumb" data-pid="' + post.id + '" data-fid="' + (lf.id || '') + '" data-fmsg="' + (lf.channel_message_id || '') + '" data-fthumb="' + escapeHtml(lf.thumbnail_url || '') + '" data-fname="' + escapeHtml(lfName) + '" style="padding: 10px 12px; font-size: 0.74rem; font-weight: 700; border-radius: 8px; border: 1px solid rgba(56,189,248,0.4); color: #38bdf8; white-space: nowrap;">✏️ Thumb</button>' : '') +
                   '</div>' +
                   '</div>';
               }).join('') +
@@ -4619,6 +4658,11 @@ const rawHtml = `<!DOCTYPE html>
           } catch (_) {}
         }
 
+        // Save current feed scroll position before opening detail view
+        if (viewFeed && viewFeed.style.display !== 'none') {
+          savedFeedScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+        }
+
         if (viewFeed) viewFeed.style.display = 'none';
         viewDetail.style.display = 'block';
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -4626,6 +4670,7 @@ const rawHtml = `<!DOCTYPE html>
         try {
           history.replaceState(null, '', '#post=' + postId);
           sessionStorage.setItem('active_post_id', String(postId));
+          sessionStorage.setItem('current_page_view', 'detail');
           localStorage.setItem('active_post_id', String(postId));
           localStorage.setItem('last_active_time', String(Date.now()));
         } catch (_) {}
@@ -4855,6 +4900,86 @@ const rawHtml = `<!DOCTYPE html>
           const pId = singleBtn.dataset.pid;
           const fId = singleBtn.dataset.fid;
           if (pId && fId) deliverFileInApp(pId, fId, singleBtn);
+          return;
+        }
+
+        // 4B. Edit File Thumbnail Clicked (Admin only)
+        const thumbBtn = e.target.closest('.btn-edit-file-thumb');
+        if (thumbBtn) {
+          e.stopPropagation();
+          e.preventDefault();
+          const pid = thumbBtn.dataset.pid;
+          const fid = thumbBtn.dataset.fid;
+          const fmsg = thumbBtn.dataset.fmsg;
+          const fname = thumbBtn.dataset.fname || 'file';
+          const curThumb = thumbBtn.dataset.fthumb || '';
+
+          const newThumb = prompt('Enter new thumbnail URL (Catbox, direct link) for "' + fname + '":\n(Leave empty to remove custom thumbnail)', curThumb);
+          if (newThumb === null) return;
+
+          showToast('⏳ Updating thumbnail...');
+          fetch('/api/admin/posts/' + pid + '/file-thumbnail?user_id=' + currentUserId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              post_id: pid,
+              file_id: fid ? Number(fid) : null,
+              channel_message_id: fmsg ? Number(fmsg) : null,
+              thumbnail_url: newThumb.trim() || null,
+              user_id: currentUserId
+            })
+          }).then(r => r.json()).then(data => {
+            if (data.success) {
+              showToast('✅ Thumbnail updated!');
+              thumbBtn.dataset.fthumb = newThumb.trim();
+              const card = thumbBtn.closest('.video-file-card, [data-lfidx]') || thumbBtn.parentElement;
+              if (card) {
+                const img = card.querySelector('img');
+                if (img) {
+                  img.src = newThumb.trim() ? newThumb.trim() : ('/api/thumbnail?msg_id=' + encodeURIComponent(fmsg || '') + '&post_id=' + encodeURIComponent(pid) + '&t=' + Date.now());
+                }
+              }
+              postDetailCache.delete(String(pid));
+            } else {
+              showToast('❌ ' + (data.error || 'Failed to update thumbnail'));
+            }
+          }).catch(() => {
+            showToast('❌ Network error updating thumbnail');
+          });
+          return;
+        }
+
+        // 4C. Edit Post Cover Clicked (Admin only)
+        const coverBtn = e.target.closest('#btnAdminEditPostCover');
+        if (coverBtn) {
+          e.stopPropagation();
+          e.preventDefault();
+          const pid = coverBtn.dataset.pid;
+          const curCover = (currentDetailPost && currentDetailPost.preview_image) || '';
+          const newCover = prompt('Enter new Post Cover / Preview Image URL (Catbox, direct link):\n(Leave empty to remove cover image)', curCover);
+          if (newCover === null) return;
+
+          showToast('⏳ Updating post cover...');
+          fetch('/api/admin/posts/' + pid + '?user_id=' + currentUserId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              preview_image: newCover.trim() || null,
+              user_id: currentUserId
+            })
+          }).then(r => r.json()).then(data => {
+            if (data.success) {
+              showToast('✅ Post cover updated!');
+              if (currentDetailPost) currentDetailPost.preview_image = newCover.trim() || null;
+              postDetailCache.delete(String(pid));
+              openPostDetailPage(pid);
+              loadPosts();
+            } else {
+              showToast('❌ ' + (data.error || 'Failed to update cover'));
+            }
+          }).catch(() => {
+            showToast('❌ Network error updating cover');
+          });
           return;
         }
 

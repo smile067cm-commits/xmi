@@ -16,6 +16,8 @@ import {
   recordFileAccess,
   incrementFileView,
   getFileViewsForPost,
+  getFileThumbsForPost,
+  setFileThumbForPost,
   getPostAnalytics,
   getGlobalStats,
   toggleSavePost,
@@ -385,6 +387,16 @@ export function createRouter() {
       const url = new URL(request.url);
       const msgId = url.searchParams.get('msg_id') || url.searchParams.get('channel_message_id');
       const postId = url.searchParams.get('post_id') || url.searchParams.get('id');
+      const fileId = url.searchParams.get('file_id');
+
+      // 0. Check if admin configured a custom thumbnail link for this file or message
+      if (postId && (msgId || fileId)) {
+        const customThumbs = await getFileThumbsForPost(env, postId).catch(() => ({}));
+        const customThumb = (fileId && customThumbs[fileId]) || (msgId && customThumbs[msgId]);
+        if (customThumb) {
+          return Response.redirect(customThumb, 302);
+        }
+      }
 
       // 1. Instant check: In-memory cache for this msgId (0ms)
       if (msgId && catboxThumbCache.has(msgId)) {
@@ -2125,6 +2137,49 @@ export function createRouter() {
   router.patch('/api/admin/posts/:id', handleEditPost);
   router.post('/api/admin/posts/:id', handleEditPost);
   router.put('/api/admin/posts/:id', handleEditPost);
+
+  // -------------------------------------------------------------
+  // POST & PUT /api/admin/posts/:id/file-thumbnail - Set Custom Thumbnail URL for a specific file
+  // -------------------------------------------------------------
+  const handleFileThumbnail = async (request, env) => {
+    try {
+      const url = new URL(request.url);
+      const postId = request.params.id;
+      const body = await request.json().catch(() => ({}));
+      const userId = body.user_id || url.searchParams.get('user_id');
+
+      const isAdm = await isAdminUser(env, userId);
+      if (!isAdm) {
+        return errorResponse('Unauthorized: Admin access required', 403);
+      }
+
+      const { file_id, channel_message_id, thumbnail_url } = body;
+      if (!postId || (!file_id && !channel_message_id)) {
+        return errorResponse('Missing post_id or file identifier', 400);
+      }
+
+      if (file_id) {
+        await setFileThumbForPost(env, postId, file_id, thumbnail_url);
+      }
+      if (channel_message_id) {
+        await setFileThumbForPost(env, postId, channel_message_id, thumbnail_url);
+      }
+
+      return jsonResponse({
+        success: true,
+        post_id: postId,
+        file_id,
+        channel_message_id,
+        thumbnail_url: thumbnail_url ? String(thumbnail_url).trim() : null
+      });
+    } catch (err) {
+      console.error('API file-thumbnail error:', err);
+      return errorResponse(err.message, 500);
+    }
+  };
+
+  router.post('/api/admin/posts/:id/file-thumbnail', handleFileThumbnail);
+  router.put('/api/admin/posts/:id/file-thumbnail', handleFileThumbnail);
 
   // -------------------------------------------------------------
   // POST /api/admin/users/:id/message - Send Direct Message to User via Bot

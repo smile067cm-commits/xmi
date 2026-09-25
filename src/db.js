@@ -330,6 +330,59 @@ export async function incrementFileView(env, postId, fileId, userId = null, user
 }
 
 /**
+ * Retrieve file thumbnail links map for a specific post { [file_id]: thumb_url, [channel_message_id]: thumb_url }
+ */
+export async function getFileThumbsForPost(env, postId) {
+  if (!env.SUPABASE_URL || !postId) return {};
+  try {
+    const url = `${getSupabaseBaseUrl(env)}/settings?key=eq.file_thumbs_${postId}&select=value`;
+    const res = await fetch(url, { method: 'GET', headers: getSupabaseHeaders(env) });
+    if (res.ok) {
+      const rows = await res.json();
+      if (rows && rows[0]?.value) {
+        return typeof rows[0].value === 'string' ? JSON.parse(rows[0].value) : rows[0].value;
+      }
+    }
+  } catch (err) {
+    console.warn('getFileThumbsForPost warning:', err.message);
+  }
+  return {};
+}
+
+/**
+ * Set custom thumbnail link for a file in a post
+ */
+export async function setFileThumbForPost(env, postId, fileKey, thumbUrl) {
+  if (!env.SUPABASE_URL || !postId || !fileKey) return {};
+  try {
+    const thumbsMap = await getFileThumbsForPost(env, postId);
+    if (thumbUrl && String(thumbUrl).trim()) {
+      thumbsMap[String(fileKey)] = String(thumbUrl).trim();
+    } else {
+      delete thumbsMap[String(fileKey)];
+    }
+
+    const url = `${getSupabaseBaseUrl(env)}/settings`;
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...getSupabaseHeaders(env),
+        'Prefer': 'resolution=merge-duplicates'
+      },
+      body: JSON.stringify({
+        key: `file_thumbs_${postId}`,
+        value: thumbsMap,
+        updated_at: new Date().toISOString()
+      })
+    });
+    return thumbsMap;
+  } catch (err) {
+    console.warn('setFileThumbForPost error:', err.message);
+    return {};
+  }
+}
+
+/**
  * Fetch single post with folders, direct links, comments, and like status
  */
 export async function getPostById(env, postId, userId = null, isAdmin = false) {
@@ -357,10 +410,12 @@ export async function getPostById(env, postId, userId = null, isAdmin = false) {
   
   const folders = (post.folders || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
   const fileViews = await getFileViewsForPost(env, postId);
+  const fileThumbs = await getFileThumbsForPost(env, postId);
   for (const f of folders) {
     if (Array.isArray(f.files)) {
       for (const file of f.files) {
         file.view_count = Number(fileViews[file.id] || fileViews[file.channel_message_id] || 0);
+        file.thumbnail_url = fileThumbs[file.id] || fileThumbs[file.channel_message_id] || null;
       }
     }
   }
