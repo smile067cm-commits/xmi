@@ -2249,48 +2249,63 @@ const rawHtml = `<!DOCTYPE html>
       }).catch(() => {});
     }
 
+    function getTargetPostId() {
+      try {
+        // 1. Hash match: #post=104, #post_104, #104
+        const hash = window.location.hash || '';
+        const hashMatch = hash.match(/post[=_](\d+)|^#(\d+)$/i);
+        if (hashMatch) return hashMatch[1] || hashMatch[2];
+
+        // 2. Query param: ?post=104 or ?post_id=104
+        const urlParams = new URLSearchParams(window.location.search);
+        let pid = urlParams.get('post') || urlParams.get('post_id');
+        if (pid) return pid;
+
+        // 3. Telegram WebApp start_param
+        const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
+        if (startParam) {
+          const spMatch = String(startParam).match(/post_?(\d+)|^(\d+)$/i);
+          if (spMatch) return spMatch[1] || spMatch[2];
+        }
+
+        // 4. SessionStorage or LocalStorage persisted active post ID
+        try {
+          const stored = sessionStorage.getItem('active_post_id') || localStorage.getItem('active_post_id');
+          if (stored && /^\d+$/.test(stored)) return stored;
+        } catch (_) {}
+
+        // 5. Full URL match fallback
+        const hrefMatch = window.location.href.match(/post[=_](\d+)/i);
+        if (hrefMatch) return hrefMatch[1];
+      } catch (_) {}
+      return null;
+    }
+
+    function checkInitialPostRoute() {
+      const targetPostId = getTargetPostId();
+      if (targetPostId) {
+        openPostDetailPage(targetPostId);
+      }
+    }
+
     // Initialize App
     async function initApp() {
       if (isAdmin) {
         showAdminElements();
       }
 
-      await loadSettingsAndUser();
-      await loadPosts();
-
       setupEventListeners();
 
-      // Check if user was viewing a post before page refresh or opened a direct post link
+      // Check route FIRST before awaiting network data, so reloading restores the post instantly
       checkInitialPostRoute();
 
       // Start presence heartbeat
       sendAppHeartbeat();
       setInterval(sendAppHeartbeat, 60000);
-    }
 
-    function checkInitialPostRoute() {
-      try {
-        let targetPostId = null;
-        const hash = window.location.hash || '';
-        const hashMatch = hash.match(/post[=_](\d+)|^#(\d+)$/i);
-        if (hashMatch) {
-          targetPostId = hashMatch[1] || hashMatch[2];
-        }
-        if (!targetPostId) {
-          const urlParams = new URLSearchParams(window.location.search);
-          targetPostId = urlParams.get('post') || urlParams.get('post_id');
-        }
-        if (!targetPostId) {
-          try {
-            targetPostId = sessionStorage.getItem('active_post_id') || localStorage.getItem('active_post_id');
-          } catch (_) {}
-        }
-        if (targetPostId) {
-          openPostDetailPage(targetPostId);
-        }
-      } catch (e) {
-        console.warn('checkInitialPostRoute error:', e);
-      }
+      // Fetch background data
+      await loadSettingsAndUser();
+      await loadPosts();
     }
 
     window.addEventListener('hashchange', () => {
@@ -2298,7 +2313,7 @@ const rawHtml = `<!DOCTYPE html>
       const m = hash.match(/post[=_](\d+)|^#(\d+)$/i);
       if (m) {
         openPostDetailPage(m[1] || m[2]);
-      } else if (!hash || hash === '#home' || hash === '#feed') {
+      } else if (hash === '#home' || hash === '#feed') {
         goBackToFeed();
       }
     });
@@ -2313,7 +2328,6 @@ const rawHtml = `<!DOCTYPE html>
             if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation();
           }
           sendAppHeartbeat();
-          checkInitialPostRoute();
         } catch (_) {}
       } else {
         // App is being minimized / backgrounded: safely pause active video to avoid browser errors
@@ -2332,7 +2346,6 @@ const rawHtml = `<!DOCTYPE html>
           if (!tg.isExpanded && typeof tg.expand === 'function') tg.expand();
           if (typeof tg.enableVerticalSwipes === 'function') tg.enableVerticalSwipes();
         }
-        checkInitialPostRoute();
       } catch (_) {}
     });
 
@@ -4089,9 +4102,11 @@ const rawHtml = `<!DOCTYPE html>
           try {
             player.pause();
             player.removeAttribute('src');
+            while (player.firstChild) player.removeChild(player.firstChild);
             player.load();
           } catch (_) {}
         }
+        currentDetailPost = null;
         const viewDetail = document.getElementById('viewPostDetail');
         const viewFeed = document.getElementById('viewPublicFeed');
         if (viewDetail) viewDetail.style.display = 'none';
@@ -4240,10 +4255,25 @@ const rawHtml = `<!DOCTYPE html>
               '</div>' +
               '</div>' +
 
-              // EXACTLY 1 VIDEO PLAYER IN THE DOM WITH FULLSCREEN CAPABILITY
+              // EXACTLY 1 VIDEO PLAYER IN THE DOM WITH FULLSCREEN & BUFFER INDICATORS
               '<div style="position: relative; width: 100%; border-radius: 12px; overflow: hidden; background: #000;" id="postVideoPlayerWrap" oncontextmenu="return false;">' +
-              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" preload="metadata" src="' + firstStreamSrc + '" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;"></video>' +
-              '<button type="button" id="btnVideoFullscreen" style="position: absolute; top: 10px; right: 10px; z-index: 10; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; padding: 5px 10px; font-size: 0.76rem; font-weight: 700; cursor: pointer; display: flex; align-items: gap: 5px; backdrop-filter: blur(4px);">⛶ Fullscreen</button>' +
+              '<video id="postActiveVideoPlayer" playsinline webkit-playsinline controls controlsList="nodownload noplaybackrate" oncontextmenu="return false;" preload="auto" style="width: 100%; max-height: 360px; outline: none; background: #000; display: block;">' +
+              '<source src="' + firstStreamSrc + '" type="video/mp4">' +
+              'Your browser does not support HTML5 video.' +
+              '</video>' +
+              '<div id="videoLoadingSpinner" style="display: none; position: absolute; inset: 0; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 5; pointer-events: none;">' +
+              '<div style="background: rgba(15,23,42,0.9); border: 1px solid rgba(56,189,248,0.4); border-radius: 12px; padding: 10px 18px; color: #38bdf8; font-weight: 700; font-size: 0.84rem; display: flex; align-items: center; gap: 8px;">' +
+              '<span>⏳</span> Buffering video...' +
+              '</div>' +
+              '</div>' +
+              '<div id="videoErrorOverlay" style="display: none; position: absolute; inset: 0; background: rgba(0,0,0,0.88); align-items: center; justify-content: center; flex-direction: column; gap: 10px; z-index: 6; padding: 16px; text-align: center;">' +
+              '<div style="color: #f87171; font-weight: 700; font-size: 0.88rem;">⚠️ Video stream delayed or loading slowly</div>' +
+              '<div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;">' +
+              '<button type="button" class="btn btn-secondary btn-sm" id="btnVideoRetry" style="padding: 6px 14px; font-size: 0.78rem;">🔄 Retry</button>' +
+              '<button type="button" class="btn btn-primary btn-sm" data-act="send-single-file" data-pid="' + post.id + '" data-fid="' + firstVidKey + '" style="padding: 6px 14px; font-size: 0.78rem;">📥 Get File in Bot</button>' +
+              '</div>' +
+              '</div>' +
+              '<button type="button" id="btnVideoFullscreen" style="position: absolute; top: 10px; right: 10px; z-index: 10; background: rgba(0,0,0,0.7); color: #fff; border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; padding: 5px 10px; font-size: 0.76rem; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 5px; backdrop-filter: blur(4px);">⛶ Fullscreen</button>' +
               '<button type="button" id="btnVideoExitFullscreen" style="display: none; position: absolute; top: 16px; right: 16px; z-index: 1000000; background: rgba(239,68,68,0.85); color: #fff; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 1.2rem; cursor: pointer; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.8);">✕</button>' +
               '</div>' +
 
@@ -4336,24 +4366,54 @@ const rawHtml = `<!DOCTYPE html>
 
           bodyEl.innerHTML = html;
 
-          // Attach error fallback for resilient video playback
+          // Attach safe event handling and fallback for resilient video playback
           const playerEl = document.getElementById('postActiveVideoPlayer');
+          const spinnerEl = document.getElementById('videoLoadingSpinner');
+          const errorOverlayEl = document.getElementById('videoErrorOverlay');
+          let videoRetryCount = 0;
+
           if (playerEl && videosForPlayer.length > 0) {
-            const firstV = videosForPlayer[0];
-            playerEl.onplay = () => {
-              if (firstV) trackFileView(post.id, firstV.id || firstV.channel_message_id);
+            const curVid = () => currentPostVideos[activeVideoIndex] || videosForPlayer[0];
+
+            playerEl.onwaiting = () => {
+              if (spinnerEl) spinnerEl.style.display = 'flex';
+            };
+            playerEl.oncanplay = () => {
+              if (spinnerEl) spinnerEl.style.display = 'none';
+              if (errorOverlayEl) errorOverlayEl.style.display = 'none';
+            };
+            playerEl.onplaying = () => {
+              if (spinnerEl) spinnerEl.style.display = 'none';
+              if (errorOverlayEl) errorOverlayEl.style.display = 'none';
+              const v = curVid();
+              if (v) trackFileView(post.id, v.id || v.channel_message_id);
             };
             playerEl.onerror = () => {
-              if (firstV && firstV.channel_message_id) {
-                const directUrl = 'https://xmi-stream-bot.onrender.com/stream?channel_id=-1004415998750&msg_id=' + encodeURIComponent(firstV.channel_message_id);
-                if (playerEl.src !== directUrl) {
-                  console.log('Proxy stream notice, retrying with direct Render stream:', directUrl);
-                  playerEl.src = directUrl;
-                  playerEl.load();
-                  playerEl.play().catch(() => {});
-                }
+              if (document.hidden) return; // Prevent crashes on app minimization
+              if (spinnerEl) spinnerEl.style.display = 'none';
+              const v = curVid();
+              if (v && v.channel_message_id && videoRetryCount === 0) {
+                videoRetryCount++;
+                const directUrl = 'https://xmi-stream-bot.onrender.com/stream?channel_id=-1004415998750&msg_id=' + encodeURIComponent(v.channel_message_id);
+                console.log('Video stream notice, attempting direct Render stream fallback:', directUrl);
+                playerEl.src = directUrl;
+                playerEl.load();
+                playerEl.play().catch(() => {});
+                return;
               }
+              if (errorOverlayEl) errorOverlayEl.style.display = 'flex';
             };
+
+            const retryBtn = document.getElementById('btnVideoRetry');
+            if (retryBtn) {
+              retryBtn.onclick = () => {
+                videoRetryCount = 0;
+                if (errorOverlayEl) errorOverlayEl.style.display = 'none';
+                if (spinnerEl) spinnerEl.style.display = 'flex';
+                playerEl.load();
+                playerEl.play().catch(() => {});
+              };
+            }
           }
 
           if (typeof trackPostView === 'function' && post.id) {
@@ -4373,6 +4433,22 @@ const rawHtml = `<!DOCTYPE html>
         const viewDetail = document.getElementById('viewPostDetail');
         const bodyEl = document.getElementById('postDetailPageBody');
         if (!viewDetail || !bodyEl) return;
+
+        // If this post is already currently open and displayed, do nothing to prevent reload thrashing
+        if (currentDetailPost && String(currentDetailPost.id) === String(postId) && viewDetail.style.display === 'block') {
+          return;
+        }
+
+        // Cleanly destroy any existing video player to free hardware decoders
+        const prevPlayer = document.getElementById('postActiveVideoPlayer');
+        if (prevPlayer) {
+          try {
+            prevPlayer.pause();
+            prevPlayer.removeAttribute('src');
+            while (prevPlayer.firstChild) prevPlayer.removeChild(prevPlayer.firstChild);
+            prevPlayer.load();
+          } catch (_) {}
+        }
 
         if (viewFeed) viewFeed.style.display = 'none';
         viewDetail.style.display = 'block';
@@ -4641,23 +4717,35 @@ const rawHtml = `<!DOCTYPE html>
                 }
               });
 
-              player.preload = 'metadata';
+              videoRetryCount = 0;
+              const spinner = document.getElementById('videoLoadingSpinner');
+              const errOverlay = document.getElementById('videoErrorOverlay');
+              if (spinner) spinner.style.display = 'flex';
+              if (errOverlay) errOverlay.style.display = 'none';
+
+              player.preload = 'auto';
               player.src = streamSrc;
               player.load();
-              player.play().catch(e => console.log('Autoplay notice:', e));
+              const pPromise = player.play();
+              if (pPromise !== undefined) {
+                pPromise.catch(e => console.log('Autoplay notice:', e));
+              }
 
               trackFileView(currentDetailPost.id, vKey);
 
               player.onerror = () => {
-                if (vid.channel_message_id) {
+                if (document.hidden) return; // Prevent crashes on app minimization
+                if (spinner) spinner.style.display = 'none';
+                if (vid.channel_message_id && videoRetryCount === 0) {
+                  videoRetryCount++;
                   const directUrl = 'https://xmi-stream-bot.onrender.com/stream?channel_id=-1004415998750&msg_id=' + encodeURIComponent(vid.channel_message_id);
-                  if (player.src !== directUrl) {
-                    console.log('Video error, switching to direct Render stream:', directUrl);
-                    player.src = directUrl;
-                    player.load();
-                    player.play().catch(() => {});
-                  }
+                  console.log('Video error, switching to direct Render stream fallback:', directUrl);
+                  player.src = directUrl;
+                  player.load();
+                  player.play().catch(() => {});
+                  return;
                 }
+                if (errOverlay) errOverlay.style.display = 'flex';
               };
             }
           }

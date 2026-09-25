@@ -239,7 +239,8 @@ export function createRouter() {
               if (effectiveMime.startsWith('image/')) {
                 responseHeaders.set('Cache-Control', 'public, max-age=604800, immutable');
               } else {
-                responseHeaders.set('Cache-Control', 'public, max-age=3600');
+                responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+                responseHeaders.set('Vary', 'Range');
               }
 
               if (upstreamRes.headers.get('content-range')) {
@@ -274,7 +275,8 @@ export function createRouter() {
             responseHeaders.set('Accept-Ranges', 'bytes');
             responseHeaders.set('Content-Type', upstreamRes.headers.get('content-type') || detectedMime || 'video/mp4');
             responseHeaders.set('Content-Disposition', 'inline');
-            responseHeaders.set('Cache-Control', 'no-cache');
+            responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+            responseHeaders.set('Vary', 'Range');
             responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
 
             if (upstreamRes.headers.get('content-range')) {
@@ -309,7 +311,8 @@ export function createRouter() {
               responseHeaders.set('Accept-Ranges', 'bytes');
               responseHeaders.set('Content-Type', fileInfo.detectedMime || detectedMime || 'video/mp4');
               responseHeaders.set('Content-Disposition', 'inline');
-              responseHeaders.set('Cache-Control', 'no-cache');
+              responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+              responseHeaders.set('Vary', 'Range');
               responseHeaders.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, Content-Type');
               if (upstreamRes.headers.get('content-range')) responseHeaders.set('Content-Range', upstreamRes.headers.get('content-range'));
               if (upstreamRes.headers.get('content-length')) responseHeaders.set('Content-Length', upstreamRes.headers.get('content-length'));
