@@ -956,8 +956,25 @@ export function createBot(env) {
   bot.start(handleStart);
   bot.hears(/^\/(start|Start|START|stsrt)(?:@\w+)?(?:\s+(.*))?$/i, handleStart);
 
-  bot.action('main_menu', showMainMenu);
-  bot.action('admin_main_menu', showMainMenu);
+  bot.action('main_menu', async (ctx) => {
+    const userId = ctx.from?.id;
+    const isAdmin = await isAdminUser(env, userId);
+    if (isAdmin) {
+      return await showMainMenu(ctx);
+    }
+    if (ctx.callbackQuery) await ctx.answerCbQuery();
+    return await sendPostFeedToUser(ctx, env, 1);
+  });
+
+  bot.action('admin_main_menu', async (ctx) => {
+    const userId = ctx.from?.id;
+    const isAdmin = await isAdminUser(env, userId);
+    if (!isAdmin) {
+      if (ctx.callbackQuery) await ctx.answerCbQuery('⛔ Admin access only');
+      return await sendPostFeedToUser(ctx, env, 1);
+    }
+    return await showMainMenu(ctx);
+  });
 
   // -------------------------------------------------------------
   // Feed Pagination Callback: bot_feed_page_<N>
@@ -3714,11 +3731,14 @@ export function createBot(env) {
 
     // 1. Check for persistent reply keyboard button clicks
     if (text) {
-      if (text === '➕ Add Post') return await startAddPostFlow(ctx);
-      if (text === '📑 Manage Posts') return await handleAdminPosts(ctx);
-      if (text === '📊 Stats' || text === '📊 Hub Stats') return await handleStats(ctx);
-      if (text === '📢 Broadcast') return await startBroadcastFlow(ctx);
-      if (text === '⚙️ Settings') return await handleSettingsMenu(ctx);
+      const isAdmin = await isAdminUser(env, userId);
+      if (isAdmin) {
+        if (text === '➕ Add Post') return await startAddPostFlow(ctx);
+        if (text === '📑 Manage Posts') return await handleAdminPosts(ctx);
+        if (text === '📊 Stats' || text === '📊 Hub Stats') return await handleStats(ctx);
+        if (text === '📢 Broadcast') return await startBroadcastFlow(ctx);
+        if (text === '⚙️ Settings') return await handleSettingsMenu(ctx);
+      }
       if (text === '🔍 Browse Posts' || text === '🔍 Browse All Posts') return await handleBrowsePosts(ctx);
       if (text === '🔖 Saved Posts' || text === '🔖 My Saved Posts') return await handleSavedPosts(ctx);
       if (text === '🎁 Invite Friends') return await handleInviteFriends(ctx);

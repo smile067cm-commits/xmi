@@ -47,20 +47,27 @@ const rawHtml = `<!DOCTYPE html>
       max-width: 100%;
     }
 
-    html, body {
+    html {
       width: 100%;
-      max-width: 100vw;
-      overflow-x: hidden;
+      height: 100%;
       margin: 0;
       padding: 0;
-      overscroll-behavior: none;
-      overscroll-behavior-y: none;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+      width: 100%;
+      min-height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
       -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg-gradient);
       background-attachment: fixed;
       color: var(--text-main);
-      min-height: 100vh;
       display: flex;
       flex-direction: column;
     }
@@ -1920,11 +1927,11 @@ const rawHtml = `<!DOCTYPE html>
       try {
         tg.ready();
         tg.expand();
-        // Prevent accidental closing on swipe down or pull drag on mobile
-        if (typeof tg.disableVerticalSwipes === 'function') {
-          tg.disableVerticalSwipes();
+        // Enable vertical swipes so users and admins can freely scroll pages
+        if (typeof tg.enableVerticalSwipes === 'function') {
+          tg.enableVerticalSwipes();
         }
-        // Enable closing confirmation to prevent instant dismissal on Telegram backgrounding/reopening
+        // Enable closing confirmation to prevent accidental background dismissal
         if (typeof tg.enableClosingConfirmation === 'function') {
           tg.enableClosingConfirmation();
         }
@@ -1932,7 +1939,7 @@ const rawHtml = `<!DOCTYPE html>
         console.warn('Telegram WebApp setup error:', err);
       }
 
-      // Handle Telegram viewport changes, restore expanded mode, and enforce swipe protection across app resume
+      // Handle Telegram viewport changes and keep app expanded
       try {
         if (typeof tg.onEvent === 'function') {
           tg.onEvent('viewportChanged', function() {
@@ -1940,35 +1947,25 @@ const rawHtml = `<!DOCTYPE html>
               if (tg && !tg.isExpanded && typeof tg.expand === 'function') {
                 tg.expand();
               }
-              if (typeof tg.disableVerticalSwipes === 'function' && tg.isVerticalSwipesEnabled !== false) {
-                tg.disableVerticalSwipes();
-              }
             } catch (_) {}
           });
           tg.onEvent('activated', function() {
             try {
               if (tg && typeof tg.expand === 'function') tg.expand();
-              if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
               if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation();
+              if (typeof tg.enableVerticalSwipes === 'function') tg.enableVerticalSwipes();
             } catch (_) {}
           });
         }
       } catch (_) {}
     }
 
-    let currentUserId = tg?.initDataUnsafe?.user?.id || (new URLSearchParams(window.location.search)).get('user_id') || 0;
-    try {
-      if (currentUserId) {
-        localStorage.setItem('xmi_user_id', String(currentUserId));
-      } else {
-        currentUserId = Number(localStorage.getItem('xmi_user_id')) || 0;
-      }
-    } catch (_) {}
-
+    try { localStorage.removeItem('xmi_user_id'); } catch (_) {}
+    const currentUserId = Number(tg?.initDataUnsafe?.user?.id || (new URLSearchParams(window.location.search)).get('user_id')) || 0;
     const currentUserName = tg?.initDataUnsafe?.user?.first_name || (tg?.initDataUnsafe?.user?.username || 'User');
     const adminId = "__ADMIN_ID__";
     const botUsername = "__BOT_USERNAME__";
-    let isAdmin = Boolean(adminId && String(currentUserId) === String(adminId));
+    let isAdmin = Boolean(adminId && currentUserId > 0 && String(currentUserId) === String(adminId));
 
     let allPosts = [];
     let savedPostIds = new Set();
@@ -2226,6 +2223,22 @@ const rawHtml = `<!DOCTYPE html>
       generateNewDestLink();
     }
 
+    function hideAdminElements() {
+      isAdmin = false;
+      const bAdmin = document.getElementById('badgeAdmin');
+      if (bAdmin) bAdmin.style.display = 'none';
+      const mBar = document.getElementById('adminModeBar');
+      if (mBar) mBar.style.display = 'none';
+      const bQuick = document.getElementById('btnAdminQuick');
+      if (bQuick) bQuick.style.display = 'none';
+      const nAdmin = document.getElementById('navAdminPill');
+      if (nAdmin) nAdmin.style.display = 'none';
+      const vAdmin = document.getElementById('viewAdminHub');
+      if (vAdmin) vAdmin.style.display = 'none';
+      const vFeed = document.getElementById('viewPublicFeed');
+      if (vFeed) vFeed.style.display = 'block';
+    }
+
     // Send periodic presence heartbeat while user is active in Mini App (every 60s)
     function sendAppHeartbeat() {
       if (!currentUserId || Number(currentUserId) <= 0) return;
@@ -2296,7 +2309,7 @@ const rawHtml = `<!DOCTYPE html>
         try {
           if (tg) {
             if (!tg.isExpanded && typeof tg.expand === 'function') tg.expand();
-            if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+            if (typeof tg.enableVerticalSwipes === 'function') tg.enableVerticalSwipes();
             if (typeof tg.enableClosingConfirmation === 'function') tg.enableClosingConfirmation();
           }
           sendAppHeartbeat();
@@ -2317,7 +2330,7 @@ const rawHtml = `<!DOCTYPE html>
       try {
         if (tg) {
           if (!tg.isExpanded && typeof tg.expand === 'function') tg.expand();
-          if (typeof tg.disableVerticalSwipes === 'function') tg.disableVerticalSwipes();
+          if (typeof tg.enableVerticalSwipes === 'function') tg.enableVerticalSwipes();
         }
         checkInitialPostRoute();
       } catch (_) {}
@@ -2360,7 +2373,11 @@ const rawHtml = `<!DOCTYPE html>
 
           if (data.is_admin) {
             showAdminElements();
+          } else {
+            hideAdminElements();
           }
+          document.body.style.overflowY = 'auto';
+          document.documentElement.style.overflowY = 'auto';
 
           // Show points badge if referrals or shorteners enabled
           if (globalSettings.referral_enabled || globalSettings.shortener_enabled) {

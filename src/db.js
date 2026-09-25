@@ -1940,8 +1940,11 @@ export function invalidateAdminCache() {
 
 export async function isAdminUser(env, userId) {
   if (!userId) return false;
-  const uidStr = String(userId);
-  if (env.ADMIN_ID && uidStr === String(env.ADMIN_ID)) return true;
+  const uidStr = String(userId).trim();
+  if (!uidStr || uidStr === '0' || uidStr === 'null' || uidStr === 'undefined' || uidStr === 'NaN') return false;
+
+  const envAdmin = env.ADMIN_ID ? String(env.ADMIN_ID).trim() : '';
+  if (envAdmin && uidStr === envAdmin) return true;
 
   const now = Date.now();
   if (cachedAdminIds && (now - adminCacheTime < ADMIN_CACHE_TTL)) {
@@ -1954,8 +1957,18 @@ export async function isAdminUser(env, userId) {
     const res = await fetch(`${baseUrl}/admins?select=user_id`, { headers });
     if (res.ok) {
       const rows = await res.json();
-      const idSet = new Set((rows || []).map(r => String(r.user_id)));
-      if (env.ADMIN_ID) idSet.add(String(env.ADMIN_ID));
+      const idSet = new Set();
+      if (envAdmin) idSet.add(envAdmin);
+      if (Array.isArray(rows)) {
+        for (const r of rows) {
+          if (r && r.user_id) {
+            const sid = String(r.user_id).trim();
+            if (sid && sid !== '0' && sid !== 'null' && sid !== 'undefined' && sid !== 'NaN') {
+              idSet.add(sid);
+            }
+          }
+        }
+      }
       cachedAdminIds = idSet;
       adminCacheTime = now;
       return idSet.has(uidStr);
