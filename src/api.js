@@ -363,10 +363,20 @@ export function createRouter() {
       const renderUrl = (settings?.render_stream_url || env.RENDER_STREAM_URL || 'https://xmi-stream-bot.onrender.com').replace(/\/+$/, '');
       const storageChannel = env.CHANNEL_ID || '-1004415998750';
 
-      // 1. Try Render MTProto /thumb endpoint
+      // 1. Instant check: If post has a preview_image, redirect immediately (0ms latency)
+      if (postId) {
+        const post = await getPostById(env, postId).catch(() => null);
+        if (post && post.preview_image) {
+          return Response.redirect(post.preview_image, 302);
+        }
+      }
+
+      // 2. Try Render MTProto /thumb endpoint with strict 1.5s timeout so user never waits
       if (renderUrl && msgId) {
         try {
-          const upstreamRes = await fetch(`${renderUrl}/thumb?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(msgId)}`);
+          const upstreamRes = await fetch(`${renderUrl}/thumb?channel_id=${encodeURIComponent(storageChannel)}&msg_id=${encodeURIComponent(msgId)}`, {
+            signal: AbortSignal.timeout(1500)
+          });
           if (upstreamRes.ok) {
             const imgBuffer = await upstreamRes.arrayBuffer();
             return new Response(imgBuffer, {
@@ -378,17 +388,7 @@ export function createRouter() {
               }
             });
           }
-        } catch (e) {
-          console.warn('Render thumb fetch notice:', e.message);
-        }
-      }
-
-      // 2. Fallback to post preview image if available
-      if (postId) {
-        const post = await getPostById(env, postId).catch(() => null);
-        if (post && post.preview_image) {
-          return Response.redirect(post.preview_image, 302);
-        }
+        } catch (_) {}
       }
 
       // 3. Fallback: Sleek inline SVG video thumbnail

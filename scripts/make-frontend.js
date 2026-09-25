@@ -2253,6 +2253,7 @@ const rawHtml = `<!DOCTYPE html>
       try {
         // 1. Hash match: #post=104, #post_104, #104
         const hash = window.location.hash || '';
+        if (hash === '#home' || hash === '#feed') return null;
         const hashMatch = hash.match(/post[=_](\d+)|^#(\d+)$/i);
         if (hashMatch) return hashMatch[1] || hashMatch[2];
 
@@ -2261,22 +2262,20 @@ const rawHtml = `<!DOCTYPE html>
         let pid = urlParams.get('post') || urlParams.get('post_id');
         if (pid) return pid;
 
-        // 3. Telegram WebApp start_param
+        // 3. Telegram WebApp start_param (e.g. from bot link)
         const startParam = window.Telegram?.WebApp?.initDataUnsafe?.start_param;
         if (startParam) {
           const spMatch = String(startParam).match(/post_?(\d+)|^(\d+)$/i);
           if (spMatch) return spMatch[1] || spMatch[2];
         }
 
-        // 4. SessionStorage or LocalStorage persisted active post ID
+        // 4. SessionStorage ONLY if hash already indicates post detail (prevent regular app launch traps)
         try {
-          const stored = sessionStorage.getItem('active_post_id') || localStorage.getItem('active_post_id');
-          if (stored && /^\d+$/.test(stored)) return stored;
+          const stored = sessionStorage.getItem('active_post_id');
+          if (stored && /^\d+$/.test(stored) && hash && hash.startsWith('#post')) {
+            return stored;
+          }
         } catch (_) {}
-
-        // 5. Full URL match fallback
-        const hrefMatch = window.location.href.match(/post[=_](\d+)/i);
-        if (hrefMatch) return hrefMatch[1];
       } catch (_) {}
       return null;
     }
@@ -2290,22 +2289,40 @@ const rawHtml = `<!DOCTYPE html>
 
     // Initialize App
     async function initApp() {
+      // Clear any legacy localStorage post locks so regular open always lands on clean feed
+      try { localStorage.removeItem('active_post_id'); } catch (_) {}
+
       if (isAdmin) {
         showAdminElements();
       }
 
       setupEventListeners();
 
-      // Check route FIRST before awaiting network data, so reloading restores the post instantly
+      // Check initial route if user came directly via a post link or start_param
       checkInitialPostRoute();
 
       // Start presence heartbeat
       sendAppHeartbeat();
       setInterval(sendAppHeartbeat, 60000);
 
-      // Fetch background data
-      await loadSettingsAndUser();
-      await loadPosts();
+      // Instant Feed Restore (0ms): render from session cache immediately if available
+      try {
+        const cached = sessionStorage.getItem('cached_feed_posts');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            allPosts = parsed;
+            savedPostIds = new Set(allPosts.filter(p => p.is_saved).map(p => p.id));
+            renderFeed();
+          }
+        }
+      } catch (_) {}
+
+      // Concurrently fetch posts and settings without blocking each other
+      Promise.all([
+        loadPosts(),
+        loadSettingsAndUser()
+      ]).catch(() => {});
     }
 
     window.addEventListener('hashchange', () => {
@@ -2450,8 +2467,8 @@ const rawHtml = `<!DOCTYPE html>
       try {
         const res = await fetch('/api/posts?user_id=' + currentUserId);
         const data = await res.json();
-        if (data.success) {
-          allPosts = (data.posts || []).map(p => {
+        if (data.success && Array.isArray(data.posts)) {
+          allPosts = data.posts.map(p => {
             const likes = Number(p.like_count) || 0;
             const downloads = Number(p.access_count) || 0;
             const views = Number(p.view_count) || 0;
@@ -2459,6 +2476,9 @@ const rawHtml = `<!DOCTYPE html>
             p._popularityScore = (base + 1) * (0.8 + Math.random() * 0.4);
             return p;
           });
+          try {
+            sessionStorage.setItem('cached_feed_posts', JSON.stringify(allPosts));
+          } catch (_) {}
           savedPostIds = new Set(allPosts.filter(p => p.is_saved).map(p => p.id));
           renderFeed();
         }
@@ -4309,7 +4329,7 @@ const rawHtml = `<!DOCTYPE html>
                   const vName = vid.file_name || ('Video ' + (idx + 1));
                   const vKey = vid.id || vid.channel_message_id || 0;
                   const isActive = idx === 0;
-                  const thumbSrc = '/api/thumbnail?msg_id=' + encodeURIComponent(vid.channel_message_id || '') + '&post_id=' + encodeURIComponent(post.id) + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : '');
+                  const thumbSrc = post.preview_image ? escapeHtml(post.preview_image) : ('/api/thumbnail?msg_id=' + encodeURIComponent(vid.channel_message_id || '') + '&post_id=' + encodeURIComponent(post.id) + (vid.file_id ? ('&file_id=' + encodeURIComponent(vid.file_id)) : ''));
                   const fallbackImg = post.preview_image ? escapeHtml(post.preview_image) : '';
 
                   return '<div class="video-file-card ' + (isActive ? 'active' : '') + '" data-vidx="' + idx + '" style="background: ' + (isActive ? 'rgba(56, 189, 248, 0.12)' : 'rgba(15, 23, 42, 0.7)') + '; border: 1.5px solid ' + (isActive ? '#38bdf8' : 'rgba(255,255,255,0.08)') + '; border-radius: 12px; overflow: hidden; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; box-shadow: ' + (isActive ? '0 0 12px rgba(56,189,248,0.25)' : 'none') + ';">' +
