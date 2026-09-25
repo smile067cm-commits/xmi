@@ -391,13 +391,15 @@ export function createRouter() {
         return Response.redirect(catboxThumbCache.get(msgId), 302);
       }
 
-      // 2. Check Cloudflare Edge Cache
-      const cache = caches.default;
-      const cacheKey = new Request(url.toString(), request);
-      const cachedResponse = await cache.match(cacheKey);
-      if (cachedResponse) {
-        return cachedResponse;
-      }
+      // 2. Check Cloudflare Edge Cache safely
+      let cache = null;
+      try {
+        cache = caches.default;
+        const cachedResponse = await cache.match(url.toString());
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+      } catch (_) {}
 
       const settings = await getSettings(env);
       const renderUrl = (settings?.render_stream_url || env.RENDER_STREAM_URL || 'https://xmi-stream-bot.onrender.com').replace(/\/+$/, '');
@@ -433,7 +435,9 @@ export function createRouter() {
                       'Cache-Control': 'public, max-age=604800, immutable'
                     }
                   });
-                  try { await cache.put(cacheKey, directImgRes.clone()); } catch (_) {}
+                  if (cache) {
+                    try { await cache.put(url.toString(), directImgRes.clone()); } catch (_) {}
+                  }
                   return directImgRes;
                 }
               }
@@ -449,7 +453,9 @@ export function createRouter() {
                   'Cache-Control': 'public, max-age=2592000, immutable'
                 }
               });
-              try { await cache.put(cacheKey, redirectRes.clone()); } catch (_) {}
+              if (cache) {
+                try { await cache.put(url.toString(), redirectRes.clone()); } catch (_) {}
+              }
               return redirectRes;
             }
           }
