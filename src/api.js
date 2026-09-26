@@ -33,6 +33,10 @@ import {
   createVerifyToken,
   verifyTokenAndGrantPass,
   checkAndDeductPostAccess,
+  isPostUnlockedForUser,
+  recordPostUnlock,
+  unlockPostViaRewardedAd,
+  updateUserPoints,
   getAllUserIds,
   getActiveUserIds,
   getBlockedUserIds,
@@ -1061,22 +1065,53 @@ export function createRouter() {
   });
 
   // -------------------------------------------------------------
-  // POST /api/posts/:id/unlock - Points-Based Post Unlock & File Access Check
+  // POST /api/posts/:id/unlock - Points or Rewarded Video Post Unlock (10 Hours Pass)
   // -------------------------------------------------------------
   router.post('/api/posts/:id/unlock', async (request, env) => {
     try {
       const { id } = request.params;
       const body = await request.json();
-      const { user_id } = body || {};
+      const { user_id, unlock_type } = body || {};
 
       if (!user_id) {
         return errorResponse('user_id is required', 400);
+      }
+
+      if (unlock_type === 'rewarded_ad') {
+        const result = await unlockPostViaRewardedAd(env, user_id, id, 10);
+        return jsonResponse({
+          success: true,
+          allowed: true,
+          unlocked: true,
+          unlock_type: 'rewarded_ad',
+          ...result
+        });
       }
 
       const result = await checkAndDeductPostAccess(env, user_id, id);
       return jsonResponse({ success: true, ...result });
     } catch (err) {
       console.error('API /api/posts/:id/unlock error:', err);
+      return errorResponse(err.message, 500);
+    }
+  });
+
+  // -------------------------------------------------------------
+  // POST /api/user/reward-ad - Reward points for watching ad
+  // -------------------------------------------------------------
+  router.post('/api/user/reward-ad', async (request, env) => {
+    try {
+      const body = await request.json();
+      const { user_id, reward_points } = body || {};
+      if (!user_id) return errorResponse('user_id is required', 400);
+
+      const pts = Math.min(25, Math.max(1, Number(reward_points) || 5));
+      const user = await getUser(env, user_id);
+      const newPoints = (user ? Number(user.points) || 0 : 0) + pts;
+      await updateUserPoints(env, user_id, newPoints);
+      return jsonResponse({ success: true, points: newPoints, added: pts });
+    } catch (err) {
+      console.error('API /api/user/reward-ad error:', err);
       return errorResponse(err.message, 500);
     }
   });
@@ -1431,6 +1466,11 @@ export function createRouter() {
       if (!post) {
         return errorResponse('Post not found', 404);
       }
+
+      const unlockStatus = await isPostUnlockedForUser(env, userId, id, 10);
+      post.is_unlocked = Boolean(isAdmin || unlockStatus.unlocked);
+      post.unlock_expires_at = unlockStatus.expires_at || null;
+      post.unlock_remaining_hours = unlockStatus.remaining_hours || 0;
 
       return jsonResponse({ success: true, post, is_admin: isAdmin });
     } catch (err) {

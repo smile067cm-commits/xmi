@@ -1556,6 +1556,10 @@ const rawHtml = `<!DOCTYPE html>
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button type="button" class="btn" id="btnWatchAdForPoints" style="padding: 12px; font-weight: 700; background: linear-gradient(135deg, #f59e0b, #d97706); color: #fff; border-radius: 10px; border: none; display: flex; align-items: center; justify-content: center; gap: 6px; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35); cursor: pointer;">
+            🎬 Watch Video Ad (+5 Points)
+          </button>
+
           <a href="#" target="_blank" class="btn btn-primary" id="btnCompleteShortener" style="padding: 12px; display: none;">
             🔗 Complete Shortener Task (+<span id="taskRewardPts">5</span> Pts)
           </a>
@@ -4332,6 +4336,80 @@ const rawHtml = `<!DOCTYPE html>
             html += '</div>';
           }
 
+          // CHECK 10-HOUR POST UNLOCK STATUS
+          const localUnlockExp = (function() {
+            try {
+              return Number(localStorage.getItem('post_unlock_' + currentUserId + '_' + post.id)) || 0;
+            } catch (_) { return 0; }
+          })();
+          const isPostUnlocked = Boolean(
+            isAdmin ||
+            post.is_unlocked ||
+            (localUnlockExp > Date.now())
+          );
+
+          if (!isPostUnlocked) {
+            const pointsRequired = Number(globalSettings.points_per_post) || 1;
+            const hasEnoughPts = userPoints >= pointsRequired;
+
+            html += '<div style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98)); border: 1.5px solid rgba(245, 158, 11, 0.45); border-radius: 18px; padding: 24px 16px; margin: 18px 0; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">' +
+              '<div style="width: 58px; height: 58px; border-radius: 50%; background: rgba(245, 158, 11, 0.15); border: 2px solid #f59e0b; display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 12px; box-shadow: 0 0 20px rgba(245, 158, 11, 0.25);">🔒</div>' +
+              '<div style="font-size: 1.15rem; font-weight: 800; color: #f8fafc; margin-bottom: 6px;">Post Content Locked</div>' +
+              '<div style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.45; max-width: 320px; margin: 0 auto 18px;">' +
+              'Watch a quick 15-second sponsor video to unlock <b>all videos, large files &amp; direct links</b> for <b>10 Hours</b>!' +
+              '</div>' +
+              '<button type="button" class="btn" id="btnUnlockPostWithAd" data-pid="' + post.id + '" style="width: 100%; padding: 13px; font-size: 0.95rem; font-weight: 800; color: #fff; background: linear-gradient(135deg, #f59e0b, #d97706); border-radius: 12px; box-shadow: 0 4px 18px rgba(245, 158, 11, 0.4); cursor: pointer; border: none; display: flex; align-items: center; justify-content: center; gap: 8px;">' +
+              '<span>🎬 Watch Video to Unlock (10 Hours)</span>' +
+              '</button>' +
+              (hasEnoughPts ? (
+                '<div style="display: flex; align-items: center; gap: 10px; margin: 14px 0 10px; color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; font-weight: 700;">' +
+                '<span style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></span>' +
+                '<span>OR</span>' +
+                '<span style="flex: 1; height: 1px; background: rgba(255,255,255,0.1);"></span>' +
+                '</div>' +
+                '<button type="button" class="btn btn-secondary" id="btnUnlockPostWithPoints" data-pid="' + post.id + '" style="width: 100%; padding: 11px; font-size: 0.84rem; font-weight: 700; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 6px;">' +
+                '🪙 Unlock with ' + pointsRequired + ' Point' + (pointsRequired > 1 ? 's' : '') + ' (Balance: ' + userPoints + ')' +
+                '</button>'
+              ) : (
+                '<button type="button" class="btn btn-ghost" onclick="openPointsModal()" style="width: 100%; margin-top: 10px; font-size: 0.8rem; color: #38bdf8;">' +
+                '🪙 Get Free Points (Balance: ' + userPoints + ' pts)' +
+                '</button>'
+              )) +
+              '</div>';
+
+            const totalVids = videosForPlayer.length;
+            const totalLarge = largeFiles.length;
+            if (totalVids > 0 || totalLarge > 0 || post.direct_link) {
+              html += '<div style="background: rgba(15, 23, 42, 0.6); border: 1px dashed rgba(255,255,255,0.12); border-radius: 14px; padding: 14px; margin-bottom: 18px;">' +
+                '<div style="font-weight: 700; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 8px;">📦 Contents in this Post:</div>' +
+                '<div style="display: flex; flex-direction: column; gap: 6px; font-size: 0.78rem; color: var(--text-muted);">' +
+                (totalVids > 0 ? ('<div>🎬 ' + totalVids + ' Streamable Video' + (totalVids > 1 ? 's' : '') + ' <span style="color: #f59e0b; font-weight: 700;">[🔒 Locked]</span></div>') : '') +
+                (totalLarge > 0 ? ('<div>📁 ' + totalLarge + ' Large File' + (totalLarge > 1 ? 's' : '') + ' <span style="color: #f59e0b; font-weight: 700;">[🔒 Locked]</span></div>') : '') +
+                (post.direct_link ? '<div>🔗 External Cloud Download Link <span style="color: #f59e0b; font-weight: 700;">[🔒 Locked]</span></div>' : '') +
+                '</div>' +
+                '</div>';
+            }
+
+            bodyEl.innerHTML = html;
+            return;
+          }
+
+          // UNLOCKED 10-HOUR PASS BADGE
+          if (!isAdmin) {
+            let expTime = post.unlock_expires_at || localUnlockExp;
+            let remHoursStr = 'Active for 10 Hours';
+            if (expTime && expTime > Date.now()) {
+              const remHours = Math.ceil((expTime - Date.now()) / (3600 * 1000));
+              remHoursStr = remHours + 'h remaining';
+            }
+            html += '<div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 12px; padding: 8px 14px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between;">' +
+              '<div style="display: flex; align-items: center; gap: 6px; color: #34d399; font-weight: 700; font-size: 0.82rem;">' +
+              '<span>🔓</span> <span>Post Unlocked (10-Hour Pass)</span>' +
+              '</div>' +
+              '<div style="font-size: 0.72rem; color: #a7f3d0; background: rgba(16, 185, 129, 0.2); padding: 2px 8px; border-radius: 6px; font-weight: 600;">⏳ ' + remHoursStr + '</div>' +
+              '</div>';
+          }
+
           // SECTION 2: VIDEO STREAM PLAYER (STREAMABLE VIDEOS ONLY)
           if (videosForPlayer.length > 0) {
             const firstVid = videosForPlayer[0];
@@ -4668,6 +4746,135 @@ const rawHtml = `<!DOCTYPE html>
           const bodyEl = document.getElementById('postDetailPageBody');
           if (bodyEl) {
             bodyEl.innerHTML = '<div style="padding: 30px; text-align: center; color: #f87171;">Failed to display post: ' + escapeHtml(rErr.message) + '</div>';
+          }
+        }
+      }
+
+      async function handleUnlockPostWithAd(postId, btnEl) {
+        if (!postId) return;
+        const origText = btnEl ? btnEl.innerHTML : '';
+        if (btnEl) {
+          btnEl.disabled = true;
+          btnEl.innerHTML = '⏳ Loading sponsor video...';
+        }
+
+        const rewardedBlockId = globalSettings.adsgram_rewarded_block_id;
+        if (window.Adsgram && rewardedBlockId) {
+          try {
+            showToast('🎬 Starting video ad...');
+            const AdController = window.Adsgram.init({ blockId: String(rewardedBlockId) });
+            await AdController.show();
+          } catch (err) {
+            console.warn('Adsgram show error or closed early:', err);
+            showToast('⚠️ You need to watch the full ad to unlock!');
+            if (btnEl) {
+              btnEl.disabled = false;
+              btnEl.innerHTML = origText;
+            }
+            return;
+          }
+        } else {
+          if (isAdmin) {
+            showToast('ℹ️ Notice: Adsgram rewarded block ID not configured yet in Settings');
+          }
+        }
+
+        try {
+          if (btnEl) btnEl.innerHTML = '🎉 Unlocking 10-Hour Pass...';
+          const res = await fetch('/api/posts/' + postId + '/unlock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: currentUserId,
+              unlock_type: 'rewarded_ad'
+            })
+          });
+          const data = await res.json();
+          const expTime = (data && data.expires_at) || (Date.now() + 10 * 3600 * 1000);
+
+          try {
+            localStorage.setItem('post_unlock_' + currentUserId + '_' + postId, String(expTime));
+          } catch (_) {}
+
+          if (currentDetailPost && String(currentDetailPost.id) === String(postId)) {
+            currentDetailPost.is_unlocked = true;
+            currentDetailPost.unlock_expires_at = expTime;
+            currentDetailPost.unlock_remaining_hours = 10;
+          }
+
+          postDetailCache.delete(String(postId));
+          showToast('🎉 Post Unlocked for 10 Hours!');
+          if (currentDetailPost) {
+            renderPostDetailPage(currentDetailPost);
+          } else {
+            openPostDetailPage(postId);
+          }
+        } catch (e) {
+          console.error('Failed to unlock post:', e);
+          showToast('Failed to record unlock. Please retry.');
+          if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.innerHTML = origText;
+          }
+        }
+      }
+
+      async function handleUnlockPostWithPoints(postId, btnEl) {
+        if (!postId) return;
+        const origText = btnEl ? btnEl.innerHTML : '';
+        if (btnEl) {
+          btnEl.disabled = true;
+          btnEl.innerHTML = '⏳ Unlocking with points...';
+        }
+
+        try {
+          const res = await fetch('/api/posts/' + postId + '/unlock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: currentUserId,
+              unlock_type: 'points'
+            })
+          });
+          const data = await res.json();
+          if (data && data.allowed) {
+            const expTime = (data && data.expires_at) || (Date.now() + 10 * 3600 * 1000);
+            try {
+              localStorage.setItem('post_unlock_' + currentUserId + '_' + postId, String(expTime));
+            } catch (_) {}
+
+            if (data.remaining_points !== undefined) {
+              userPoints = data.remaining_points;
+              const modalVal = document.getElementById('modalPointsVal');
+              if (modalVal) modalVal.textContent = userPoints;
+            }
+
+            if (currentDetailPost && String(currentDetailPost.id) === String(postId)) {
+              currentDetailPost.is_unlocked = true;
+              currentDetailPost.unlock_expires_at = expTime;
+              currentDetailPost.unlock_remaining_hours = 10;
+            }
+
+            postDetailCache.delete(String(postId));
+            showToast('🎉 Post Unlocked for 10 Hours!');
+            if (currentDetailPost) {
+              renderPostDetailPage(currentDetailPost);
+            } else {
+              openPostDetailPage(postId);
+            }
+          } else {
+            showToast('⚠️ Not enough points. Watch an ad to unlock!');
+            if (btnEl) {
+              btnEl.disabled = false;
+              btnEl.innerHTML = origText;
+            }
+          }
+        } catch (e) {
+          console.error('Points unlock error:', e);
+          showToast('Error unlocking post with points');
+          if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.innerHTML = origText;
           }
         }
       }
@@ -5025,6 +5232,26 @@ const rawHtml = `<!DOCTYPE html>
           }).catch(() => {
             showToast('❌ Network error updating cover');
           });
+          return;
+        }
+
+        // 4D. Unlock Post with Rewarded Ad (10-Hour Pass)
+        const unlockAdBtn = e.target.closest('#btnUnlockPostWithAd');
+        if (unlockAdBtn) {
+          e.stopPropagation();
+          e.preventDefault();
+          const pid = unlockAdBtn.dataset.pid || (currentDetailPost && currentDetailPost.id);
+          if (pid) handleUnlockPostWithAd(pid, unlockAdBtn);
+          return;
+        }
+
+        // 4E. Unlock Post with Points (10-Hour Pass)
+        const unlockPtsBtn = e.target.closest('#btnUnlockPostWithPoints');
+        if (unlockPtsBtn) {
+          e.stopPropagation();
+          e.preventDefault();
+          const pid = unlockPtsBtn.dataset.pid || (currentDetailPost && currentDetailPost.id);
+          if (pid) handleUnlockPostWithPoints(pid, unlockPtsBtn);
           return;
         }
 
@@ -5394,6 +5621,51 @@ const rawHtml = `<!DOCTYPE html>
         } finally {
           btn.textContent = '🔄 Generate / Next Task Link';
           btn.disabled = false;
+        }
+      });
+
+      document.getElementById('btnWatchAdForPoints')?.addEventListener('click', async () => {
+        const btn = document.getElementById('btnWatchAdForPoints');
+        const rewardedBlockId = globalSettings.adsgram_rewarded_block_id;
+
+        if (window.Adsgram && rewardedBlockId) {
+          try {
+            btn.disabled = true;
+            btn.textContent = '🎬 Watching sponsor video...';
+            const AdController = window.Adsgram.init({ blockId: String(rewardedBlockId) });
+            await AdController.show();
+          } catch (err) {
+            console.warn('Ad error or dismissed:', err);
+            showToast('⚠️ You must watch the complete video to earn points!');
+            btn.disabled = false;
+            btn.textContent = '🎬 Watch Video Ad (+5 Points)';
+            return;
+          }
+        } else {
+          if (isAdmin) {
+            showToast('ℹ️ Notice: Rewarded block ID not configured yet in Settings');
+          }
+        }
+
+        try {
+          btn.textContent = '⏳ Crediting +5 points...';
+          const res = await fetch('/api/user/reward-ad', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: currentUserId, reward_points: 5 })
+          });
+          const data = await res.json();
+          if (data && data.success) {
+            userPoints = data.points;
+            const modalVal = document.getElementById('modalPointsVal');
+            if (modalVal) modalVal.textContent = userPoints;
+            showToast('🎉 +5 Points Earned! Current Balance: ' + userPoints);
+          }
+        } catch (e) {
+          showToast('Failed to credit points');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '🎬 Watch Video Ad (+5 Points)';
         }
       });
 

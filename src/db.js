@@ -1833,11 +1833,90 @@ export async function verifyTokenAndGrantPass(env, token, actualUserId = null) {
 }
 
 // ------------------------------------------
-// 12. CHECK & DEDUCT POST ACCESS (Points Economy)
+// 12. CHECK & DEDUCT POST ACCESS (Points Economy & Rewarded Unlock Pass)
 // ------------------------------------------
+
+export async function isPostUnlockedForUser(env, user_id, post_id, hours = 10) {
+  if (String(user_id) === String(env.ADMIN_ID)) {
+    return { unlocked: true, is_admin: true };
+  }
+  if (!user_id || !post_id) return { unlocked: false };
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    const sinceDate = new Date(Date.now() - hours * 3600 * 1000).toISOString();
+    const res = await fetch(`${baseUrl}/file_access_logs?user_id=eq.${encodeURIComponent(user_id)}&post_id=eq.${encodeURIComponent(post_id)}&accessed_at=gte.${encodeURIComponent(sinceDate)}&order=accessed_at.desc&limit=1`, {
+      method: 'GET',
+      headers
+    });
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows.length > 0) {
+        const accessedAt = new Date(rows[0].accessed_at).getTime();
+        const expiresAt = accessedAt + hours * 3600 * 1000;
+        const remainingMs = Math.max(0, expiresAt - Date.now());
+        if (remainingMs > 0) {
+          return {
+            unlocked: true,
+            expires_at: expiresAt,
+            remaining_ms: remainingMs,
+            remaining_hours: Math.ceil(remainingMs / (3600 * 1000))
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error in isPostUnlockedForUser:', err);
+  }
+  return { unlocked: false };
+}
+
+export async function recordPostUnlock(env, user_id, post_id, unlock_type = 'rewarded_ad', hours = 10) {
+  try {
+    const baseUrl = getSupabaseBaseUrl(env);
+    const headers = getSupabaseHeaders(env);
+    await fetch(`${baseUrl}/file_access_logs`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        post_id: Number(post_id),
+        user_id: Number(user_id),
+        item_name: `Post Unlock (${unlock_type === 'rewarded_ad' ? 'Rewarded Video' : 'Points'})`,
+        accessed_at: new Date().toISOString()
+      })
+    });
+  } catch (err) {
+    console.error('Error in recordPostUnlock:', err);
+  }
+  const expiresAt = Date.now() + hours * 3600 * 1000;
+  return {
+    unlocked: true,
+    expires_at: expiresAt,
+    remaining_hours: hours
+  };
+}
+
+export async function unlockPostViaRewardedAd(env, user_id, post_id, hours = 10) {
+  try {
+    incrementStatCounter(env, 'total_ads_watched', 1);
+  } catch (_) {}
+  return await recordPostUnlock(env, user_id, post_id, 'rewarded_ad', hours);
+}
+
 export async function checkAndDeductPostAccess(env, user_id, post_id) {
   if (String(user_id) === String(env.ADMIN_ID)) {
     return { allowed: true, is_admin: true };
+  }
+
+  // 1. Check if user already has an active 10-hour unlock for this post
+  const activeUnlock = await isPostUnlockedForUser(env, user_id, post_id, 10);
+  if (activeUnlock.unlocked) {
+    return {
+      allowed: true,
+      unlocked_by_pass: true,
+      expires_at: activeUnlock.expires_at,
+      remaining_hours: activeUnlock.remaining_hours
+    };
   }
 
   const settings = await getSettings(env);
@@ -1857,10 +1936,14 @@ export async function checkAndDeductPostAccess(env, user_id, post_id) {
     const remainingPoints = currentPoints - requiredPoints;
     await updateUserPoints(env, user_id, remainingPoints);
     incrementStatCounter(env, 'total_points_spent', requiredPoints);
+    // Record 10-hour unlock pass on points deduction as well
+    await recordPostUnlock(env, user_id, post_id, 'points', 10);
     return {
       allowed: true,
       points_deducted: requiredPoints,
-      remaining_points: remainingPoints
+      remaining_points: remainingPoints,
+      expires_at: Date.now() + 10 * 3600 * 1000,
+      remaining_hours: 10
     };
   }
 
