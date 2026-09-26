@@ -1026,17 +1026,25 @@ const rawHtml = `<!DOCTYPE html>
 </head>
 <body>
 
+  <!-- Desktop / Web Notice Bar -->
+  <div id="desktopNoticeBar" style="display: none; background: rgba(56, 189, 248, 0.12); border-bottom: 1px solid rgba(56, 189, 248, 0.25); padding: 7px 12px; text-align: center; font-size: 0.76rem; color: #bae6fd; font-weight: 600;">
+    📱 Telegram Mini App • For full features, open via <a href="https://t.me/__BOT_USERNAME__/Xmi" target="_blank" style="color: #38bdf8; text-decoration: underline; font-weight: 700;">@__BOT_USERNAME__</a>
+  </div>
+
   <!-- Header -->
   <header>
     <a href="/" class="brand">
       <div class="brand-icon">⚡</div>
       <div>
-        <div class="brand-title">xmi</div>
-        <div class="brand-subtitle">CONTENT HUB</div>
+        <div class="brand-title">Xmi Media Hub</div>
+        <div class="brand-subtitle">STREAMING &amp; CLOUD VAULT</div>
       </div>
     </a>
 
     <div class="user-auth-area">
+      <button type="button" class="btn btn-sm btn-secondary" id="btnOpenAboutApp" style="padding: 5px 9px; font-size: 0.74rem; border-radius: 8px; font-weight: 700; background: rgba(255,255,255,0.06); border: 1px solid var(--card-border);">
+        ℹ️ Info
+      </button>
       <div class="points-badge" id="btnHeaderPoints" style="display: none;" title="Your Points Balance">
         🪙 <span id="headerPointsVal">0</span> pts
       </div>
@@ -1571,6 +1579,44 @@ const rawHtml = `<!DOCTYPE html>
           <button class="btn btn-ghost" id="btnCopyInviteLink">
             🎁 Copy Invite Link (+<span id="inviteRewardPts">10</span> Pts)
           </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- About & Features Modal -->
+  <div class="modal-overlay" id="aboutAppModal">
+    <div class="modal-content" style="max-width: 460px;">
+      <div class="modal-header">
+        <h3 class="modal-title">⚡ About Xmi Media Hub</h3>
+        <button class="modal-close" id="btnAboutAppClose">&times;</button>
+      </div>
+      <div class="modal-body" style="font-size: 0.85rem; color: #cbd5e1; line-height: 1.55;">
+        <div style="text-align: center; margin-bottom: 16px;">
+          <div style="font-size: 36px; margin-bottom: 6px;">⚡</div>
+          <div style="font-weight: 800; font-size: 1.15rem; color: #f8fafc;">Xmi Cloud &amp; Media Vault</div>
+          <div style="font-size: 0.76rem; color: #38bdf8; font-weight: 600;">Full-Featured Telegram Mini App Platform</div>
+        </div>
+        
+        <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; margin-bottom: 14px;">
+          <div style="font-weight: 700; color: #f8fafc; margin-bottom: 8px;">🎯 Key Platform Features:</div>
+          <ul style="padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 0.8rem; color: var(--text-muted);">
+            <li>🎬 <b style="color: #cbd5e1;">In-App Video Streaming:</b> Fast HTML5 streaming with dynamic network speed metering.</li>
+            <li>📦 <b style="color: #cbd5e1;">Cloud Storage &amp; Files:</b> Direct delivery to Telegram chat and external cloud links.</li>
+            <li>🔍 <b style="color: #cbd5e1;">Curated Search &amp; Discovery:</b> Instant search across tags, topics, and popularity rankings.</li>
+            <li>🪙 <b style="color: #cbd5e1;">Points &amp; Rewards Pass:</b> Earn points via tasks, referrals, or unlock 10-hour passes.</li>
+          </ul>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: rgba(15,23,42,0.6); border-radius: 10px; font-size: 0.76rem; border: 1px solid rgba(255,255,255,0.06); margin-bottom: 14px;">
+          <span style="color: var(--text-muted);">Platform Engine:</span>
+          <span style="color: #34d399; font-weight: 700;">Cloudflare Edge &bull; Supabase &bull; Telegram MTProto</span>
+        </div>
+
+        <div style="text-align: center;">
+          <a href="https://t.me/__BOT_USERNAME__" target="_blank" class="btn btn-secondary" style="width: 100%; padding: 10px; font-weight: 700; font-size: 0.82rem; display: flex; align-items: center; justify-content: center; gap: 6px;">
+            💬 Official Telegram Channel &amp; Support (@__BOT_USERNAME__)
+          </a>
         </div>
       </div>
     </div>
@@ -2304,6 +2350,13 @@ const rawHtml = `<!DOCTYPE html>
       if (isAdmin) {
         showAdminElements();
       }
+
+      try {
+        if (!window.Telegram?.WebApp?.initData) {
+          const dNotice = document.getElementById('desktopNoticeBar');
+          if (dNotice) dNotice.style.display = 'block';
+        }
+      } catch (_) {}
 
       setupEventListeners();
 
@@ -3428,6 +3481,19 @@ const rawHtml = `<!DOCTYPE html>
 
     // Event Handlers
     function setupEventListeners() {
+      // About & Info Modal
+      document.getElementById('btnOpenAboutApp')?.addEventListener('click', () => {
+        document.getElementById('aboutAppModal')?.classList.add('active');
+      });
+      document.getElementById('btnAboutAppClose')?.addEventListener('click', () => {
+        document.getElementById('aboutAppModal')?.classList.remove('active');
+      });
+      document.getElementById('aboutAppModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'aboutAppModal') {
+          document.getElementById('aboutAppModal').classList.remove('active');
+        }
+      });
+
       // Admin Mode Switcher
       document.getElementById('tabModePublic')?.addEventListener('click', () => {
         document.getElementById('tabModePublic').classList.add('active');
